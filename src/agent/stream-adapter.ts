@@ -10,6 +10,7 @@ import {
   ToolCall,
   TranscriptContext,
 } from '@earendil-works/pi-ai';
+import { ALL_AGENT_TOOLS } from './tools';
 import { ProviderConfig } from '../types';
 
 export function createCustomModel(config: ProviderConfig): Model<any> {
@@ -39,10 +40,11 @@ export async function createStreamFn(
         await streamOpenAI(config, model, context, stream, signal);
       }
     } catch (err: any) {
+      console.error('[AutoForm StreamAdapter] Stream error:', err);
       if (signal?.aborted) {
         const abortedMsg: AssistantMessage = {
           role: 'assistant',
-          content: [],
+          content: [{ type: 'text', text: 'Request was cancelled.' }],
           stopReason: 'aborted',
           errorMessage: 'Request was cancelled',
         };
@@ -51,7 +53,7 @@ export async function createStreamFn(
       } else {
         const errorMsg: AssistantMessage = {
           role: 'assistant',
-          content: [],
+          content: [{ type: 'text', text: `⚠️ API Error: ${err?.message || String(err)}` }],
           stopReason: 'error',
           errorMessage: err?.message || String(err),
         };
@@ -65,7 +67,7 @@ export async function createStreamFn(
 }
 
 // ---------------------------------------------------------
-// OpenAI-Compatible Streaming (OpenAI, Minimax, Groq, etc.)
+// OpenAI-Compatible Streaming (OpenAI, Minimax, Groq, DeepSeek, etc.)
 // ---------------------------------------------------------
 async function streamOpenAI(
   config: ProviderConfig,
@@ -79,37 +81,78 @@ async function streamOpenAI(
     endpoint = `${endpoint}/chat/completions`;
   }
 
+  // 1. Extract system prompt from context.messages (where pi-agent-core carries it)
+  let systemPrompt = context.systemPrompt || '';
+  for (const m of context.messages) {
+    if (m.role === 'system') {
+      const text =
+        typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content)
+          ? m.content.map((c: any) => c.text || '').join('\n')
+          : '';
+      if (text) {
+        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${text}` : text;
+      }
+    }
+  }
+
   // Convert context messages to OpenAI format
   const messages: any[] = [];
-
-  // System prompt
-  if (context.systemPrompt) {
-    messages.push({ role: 'system', content: context.systemPrompt });
+  if (systemPrompt) {
+    messages.push({ role: 'system', content: systemPrompt });
   }
 
   for (const m of context.messages) {
-    if (m.role === 'user') {
-      const text = typeof m.content === 'string' ? m.content : m.content.map((c: any) => c.text || '').join('\n');
+    if (m.role === 'system') {
+      // Already captured in leading system message
+      continue;
+    } else if (m.role === 'user') {
+      const text =
+        typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content)
+          ? m.content.map((c: any) => c.text || '').join('\n')
+          : String(m.content || '');
       messages.push({ role: 'user', content: text });
     } else if (m.role === 'assistant') {
-      const textParts = m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
-      const toolCalls = m.content
-        .filter((c: any) => c.type === 'toolCall')
-        .map((c: any) => ({
-          id: c.id,
-          type: 'function',
-          function: {
-            name: c.name,
-            arguments: typeof c.args === 'string' ? c.args : JSON.stringify(c.args),
-          },
-        }));
+      let textParts = '';
+      let toolCalls: any[] = [];
+
+      if (typeof m.content === 'string') {
+        textParts = m.content;
+      } else if (Array.isArray(m.content)) {
+        textParts = m.content
+          .filter((c: any) => c.type === 'text')
+          .map((c: any) => c.text || '')
+          .join('\n');
+
+        toolCalls = m.content
+          .filter((c: any) => c.type === 'toolCall')
+          .map((c: any) => ({
+            id: c.id,
+            type: 'function',
+            function: {
+              name: c.name,
+              arguments: typeof c.args === 'string' ? c.args : JSON.stringify(c.args || {}),
+            },
+          }));
+      }
 
       const msg: any = { role: 'assistant' };
       if (textParts) msg.content = textParts;
-      if (toolCalls.length > 0) msg.tool_calls = toolCalls;
+      if (toolCalls.length > 0) {
+        msg.tool_calls = toolCalls;
+        if (!textParts) msg.content = null;
+      }
       messages.push(msg);
     } else if (m.role === 'toolResult') {
-      const text = m.content.map((c: any) => c.text || '').join('\n');
+      const text = Array.isArray(m.content)
+        ? m.content.map((c: any) => c.text || '').join('\n')
+        : typeof m.content === 'string'
+        ? m.content
+        : JSON.stringify(m.content || '');
+
       messages.push({
         role: 'tool',
         tool_call_id: m.toolCallId,
@@ -118,8 +161,8 @@ async function streamOpenAI(
     }
   }
 
-  // Convert tools
-  const tools = (context.tools || []).map((t) => ({
+  // Tools: Always ensure full tool definitions are passed
+  const tools = ALL_AGENT_TOOLS.map((t) => ({
     type: 'function',
     function: {
       name: t.name,
@@ -136,6 +179,7 @@ async function streamOpenAI(
 
   if (tools.length > 0) {
     payload.tools = tools;
+    payload.tool_choice = 'auto';
   }
 
   const response = await fetch(endpoint, {
@@ -237,13 +281,13 @@ async function streamOpenAI(
             assistantMessage.stopReason = 'toolUse';
           }
         }
-      } catch (err) {
+      } catch {
         // Skip malformed SSE lines
       }
     }
   }
 
-  // Finalize any accumulated text block
+  // Finalize text block
   if (textContentBlock) {
     const contentIndex = assistantMessage.content.indexOf(textContentBlock);
     stream.push({
@@ -308,30 +352,61 @@ async function streamAnthropic(
     endpoint = `${endpoint}/v1/messages`;
   }
 
-  const messages: any[] = [];
+  // 1. Extract system prompt from context.messages
   let systemText = context.systemPrompt || '';
+  for (const m of context.messages) {
+    if (m.role === 'system') {
+      const text =
+        typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content)
+          ? m.content.map((c: any) => c.text || '').join('\n')
+          : '';
+      if (text) {
+        systemText = systemText ? `${systemText}\n\n${text}` : text;
+      }
+    }
+  }
+
+  const messages: any[] = [];
 
   for (const m of context.messages) {
-    if (m.role === 'user') {
-      const text = typeof m.content === 'string' ? m.content : m.content.map((c: any) => c.text || '').join('\n');
+    if (m.role === 'system') {
+      continue;
+    } else if (m.role === 'user') {
+      const text =
+        typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content)
+          ? m.content.map((c: any) => c.text || '').join('\n')
+          : String(m.content || '');
       messages.push({ role: 'user', content: text });
     } else if (m.role === 'assistant') {
       const contentBlocks: any[] = [];
-      for (const block of m.content) {
-        if (block.type === 'text') {
-          contentBlocks.push({ type: 'text', text: block.text });
-        } else if (block.type === 'toolCall') {
-          contentBlocks.push({
-            type: 'tool_use',
-            id: block.id,
-            name: block.name,
-            input: block.args,
-          });
+      if (typeof m.content === 'string') {
+        contentBlocks.push({ type: 'text', text: m.content });
+      } else if (Array.isArray(m.content)) {
+        for (const block of m.content) {
+          if (block.type === 'text' && block.text) {
+            contentBlocks.push({ type: 'text', text: block.text });
+          } else if (block.type === 'toolCall') {
+            contentBlocks.push({
+              type: 'tool_use',
+              id: block.id,
+              name: block.name,
+              input: block.args || {},
+            });
+          }
         }
       }
       messages.push({ role: 'assistant', content: contentBlocks });
     } else if (m.role === 'toolResult') {
-      const text = m.content.map((c: any) => c.text || '').join('\n');
+      const text = Array.isArray(m.content)
+        ? m.content.map((c: any) => c.text || '').join('\n')
+        : typeof m.content === 'string'
+        ? m.content
+        : JSON.stringify(m.content || '');
+
       messages.push({
         role: 'user',
         content: [
@@ -346,7 +421,7 @@ async function streamAnthropic(
   }
 
   // Convert tools
-  const tools = (context.tools || []).map((t) => ({
+  const tools = ALL_AGENT_TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.parameters,
@@ -492,6 +567,7 @@ async function streamAnthropic(
               };
 
               assistantMessage.content.push(toolCall);
+              assistantMessage.stopReason = 'toolUse';
               stream.push({
                 type: 'toolcall_end',
                 contentIndex: currentBlockIndex,
