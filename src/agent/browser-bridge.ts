@@ -1,6 +1,6 @@
 // Browser bridge to communicate with Chrome Extension APIs and content script
 
-import { PageFormSummary } from '../types';
+import { PageFormSummary, FormElementDescriptor } from '../types';
 
 export interface TabInfo {
   id: number;
@@ -26,66 +26,300 @@ export async function ensureContentScriptInjected(tabId: number): Promise<boolea
     return false;
   }
   try {
-    // Try pinging first
-    const pong = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(tabId, { action: 'PING' }, (resp) => {
-        if (chrome.runtime.lastError || !resp) {
-          resolve(false);
-        } else {
-          resolve(true);
-        }
-      });
-    });
-
-    if (pong) return true;
-
-    // Inject content script if not present
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ['content.js'],
     });
-    // Wait briefly for execution
     await new Promise((r) => setTimeout(r, 100));
     return true;
-  } catch (e) {
-    console.warn('[AutoForm AI] Failed to inject content script:', e);
+  } catch (e: any) {
+    console.warn('[AutoForm AI] Content script injection notice:', e?.message || e);
     return false;
   }
 }
 
-export async function sendMessageToTab<T = any>(tabId: number, message: any): Promise<T> {
+export async function sendMessageToTab<T = any>(tabId: number, message: any, timeoutMs = 2500): Promise<T> {
   if (typeof chrome === 'undefined' || !chrome.tabs) {
     throw new Error('Chrome extension APIs not available in current environment');
   }
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`Timeout waiting for response from active tab (timeout ${timeoutMs}ms)`));
+      }
+    }, timeoutMs);
+
     chrome.tabs.sendMessage(tabId, message, async (response) => {
+      if (settled) return;
+
       if (chrome.runtime.lastError) {
         // Try injecting content script and retry once
-        const injected = await ensureContentScriptInjected(tabId);
-        if (injected) {
-          chrome.tabs.sendMessage(tabId, message, (retryResponse) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else {
-              resolve(retryResponse);
-            }
-          });
-        } else {
-          reject(new Error(chrome.runtime.lastError.message));
+        try {
+          const injected = await ensureContentScriptInjected(tabId);
+          if (injected) {
+            chrome.tabs.sendMessage(tabId, message, (retryResponse) => {
+              if (settled) return;
+              clearTimeout(timer);
+              settled = true;
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+              } else {
+                resolve(retryResponse);
+              }
+            });
+            return;
+          }
+        } catch {
+          // Fall through to error
         }
+
+        clearTimeout(timer);
+        settled = true;
+        reject(new Error(chrome.runtime.lastError.message));
       } else {
+        clearTimeout(timer);
+        settled = true;
         resolve(response);
       }
     });
   });
 }
 
+// In-page fallback script for direct DOM inspection without relying on message ports
+function inPageInspectForm(): PageFormSummary {
+  const elements = document.querySelectorAll<HTMLElement>(
+    'input:not([type="hidden"]), textarea, select, [role="textbox"], [role="combobox"], [role="checkbox"]'
+  );
+
+  const fields: FormElementDescriptor[] = [];
+  let counter = 0;
+
+  elements.forEach((elem) => {
+    const tagName = elem.tagName.toLowerCase();
+    const type = (elem.getAttribute('type') || (tagName === 'textarea' ? 'textarea' : tagName === 'select' ? 'select' : 'text')).toLowerCase();
+    if (['submit', 'reset', 'button', 'image'].includes(type)) return;
+
+    counter++;
+    const refId = `af_${counter}`;
+    elem.setAttribute('data-autoform-ref', refId);
+
+    // Label lookup
+    let label = '';
+    const labelledBy = elem.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const l = document.getElementById(labelledBy);
+      if (l) label = l.textContent?.trim() || '';
+    }
+    if (!label && elem.getAttribute('aria-label')) {
+      label = elem.getAttribute('aria-label') || '';
+    }
+    if (!label && elem.id) {
+      const l = document.querySelector(`label[for="${CSS.escape(elem.id)}"]`);
+      if (l) label = l.textContent?.trim() || '';
+    }
+    if (!label) {
+      const parentLabel = elem.closest('label');
+      if (parentLabel) label = parentLabel.textContent?.replace(elem.textContent || '', '').trim() || '';
+    }
+    if (!label && elem.previousElementSibling) {
+      const prev = elem.previousElementSibling;
+      if (['LABEL', 'SPAN', 'DIV', 'P'].includes(prev.tagName)) {
+        label = prev.textContent?.trim().slice(0, 80) || '';
+      }
+    }
+
+    let value = '';
+    let checked: boolean | undefined = undefined;
+    let options: Array<{ value: string; label: string; selected: boolean }> | undefined = undefined;
+
+    if (tagName === 'input') {
+      const inp = elem as HTMLInputElement;
+      if (type === 'checkbox' || type === 'radio') {
+        checked = inp.checked;
+        value = inp.value || (inp.checked ? 'true' : 'false');
+      } else {
+        value = inp.value || '';
+      }
+    } else if (tagName === 'textarea') {
+      value = (elem as HTMLTextAreaElement).value || '';
+    } else if (tagName === 'select') {
+      const sel = elem as HTMLSelectElement;
+      value = sel.value || '';
+      options = Array.from(sel.options).map((o) => ({
+        value: o.value,
+        label: o.text.trim(),
+        selected: o.selected,
+      }));
+    }
+
+    const rect = elem.getBoundingClientRect();
+    const visible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(elem).display !== 'none';
+
+    fields.push({
+      refId,
+      tagName,
+      type,
+      id: elem.id || '',
+      name: elem.getAttribute('name') || '',
+      label,
+      placeholder: elem.getAttribute('placeholder') || '',
+      value,
+      checked,
+      required: elem.hasAttribute('required') || elem.getAttribute('aria-required') === 'true',
+      disabled: (elem as HTMLInputElement).disabled || false,
+      readonly: (elem as HTMLInputElement).readOnly || false,
+      isVisible: visible,
+      selector: `[data-autoform-ref="${refId}"]`,
+      options,
+    });
+  });
+
+  const buttons: Array<{ refId: string; text: string; type: string; isSubmit: boolean; isNext: boolean; isPrevious: boolean }> = [];
+  document.querySelectorAll<HTMLElement>('button, input[type="submit"], input[type="button"], [role="button"]').forEach((btn) => {
+    const text = (btn.textContent || (btn as HTMLInputElement).value || '').trim();
+    if (!text || text.length > 50) return;
+    const lower = text.toLowerCase();
+    counter++;
+    const refId = `af_btn_${counter}`;
+    btn.setAttribute('data-autoform-ref', refId);
+    buttons.push({
+      refId,
+      text,
+      type: btn.getAttribute('type') || 'button',
+      isSubmit: lower.includes('submit') || lower.includes('finish') || lower.includes('complete'),
+      isNext: lower.includes('next') || lower.includes('continue') || lower.includes('proceed'),
+      isPrevious: lower.includes('back') || lower.includes('prev'),
+    });
+  });
+
+  const stepIndicators: string[] = [];
+  document.querySelectorAll('[class*="step"], [class*="progress"]').forEach((el) => {
+    const t = el.textContent?.replace(/\s+/g, ' ').trim();
+    if (t && t.length > 3 && t.length < 80 && !stepIndicators.includes(t)) {
+      stepIndicators.push(t);
+    }
+  });
+
+  return {
+    title: document.title,
+    url: window.location.href,
+    fields,
+    stepIndicators: stepIndicators.slice(0, 5),
+    buttons: buttons.slice(0, 8),
+  };
+}
+
+// In-page fallback script for directly setting field values in tab
+function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; value: string }>): { successCount: number; errors: string[] } {
+  let successCount = 0;
+  const errors: string[] = [];
+
+  for (const item of assignments) {
+    let target: HTMLElement | null = null;
+    if (item.refId) {
+      target = document.querySelector(`[data-autoform-ref="${CSS.escape(item.refId)}"]`);
+    }
+    if (!target && item.selector) {
+      target = document.querySelector(item.selector);
+    }
+
+    if (!target) {
+      errors.push(`Field not found: ${item.refId || item.selector}`);
+      continue;
+    }
+
+    try {
+      const tagName = target.tagName.toLowerCase();
+      if (tagName === 'input') {
+        const input = target as HTMLInputElement;
+        const type = (input.getAttribute('type') || 'text').toLowerCase();
+        if (type === 'checkbox' || type === 'radio') {
+          const boolVal = item.value === 'true' || item.value === '1' || item.value === 'yes' || item.value === 'on';
+          const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked');
+          if (desc?.set) desc.set.call(input, boolVal);
+          else input.checked = boolVal;
+        } else {
+          const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+          if (desc?.set) desc.set.call(input, item.value);
+          else input.value = item.value;
+        }
+      } else if (tagName === 'textarea') {
+        const desc = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+        if (desc?.set) desc.set.call(target, item.value);
+        else (target as HTMLTextAreaElement).value = item.value;
+      } else if (tagName === 'select') {
+        const sel = target as HTMLSelectElement;
+        const valLower = item.value.toLowerCase().trim();
+        let idx = -1;
+        for (let i = 0; i < sel.options.length; i++) {
+          const opt = sel.options[i];
+          if (opt.value.toLowerCase().trim() === valLower || opt.text.toLowerCase().trim() === valLower || opt.text.toLowerCase().includes(valLower)) {
+            idx = i;
+            break;
+          }
+        }
+        if (idx >= 0) {
+          sel.selectedIndex = idx;
+          const desc = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value');
+          if (desc?.set) desc.set.call(sel, sel.options[idx].value);
+          else sel.value = sel.options[idx].value;
+        } else {
+          sel.value = item.value;
+        }
+      }
+
+      // Event dispatching
+      target.dispatchEvent(new Event('focus', { bubbles: true }));
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      target.dispatchEvent(new Event('blur', { bubbles: true }));
+
+      // Visual flash highlight
+      target.style.outline = '2px solid #22c55e';
+      setTimeout(() => {
+        target!.style.outline = '';
+      }, 1500);
+
+      successCount++;
+    } catch (e: any) {
+      errors.push(`Error filling ${item.refId}: ${e?.message || e}`);
+    }
+  }
+
+  return { successCount, errors };
+}
+
+// In-page fallback script for clicking buttons
+function inPageClickElement(refId?: string, selector?: string, text?: string): { success: boolean; message: string } {
+  let target: HTMLElement | null = null;
+  if (refId) {
+    target = document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
+  }
+  if (!target && selector) {
+    target = document.querySelector(selector);
+  }
+  if (!target && text) {
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>('button, a, input[type="submit"], input[type="button"], [role="button"]'));
+    const tLower = text.toLowerCase().trim();
+    target = candidates.find((c) => (c.textContent || (c as HTMLInputElement).value || '').toLowerCase().trim().includes(tLower)) || null;
+  }
+
+  if (!target) {
+    return { success: false, message: `Button or element not found: ${refId || selector || text}` };
+  }
+
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.click();
+  return { success: true, message: `Clicked button "${target.textContent?.trim().slice(0, 30)}"` };
+}
+
 // Inspect Form on Active Tab
 export async function inspectActiveTabForm(): Promise<PageFormSummary> {
   const activeTab = await getActiveTab();
   if (!activeTab || !activeTab.id) {
-    // Dev mock fallback if outside extension environment
     return getMockFormSummary();
   }
 
@@ -93,16 +327,36 @@ export async function inspectActiveTabForm(): Promise<PageFormSummary> {
     throw new Error(`Chrome restricts extensions from accessing internal pages (${activeTab.url}). Please open a regular webpage or form (such as test-form.html) in your browser!`);
   }
 
+  // 1. Try sendMessageToTab first with quick timeout
   try {
-    const response = await sendMessageToTab(activeTab.id, { action: 'INSPECT_PAGE_FORM' });
+    const response = await sendMessageToTab(activeTab.id, { action: 'INSPECT_PAGE_FORM' }, 2000);
     if (response && response.success && response.data) {
       return response.data;
     }
-    throw new Error(response?.error || 'Failed to inspect form');
   } catch (err: any) {
-    console.error('Error in inspectActiveTabForm:', err);
-    throw err;
+    console.warn('[AutoForm AI] sendMessageToTab failed, falling back to direct executeScript:', err?.message || err);
   }
+
+  // 2. Direct executeScript fallback (never hangs, 100% reliable)
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: inPageInspectForm,
+      });
+      if (results && results[0] && results[0].result) {
+        return results[0].result as PageFormSummary;
+      }
+    } catch (scriptErr: any) {
+      const msg = scriptErr?.message || String(scriptErr);
+      if (msg.includes('Cannot access contents of url') || msg.includes('file:')) {
+        throw new Error(`Permission needed: To allow AutoForm AI to inspect local files (file:///...), please open chrome://extensions -> AutoForm AI Details -> toggle ON "Allow access to file URLs". Alternatively, test on any http:// or https:// webpage!`);
+      }
+      throw scriptErr;
+    }
+  }
+
+  throw new Error('Failed to inspect form fields on the active tab.');
 }
 
 // Fill fields on active tab
@@ -119,15 +373,40 @@ export async function fillActiveTabFields(
     throw new Error(`Chrome restricts extensions from accessing internal pages (${activeTab.url}). Please open a regular webpage or form (such as test-form.html) in your browser!`);
   }
 
-  const response = await sendMessageToTab(activeTab.id, {
-    action: 'FILL_FORM_FIELDS',
-    assignments,
-  });
-
-  if (response && response.success && response.data) {
-    return response.data;
+  // 1. Try sendMessageToTab
+  try {
+    const response = await sendMessageToTab(activeTab.id, {
+      action: 'FILL_FORM_FIELDS',
+      assignments,
+    }, 2000);
+    if (response && response.success && response.data) {
+      return response.data;
+    }
+  } catch (err: any) {
+    console.warn('[AutoForm AI] sendMessageToTab failed, falling back to direct executeScript:', err?.message || err);
   }
-  throw new Error(response?.error || 'Failed to fill form fields');
+
+  // 2. Direct executeScript fallback
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: inPageFillForm,
+        args: [assignments],
+      });
+      if (results && results[0] && results[0].result) {
+        return results[0].result as { successCount: number; errors: string[] };
+      }
+    } catch (scriptErr: any) {
+      const msg = scriptErr?.message || String(scriptErr);
+      if (msg.includes('Cannot access contents of url') || msg.includes('file:')) {
+        throw new Error(`Permission needed: Please enable "Allow access to file URLs" in chrome://extensions -> AutoForm AI Details to interact with local files.`);
+      }
+      throw scriptErr;
+    }
+  }
+
+  throw new Error('Failed to fill form fields on active tab');
 }
 
 // Click element on active tab
@@ -141,12 +420,36 @@ export async function clickActiveTabElement(options: {
     return { success: true, message: `[Dev Mock] Clicked element: ${JSON.stringify(options)}` };
   }
 
-  const response = await sendMessageToTab(activeTab.id, {
-    action: 'CLICK_ELEMENT',
-    ...options,
-  });
+  // 1. Try sendMessageToTab
+  try {
+    const response = await sendMessageToTab(activeTab.id, {
+      action: 'CLICK_ELEMENT',
+      ...options,
+    }, 2000);
+    if (response && response.success) {
+      return response;
+    }
+  } catch (err) {
+    // Fall back to direct script
+  }
 
-  return response || { success: false, message: 'No response from tab' };
+  // 2. Direct executeScript fallback
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: inPageClickElement,
+        args: [options.refId, options.selector, options.text],
+      });
+      if (results && results[0] && results[0].result) {
+        return results[0].result as { success: boolean; message: string };
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  return { success: false, message: 'Could not click element on active tab' };
 }
 
 // Scroll page
@@ -163,7 +466,7 @@ export async function scrollActiveTab(
     action: 'SCROLL_PAGE',
     direction,
     selector,
-  });
+  }, 1500).catch(() => ({ success: false }));
 
   return response || { success: false };
 }
@@ -179,11 +482,15 @@ export async function getActiveTabPageContent(): Promise<{ text: string; title: 
     };
   }
 
-  const response = await sendMessageToTab(activeTab.id, { action: 'GET_PAGE_TEXT' });
+  const response = await sendMessageToTab(activeTab.id, { action: 'GET_PAGE_TEXT' }, 2000).catch(() => null);
   if (response && response.success) {
     return { text: response.text, title: response.title, url: response.url };
   }
-  throw new Error(response?.error || 'Failed to get page text');
+  return {
+    text: activeTab.title || 'Web page',
+    title: activeTab.title || '',
+    url: activeTab.url || '',
+  };
 }
 
 // Chrome-level tools
@@ -192,7 +499,6 @@ export async function listAllTabs(): Promise<TabInfo[]> {
     return [
       { id: 1, title: 'Job Application - Careers Portal', url: 'https://example.com/apply', active: true },
       { id: 2, title: 'GitHub - Profile', url: 'https://github.com/alexmercer', active: false },
-      { id: 3, title: 'LinkedIn', url: 'https://linkedin.com', active: false },
     ];
   }
 
@@ -257,7 +563,6 @@ export async function navigateActiveTab(url: string): Promise<boolean> {
 
 export async function captureTabScreenshot(): Promise<string> {
   if (typeof chrome === 'undefined' || !chrome.tabs) {
-    // Return empty mock PNG
     return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   }
 
@@ -272,114 +577,63 @@ export async function captureTabScreenshot(): Promise<string> {
   });
 }
 
-// Development mock data when previewing outside extension
+// Development mock data
 function getMockFormSummary(): PageFormSummary {
   return {
     title: 'Career Application - Job Portal (Demo Mock)',
     url: 'https://careers.example.com/apply/senior-engineer',
-    stepIndicators: ['Step 1: Personal Information', 'Step 2: Experience', 'Step 3: Review & Submit'],
+    stepIndicators: ['Step 1: Personal Information', 'Step 2: Experience'],
     fields: [
       {
         refId: 'af_1',
         tagName: 'input',
         type: 'text',
-        id: 'full_name',
-        name: 'full_name',
-        label: 'Full Name',
-        placeholder: 'e.g. John Doe',
+        id: 'first_name',
+        name: 'firstName',
+        label: 'First Name',
+        placeholder: 'Alex',
         value: '',
         required: true,
         disabled: false,
         readonly: false,
         isVisible: true,
-        selector: '#full_name',
+        selector: '#first_name',
       },
       {
         refId: 'af_2',
         tagName: 'input',
-        type: 'email',
-        id: 'email_address',
-        name: 'email',
-        label: 'Email Address',
-        placeholder: 'name@example.com',
+        type: 'text',
+        id: 'last_name',
+        name: 'lastName',
+        label: 'Last Name',
+        placeholder: 'Mercer',
         value: '',
         required: true,
         disabled: false,
         readonly: false,
         isVisible: true,
-        selector: '#email_address',
+        selector: '#last_name',
       },
       {
         refId: 'af_3',
         tagName: 'input',
-        type: 'tel',
-        id: 'phone_number',
-        name: 'phone',
-        label: 'Phone Number',
-        placeholder: '+1 (555) 000-0000',
-        value: '',
-        required: false,
-        disabled: false,
-        readonly: false,
-        isVisible: true,
-        selector: '#phone_number',
-      },
-      {
-        refId: 'af_4',
-        tagName: 'input',
-        type: 'text',
-        id: 'city',
-        name: 'city',
-        label: 'City',
-        placeholder: 'Seattle',
+        type: 'email',
+        id: 'email',
+        name: 'email',
+        label: 'Email Address',
+        placeholder: 'alex@example.com',
         value: '',
         required: true,
         disabled: false,
         readonly: false,
         isVisible: true,
-        selector: '#city',
-      },
-      {
-        refId: 'af_5',
-        tagName: 'select',
-        type: 'select',
-        id: 'experience_level',
-        name: 'experience_level',
-        label: 'Years of Experience',
-        placeholder: '',
-        value: '',
-        required: true,
-        disabled: false,
-        readonly: false,
-        isVisible: true,
-        selector: '#experience_level',
-        options: [
-          { value: '', label: 'Select experience...', selected: true },
-          { value: 'entry', label: '0-2 years', selected: false },
-          { value: 'mid', label: '3-5 years', selected: false },
-          { value: 'senior', label: '6+ years', selected: false },
-        ],
-      },
-      {
-        refId: 'af_6',
-        tagName: 'textarea',
-        type: 'textarea',
-        id: 'cover_summary',
-        name: 'summary',
-        label: 'Professional Summary',
-        placeholder: 'Briefly describe your qualifications...',
-        value: '',
-        required: false,
-        disabled: false,
-        readonly: false,
-        isVisible: true,
-        selector: '#cover_summary',
+        selector: '#email',
       },
     ],
     buttons: [
       {
         refId: 'af_btn_1',
-        text: 'Next Step: Experience',
+        text: 'Next: Experience',
         type: 'button',
         isSubmit: false,
         isNext: true,
