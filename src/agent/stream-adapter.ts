@@ -154,17 +154,31 @@ async function streamOpenAI(
       }
       messages.push(msg);
     } else if (m.role === 'toolResult') {
-      const text = Array.isArray(m.content)
+      let text = Array.isArray(m.content)
         ? m.content.map((c: any) => c.text || '').join('\n')
         : typeof m.content === 'string'
         ? m.content
         : JSON.stringify(m.content || '');
+
+      // Cap single tool output to 2500 characters to prevent huge dumps into context
+      if (text.length > 2500) {
+        text = text.slice(0, 2500) + '\n... [Remaining content trimmed to conserve context]';
+      }
 
       messages.push({
         role: 'tool',
         tool_call_id: m.toolCallId,
         content: text,
       });
+    }
+  }
+
+  // Compact older tool results in history so multi-turn sessions don't hit 413 / ITPM token limits
+  const totalMsgs = messages.length;
+  for (let i = 0; i < totalMsgs - 4; i++) {
+    const msg = messages[i];
+    if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.length > 350) {
+      msg.content = msg.content.slice(0, 350) + '\n... [Prior turn output compacted]';
     }
   }
 
@@ -224,21 +238,65 @@ async function streamOpenAI(
 
     const errorBody = await response.text();
 
-    // Check for 429 Rate Limit (both ITPM input tokens and OTPM output tokens on Groq free tier)
-    if (response.status === 429 && isGroq && attempt < maxRetries) {
-      // If error specifically asks to reduce max_tokens (OTPM exceeded), clamp max_tokens smaller and retry after a short wait
-      if (errorBody.includes('reduce max_tokens') || errorBody.includes('OTPM')) {
-        const currentMax = payload.max_tokens || 450;
-        payload.max_tokens = Math.max(200, Math.floor(currentMax * 0.5));
-        // Wait a few seconds for OTPM budget to partially reset
-        stream.push({ type: 'text_delta', delta: `⏳ Groq output limit hit. Retrying with shorter response (max ${payload.max_tokens} tokens)...\n` });
-        await new Promise((r) => setTimeout(r, 5000));
+    // Check for 413 (Payload Too Large) or 429 (Rate Limit - ITPM input or OTPM output tokens)
+    const isRateOrSizeLimit = response.status === 413 || response.status === 429;
+    if (isRateOrSizeLimit && isGroq && attempt < maxRetries) {
+      // 1. If error specifically asks to reduce message size or indicates ITPM input limit exceeded (413 or 429)
+      if (
+        response.status === 413 ||
+        errorBody.includes('reduce your message size') ||
+        errorBody.includes('Request too large') ||
+        (errorBody.includes('ITPM') && errorBody.includes('Limit'))
+      ) {
+        stream.push({
+          type: 'text_delta',
+          delta: `⏳ Free tier token limit reached (requested size exceeded limit). Auto-compacting conversation history...\n`,
+        });
+
+        // Aggressively compact all tool messages to 200 chars max
+        for (const msg of payload.messages) {
+          if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.length > 200) {
+            msg.content = msg.content.slice(0, 200) + '... [Compacted]';
+          }
+          if (msg.role === 'system' && typeof msg.content === 'string' && msg.content.length > 1200) {
+            msg.content = msg.content.slice(0, 1200) + '\n... [Stored knowledge trimmed to fit token limits]';
+          }
+        }
+
+        // If history is still long, retain system prompt + initial user task + last 2 turns
+        if (payload.messages.length > 6) {
+          const sys = payload.messages.find((m: any) => m.role === 'system');
+          const firstUser = payload.messages.find((m: any) => m.role === 'user');
+          const recent = payload.messages.slice(-3);
+          const pruned = [];
+          if (sys) pruned.push(sys);
+          if (firstUser && !recent.includes(firstUser)) pruned.push(firstUser);
+          for (const r of recent) {
+            if (!pruned.includes(r)) pruned.push(r);
+          }
+          payload.messages = pruned;
+        }
+
+        payload.max_tokens = Math.min(payload.max_tokens || 450, 350);
+        await new Promise((r) => setTimeout(r, 4000));
         continue;
       }
 
+      // 2. If error specifically asks to reduce max_tokens (OTPM output tokens exceeded)
+      if (errorBody.includes('reduce max_tokens') || errorBody.includes('OTPM')) {
+        const currentMax = payload.max_tokens || 450;
+        payload.max_tokens = Math.max(200, Math.floor(currentMax * 0.5));
+        stream.push({
+          type: 'text_delta',
+          delta: `⏳ Output token limit hit. Retrying with shorter response (max ${payload.max_tokens} tokens)...\n`,
+        });
+        await new Promise((r) => setTimeout(r, 4000));
+        continue;
+      }
+
+      // 3. Standard 429 countdown
       let waitSeconds = 6;
       try {
-        // Parse "Please try again in 6.334285714s" from Groq error message
         const match = errorBody.match(/try again in ([\d\.]+)s/i);
         if (match && match[1]) {
           waitSeconds = Math.ceil(parseFloat(match[1])) + 1;
@@ -247,7 +305,6 @@ async function streamOpenAI(
         waitSeconds = 6;
       }
 
-      // Stream user-facing countdown notification so they know OpenBUA is automatically waiting
       for (let s = waitSeconds; s > 0; s--) {
         if (signal?.aborted) break;
         stream.push({

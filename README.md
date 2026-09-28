@@ -81,25 +81,7 @@ No technical knowledge or coding required. Follow these steps to install OpenBUA
 
 ---
 
-## How to Use OpenBUA 100% Free with Groq
-
-You do not need a paid subscription or credit card to use OpenBUA. Groq provides ultra-fast free cloud API access:
-
-1. **Create a Free Groq Account**:
-   - Go to [console.groq.com](https://console.groq.com) and sign up for a free account.
-2. **Generate an API Key**:
-   - Navigate to the **API Keys** tab on the left menu (or visit [console.groq.com/keys](https://console.groq.com/keys)).
-   - Click **Create API Key**, give it a name (e.g., `OpenBUA`), and copy the key (starts with `gsk_...`).
-3. **Configure in OpenBUA**:
-   - Open OpenBUA in your Chrome side panel and go to **Settings**.
-   - Under **OpenAI Compatible**, paste your `gsk_...` key. OpenBUA will automatically detect your Groq key!
-   - Base URL: `https://api.groq.com/openai/v1/chat/completions` (or click the **Groq (Free)** preset button).
-   - Model ID: `qwen/qwen3.8-27b` (recommended, high rate limit and excellent tool performance) or `llama-3.3-70b-versatile`.
-   - Click **Save Settings**.
-4. **Built-in Rate Limit Handling**:
-   - Groq free tier has an input tokens-per-minute rate limit. OpenBUA has built-in smart rate-limit retry: if you reach a free tier limit, OpenBUA automatically pauses, displays a countdown timer, and resumes your task seamlessly without crashing!
-
-**Important Disclaimer**: Groq free accounts have strict rate limiting and limitations on both input and output tokens. This is great for testing and getting started, but for serious, fast, and reliable work, use a proper API key from a paid provider such as Claude, GPT, GLM, Qwen, Kimi, Meta, Minimax, Grok, Mimo, or DeepSeek.
+**Disclaimer on Free Groq Keys**: Free-tier Groq accounts enforce severe rate limits on both input tokens per minute (ITPM ~7,000) and output tokens per minute (OTPM ~1,000). Autonomous browser agents inspect full web pages, navigate dynamic apps, and maintain multi-turn tool transcripts, which quickly exceed these free-tier quotas. If you plan on using free Groq keys, they have strict rate limiting and input/output token limits, so it will not work as intended and is not recommended. For fast, reliable, and uninterrupted web automation, use a standard API key from providers like Anthropic (Claude 3.7 Sonnet), OpenAI (GPT-4o), DeepSeek, Qwen (DashScope), or MiniMax.
 
 ---
 

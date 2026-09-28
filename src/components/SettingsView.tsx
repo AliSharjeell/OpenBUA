@@ -235,9 +235,27 @@ export function SettingsView({ settings, onSettingsSaved }: SettingsViewProps) {
                 <button
                   type="button"
                   className="text-[9px] text-zinc-400 hover:text-zinc-200 underline"
+                  onClick={() => setOpenaiUrl('https://api.deepseek.com/v1')}
+                >
+                  DeepSeek
+                </button>
+                <button
+                  type="button"
+                  className="text-[9px] text-zinc-400 hover:text-zinc-200 underline"
                   onClick={() => setOpenaiUrl('https://openrouter.ai/api/v1')}
                 >
                   OpenRouter
+                </button>
+                <button
+                  type="button"
+                  className="text-[9px] text-zinc-400 hover:text-zinc-200 underline"
+                  onClick={() => {
+                    setOpenaiUrl('https://api.groq.com/openai/v1/chat/completions');
+                    setOpenaiModel('qwen/qwen3.8-27b');
+                  }}
+                  title="Groq Cloud"
+                >
+                  Groq
                 </button>
                 <button
                   type="button"
@@ -246,17 +264,6 @@ export function SettingsView({ settings, onSettingsSaved }: SettingsViewProps) {
                 >
                   Minimax
                 </button>
-                <button
-                  type="button"
-                  className="text-[9px] text-emerald-400 hover:text-emerald-300 font-medium underline"
-                  onClick={() => {
-                    setOpenaiUrl('https://api.groq.com/openai/v1/chat/completions');
-                    setOpenaiModel('qwen/qwen3.8-27b');
-                  }}
-                  title="Free fast inference on Groq Cloud"
-                >
-                  Groq (Free)
-                </button>
               </div>
             </div>
 
@@ -264,9 +271,8 @@ export function SettingsView({ settings, onSettingsSaved }: SettingsViewProps) {
               <div className="flex items-center justify-between mb-1">
                 <label className="text-[11px] text-zinc-400">API Key</label>
                 {openaiKey.trim().startsWith('gsk_') && (
-                  <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/60">
-                    <Sparkles className="w-3 h-3 text-emerald-400" />
-                    Groq Key Detected
+                  <span className="text-[10px] text-amber-400 font-medium flex items-center gap-1 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-800/60" title="Groq free tier has strict rate and token limits. Standard API keys recommended.">
+                    Groq Key (Rate Limits Apply)
                   </span>
                 )}
               </div>

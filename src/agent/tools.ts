@@ -27,10 +27,10 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
       const summary = await inspectActiveTabForm();
-      const fieldsCount = summary.fields.length;
-      const visibleFields = summary.fields.filter(f => f.isVisible);
+      const visibleFields = summary.fields.filter(f => f.isVisible).slice(0, 20);
+      const buttons = summary.buttons.slice(0, 8);
       
-      const textOutput = `Found ${fieldsCount} fields (${visibleFields.length} visible) on page "${summary.title}":\n\n` +
+      let textOutput = `Found ${fieldsCount} fields (${summary.fields.filter(f => f.isVisible).length} visible, showing top ${visibleFields.length}) on page "${summary.title}":\n\n` +
         `Current URL: ${summary.url}\n` +
         (summary.stepIndicators.length > 0 ? `Step Progress: ${summary.stepIndicators.join(' | ')}\n\n` : '') +
         `Fields:\n` +
@@ -40,12 +40,15 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
           if (f.value) desc += ` | Current Value: "${f.value}"`;
           if (f.required) desc += ` (REQUIRED)`;
           if (f.options && f.options.length > 0) {
-            desc += ` | Options: [${f.options.map(o => `"${o.label}" (value: "${o.value}")`).slice(0, 8).join(', ')}]`;
+            desc += ` | Options: [${f.options.map(o => `"${o.label}" (value: "${o.value}")`).slice(0, 6).join(', ')}]`;
           }
           return desc;
-        }).join('\n') +
-        `\n\nAction Buttons:\n` +
-        summary.buttons.map(b => `- [refId: ${b.refId}] "${b.text}" (${b.isSubmit ? 'SUBMIT' : b.isNext ? 'NEXT STEP' : 'Action'})`).join('\n');
+        }).join('\n');
+
+      if (buttons.length > 0) {
+        textOutput += `\n\nAction Buttons:\n` +
+          buttons.map(b => `- [refId: ${b.refId}] "${b.text}" (${b.isSubmit ? 'SUBMIT' : b.isNext ? 'NEXT STEP' : 'Action'})`).join('\n');
+      }
 
       return {
         content: [{ type: 'text', text: textOutput }],
