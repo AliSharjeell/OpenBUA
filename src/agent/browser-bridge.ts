@@ -15,8 +15,19 @@ export async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
     return null;
   }
   return new Promise((resolve) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      resolve(tabs && tabs.length > 0 ? tabs[0] : null);
+    // In Side Panel, lastFocusedWindow targets the main browser window tab
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        return resolve(tabs[0]);
+      }
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs2) => {
+        if (tabs2 && tabs2.length > 0) {
+          return resolve(tabs2[0]);
+        }
+        chrome.tabs.query({ active: true }, (tabs3) => {
+          resolve(tabs3 && tabs3.length > 0 ? tabs3[0] : null);
+        });
+      });
     });
   });
 }
@@ -221,6 +232,12 @@ function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; 
     let target: HTMLElement | null = null;
     if (item.refId) {
       target = document.querySelector(`[data-autoform-ref="${CSS.escape(item.refId)}"]`);
+      if (!target) {
+        target = document.getElementById(item.refId);
+      }
+      if (!target) {
+        target = document.querySelector(`[name="${CSS.escape(item.refId)}"]`);
+      }
     }
     if (!target && item.selector) {
       target = document.querySelector(item.selector);
