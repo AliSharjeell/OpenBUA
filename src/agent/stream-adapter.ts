@@ -132,9 +132,9 @@ async function streamOpenAI(
           .join('\n');
 
         toolCalls = m.content
-          .filter((c: any) => c.type === 'toolCall')
+          .filter((c: any) => c.type === 'toolCall' || c.type === 'tool_use')
           .map((c: any) => {
-            const rawArgs = c.arguments || c.args || {};
+            const rawArgs = c.arguments || c.args || c.input || {};
             return {
               id: c.id,
               type: 'function',
@@ -380,7 +380,8 @@ async function streamAnthropic(
     }
   }
 
-  const messages: any[] = [];
+  // Convert context messages to Anthropic format
+  const rawMessages: any[] = [];
 
   for (const m of context.messages) {
     if (m.role === 'system') {
@@ -392,26 +393,51 @@ async function streamAnthropic(
           : Array.isArray(m.content)
           ? m.content.map((c: any) => c.text || '').join('\n')
           : String(m.content || '');
-      messages.push({ role: 'user', content: text });
+      rawMessages.push({
+        role: 'user',
+        content: text.trim() ? [{ type: 'text', text }] : [{ type: 'text', text: 'Continue' }],
+      });
     } else if (m.role === 'assistant') {
       const contentBlocks: any[] = [];
       if (typeof m.content === 'string') {
-        contentBlocks.push({ type: 'text', text: m.content });
+        if (m.content.trim()) {
+          contentBlocks.push({ type: 'text', text: m.content });
+        }
       } else if (Array.isArray(m.content)) {
         for (const block of m.content) {
-          if (block.type === 'text' && block.text) {
+          if (block.type === 'text' && block.text && block.text.trim()) {
             contentBlocks.push({ type: 'text', text: block.text });
-          } else if (block.type === 'toolCall') {
+          } else if (block.type === 'thinking' && block.thinking && block.thinking.trim()) {
+            contentBlocks.push({
+              type: 'text',
+              text: `[Thinking: ${block.thinking.slice(0, 1000)}]`,
+            });
+          } else if (block.type === 'toolCall' || block.type === 'tool_use') {
+            const rawArgs = block.arguments || block.args || block.input || {};
+            let parsedArgs = rawArgs;
+            if (typeof rawArgs === 'string') {
+              try {
+                parsedArgs = JSON.parse(rawArgs);
+              } catch {
+                parsedArgs = { raw: rawArgs };
+              }
+            }
             contentBlocks.push({
               type: 'tool_use',
-              id: block.id,
-              name: block.name,
-              input: block.arguments || block.args || {},
+              id: block.id || `call_${Date.now()}`,
+              name: block.name || block.function?.name || 'tool',
+              input: parsedArgs,
             });
           }
         }
       }
-      messages.push({ role: 'assistant', content: contentBlocks });
+
+      // Anthropic / MiniMax rule: Assistant MUST have non-empty content
+      if (contentBlocks.length === 0) {
+        contentBlocks.push({ type: 'text', text: 'Understood. Continuing...' });
+      }
+
+      rawMessages.push({ role: 'assistant', content: contentBlocks });
     } else if (m.role === 'toolResult') {
       const text = Array.isArray(m.content)
         ? m.content.map((c: any) => c.text || '').join('\n')
@@ -419,16 +445,65 @@ async function streamAnthropic(
         ? m.content
         : JSON.stringify(m.content || '');
 
-      messages.push({
+      rawMessages.push({
         role: 'user',
         content: [
           {
             type: 'tool_result',
             tool_use_id: m.toolCallId,
-            content: text,
+            content: text || 'Success',
           },
         ],
       });
+    }
+  }
+
+  // Normalize rawMessages to enforce:
+  // 1. Strictly alternating user and assistant roles
+  // 2. Merging consecutive user messages (e.g. multiple tool results from parallel/sequential calls)
+  // 3. Merging consecutive assistant messages
+  // 4. Starting with a user message
+  const messages: any[] = [];
+
+  for (const rawMsg of rawMessages) {
+    if (messages.length === 0 && rawMsg.role === 'assistant') {
+      messages.push({
+        role: 'user',
+        content: [{ type: 'text', text: 'Please proceed with the task.' }],
+      });
+    }
+
+    const prevMsg = messages[messages.length - 1];
+
+    if (prevMsg && prevMsg.role === rawMsg.role) {
+      const prevBlocks = Array.isArray(prevMsg.content)
+        ? prevMsg.content
+        : [{ type: 'text', text: String(prevMsg.content || '') }];
+      const currBlocks = Array.isArray(rawMsg.content)
+        ? rawMsg.content
+        : [{ type: 'text', text: String(rawMsg.content || '') }];
+      prevMsg.content = [...prevBlocks, ...currBlocks];
+    } else {
+      messages.push(rawMsg);
+    }
+  }
+
+  // Final validation pass on all messages
+  for (const msg of messages) {
+    if (Array.isArray(msg.content)) {
+      msg.content = msg.content.filter((b: any) => {
+        if (b.type === 'text') {
+          return Boolean(b.text && String(b.text).trim().length > 0);
+        }
+        return true;
+      });
+
+      if (msg.content.length === 0) {
+        msg.content.push({
+          type: 'text',
+          text: msg.role === 'assistant' ? 'Continuing...' : 'Continue',
+        });
+      }
     }
   }
 
@@ -519,6 +594,15 @@ async function streamAnthropic(
                 contentIndex: currentBlockIndex,
                 partial: assistantMessage,
               });
+            } else if (event.content_block?.type === 'thinking') {
+              currentBlockType = 'text';
+              const textBlock: TextContent = { type: 'text', text: '' };
+              assistantMessage.content.push(textBlock);
+              stream.push({
+                type: 'text_start',
+                contentIndex: currentBlockIndex,
+                partial: assistantMessage,
+              });
             } else if (event.content_block?.type === 'tool_use') {
               currentBlockType = 'tool_use';
               currentToolUse = {
@@ -545,8 +629,11 @@ async function streamAnthropic(
           }
 
           case 'content_block_delta': {
-            if (currentBlockType === 'text' && event.delta?.type === 'text_delta') {
-              const delta = event.delta.text || '';
+            if (
+              (currentBlockType === 'text') &&
+              (event.delta?.type === 'text_delta' || event.delta?.type === 'thinking_delta')
+            ) {
+              const delta = event.delta.text || event.delta.thinking || '';
               const block = assistantMessage.content[currentBlockIndex] as TextContent;
               if (block) block.text += delta;
               stream.push({
@@ -625,6 +712,39 @@ async function streamAnthropic(
         }
       } catch {
         // Skip malformed SSE lines
+      }
+    }
+  }
+
+  // Ensure assistantMessage is never completely empty
+  if (assistantMessage.content.length === 0) {
+    const fallbackText: TextContent = { type: 'text', text: 'Done.' };
+    assistantMessage.content.push(fallbackText);
+    stream.push({
+      type: 'text_start',
+      contentIndex: 0,
+      partial: assistantMessage,
+    });
+    stream.push({
+      type: 'text_delta',
+      contentIndex: 0,
+      delta: 'Done.',
+      partial: assistantMessage,
+    });
+    stream.push({
+      type: 'text_end',
+      contentIndex: 0,
+      content: 'Done.',
+      partial: assistantMessage,
+    });
+  } else {
+    // If there is only an empty text block and no tool calls, fill it
+    const hasToolCall = assistantMessage.content.some((c: any) => c.type === 'toolCall');
+    if (!hasToolCall) {
+      for (const block of assistantMessage.content) {
+        if (block.type === 'text' && !block.text.trim()) {
+          block.text = 'Done.';
+        }
       }
     }
   }
