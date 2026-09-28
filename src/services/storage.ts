@@ -3,8 +3,9 @@
 import { AppSettings, UserDocument, ChatMessage } from '../types';
 
 const SETTINGS_KEY = 'autoform_settings';
-const DOCUMENTS_KEY = 'autoform_documents';
-const CHAT_HISTORY_KEY = 'autoform_chat_history';
+const GLOBAL_MEMORY_KEY = 'autoform_global_memory';
+const CHAT_HISTORY_PREFIX = 'autoform_chat_';
+const TAB_MEMORY_PREFIX = 'autoform_tab_mem_';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   activeProvider: 'openai',
@@ -22,10 +23,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   systemInstruction: 'You are AutoForm AI, an autonomous browser assistant that helps users fill forms on websites accurately using their stored documents and profile.',
 };
 
-const DEFAULT_DOCUMENTS: UserDocument[] = [
+export const DEFAULT_GLOBAL_MEMORIES: UserDocument[] = [
   {
-    id: 'doc-default-profile',
-    title: 'Personal & Professional Profile',
+    id: 'mem-default-profile',
+    title: 'Personal & Professional Profile (About Me)',
     type: 'markdown',
     content: `# Personal & Professional Information
 
@@ -64,17 +65,36 @@ const DEFAULT_DOCUMENTS: UserDocument[] = [
     summary: 'Alex Mercer - Senior Software Engineer, Seattle WA. Full personal and professional profile.',
     createdAt: Date.now(),
     sizeBytes: 950,
-    tags: ['profile', 'contact', 'resume'],
+    tags: ['profile', 'contact', 'resume', 'about-me'],
     isActiveForContext: true,
-  }
+    isGlobal: true,
+  },
 ];
+
+// Helper to get normalized tab key for scoped storage
+export function getTabKey(tab?: { id?: number; url?: string; title?: string } | null): string {
+  if (!tab) return 'default_tab';
+  if (tab.url) {
+    try {
+      const u = new URL(tab.url);
+      if (u.protocol === 'file:') {
+        const filePart = u.pathname.split('/').pop() || 'local_file';
+        return `file_${filePart}`;
+      }
+      return `${u.hostname}${u.pathname}`;
+    } catch {
+      return tab.url.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+    }
+  }
+  return tab.id ? `tab_${tab.id}` : 'default_tab';
+}
 
 // Chrome storage wrapper with window.localStorage fallback
 export async function getStorageItem<T>(key: string, defaultValue: T): Promise<T> {
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
     return new Promise((resolve) => {
       chrome.storage.local.get([key], (result) => {
-        if (chrome.runtime.lastError || !result[key]) {
+        if (chrome.runtime.lastError || result[key] === undefined) {
           resolve(defaultValue);
         } else {
           resolve(result[key]);
@@ -120,47 +140,135 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   await setStorageItem(SETTINGS_KEY, settings);
 }
 
-// Documents
-export async function loadDocuments(): Promise<UserDocument[]> {
-  const docs = await getStorageItem<UserDocument[]>(DOCUMENTS_KEY, DEFAULT_DOCUMENTS);
-  return docs;
+// ========================================================
+// Global Memories (Consistent across all tabs)
+// ========================================================
+export async function loadGlobalMemories(): Promise<UserDocument[]> {
+  return await getStorageItem<UserDocument[]>(GLOBAL_MEMORY_KEY, DEFAULT_GLOBAL_MEMORIES);
 }
 
-export async function saveDocument(doc: UserDocument): Promise<void> {
-  const docs = await loadDocuments();
-  const index = docs.findIndex((d) => d.id === doc.id);
+export async function saveGlobalMemory(doc: UserDocument): Promise<void> {
+  const memories = await loadGlobalMemories();
+  const index = memories.findIndex((m) => m.id === doc.id);
+  const toSave = { ...doc, isGlobal: true };
   if (index >= 0) {
-    docs[index] = doc;
+    memories[index] = toSave;
   } else {
-    docs.unshift(doc);
+    memories.unshift(toSave);
   }
-  await setStorageItem(DOCUMENTS_KEY, docs);
+  await setStorageItem(GLOBAL_MEMORY_KEY, memories);
 }
 
-export async function deleteDocument(id: string): Promise<void> {
-  const docs = await loadDocuments();
-  const filtered = docs.filter((d) => d.id !== id);
-  await setStorageItem(DOCUMENTS_KEY, filtered);
+export async function deleteGlobalMemory(id: string): Promise<void> {
+  const memories = await loadGlobalMemories();
+  const filtered = memories.filter((m) => m.id !== id);
+  await setStorageItem(GLOBAL_MEMORY_KEY, filtered);
 }
 
-export async function toggleDocumentActive(id: string): Promise<UserDocument[]> {
-  const docs = await loadDocuments();
-  const updated = docs.map((d) => (d.id === id ? { ...d, isActiveForContext: !d.isActiveForContext } : d));
-  await setStorageItem(DOCUMENTS_KEY, updated);
+export async function toggleGlobalMemoryActive(id: string): Promise<UserDocument[]> {
+  const memories = await loadGlobalMemories();
+  const updated = memories.map((m) =>
+    m.id === id ? { ...m, isActiveForContext: !m.isActiveForContext } : m
+  );
+  await setStorageItem(GLOBAL_MEMORY_KEY, updated);
   return updated;
 }
 
-// Chat History
+// ========================================================
+// Tab-Scoped Memories (Specific to current tab / page)
+// ========================================================
+export async function loadTabMemories(tabKey: string): Promise<UserDocument[]> {
+  const key = `${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`;
+  return await getStorageItem<UserDocument[]>(key, []);
+}
+
+export async function saveTabMemory(tabKey: string, doc: UserDocument): Promise<void> {
+  const key = `${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`;
+  const memories = await loadTabMemories(tabKey);
+  const index = memories.findIndex((m) => m.id === doc.id);
+  const toSave = { ...doc, isGlobal: false, tabUrlPattern: tabKey };
+  if (index >= 0) {
+    memories[index] = toSave;
+  } else {
+    memories.unshift(toSave);
+  }
+  await setStorageItem(key, memories);
+}
+
+export async function deleteTabMemory(tabKey: string, id: string): Promise<void> {
+  const key = `${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`;
+  const memories = await loadTabMemories(tabKey);
+  const filtered = memories.filter((m) => m.id !== id);
+  await setStorageItem(key, filtered);
+}
+
+export async function toggleTabMemoryActive(tabKey: string, id: string): Promise<UserDocument[]> {
+  const key = `${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`;
+  const memories = await loadTabMemories(tabKey);
+  const updated = memories.map((m) =>
+    m.id === id ? { ...m, isActiveForContext: !m.isActiveForContext } : m
+  );
+  await setStorageItem(key, updated);
+  return updated;
+}
+
+// Get all active memories for a tab (Active Global + Active Tab)
+export async function getActiveContextMemories(tabKey: string): Promise<UserDocument[]> {
+  const [globalMems, tabMems] = await Promise.all([
+    loadGlobalMemories(),
+    loadTabMemories(tabKey),
+  ]);
+  const activeGlobal = globalMems.filter((m) => m.isActiveForContext);
+  const activeTab = tabMems.filter((m) => m.isActiveForContext);
+  return [...activeGlobal, ...activeTab];
+}
+
+// Backwards compatibility wrappers
+export async function loadDocuments(): Promise<UserDocument[]> {
+  return await loadGlobalMemories();
+}
+
+export async function saveDocument(doc: UserDocument): Promise<void> {
+  await saveGlobalMemory(doc);
+}
+
+export async function deleteDocument(id: string): Promise<void> {
+  await deleteGlobalMemory(id);
+}
+
+export async function toggleDocumentActive(id: string): Promise<UserDocument[]> {
+  return await toggleGlobalMemoryActive(id);
+}
+
+// ========================================================
+// Tab-Scoped Chat History
+// ========================================================
+export async function loadChatHistoryForTab(tabKey: string): Promise<ChatMessage[]> {
+  const key = `${CHAT_HISTORY_PREFIX}${encodeURIComponent(tabKey)}`;
+  return await getStorageItem<ChatMessage[]>(key, []);
+}
+
+export async function saveChatHistoryForTab(tabKey: string, messages: ChatMessage[]): Promise<void> {
+  const key = `${CHAT_HISTORY_PREFIX}${encodeURIComponent(tabKey)}`;
+  const trimmed = messages.slice(-50);
+  await setStorageItem(key, trimmed);
+}
+
+export async function clearChatHistoryForTab(tabKey: string): Promise<void> {
+  const key = `${CHAT_HISTORY_PREFIX}${encodeURIComponent(tabKey)}`;
+  await setStorageItem(key, []);
+}
+
+// Backwards compatibility for single chat
 export async function loadChatHistory(): Promise<ChatMessage[]> {
-  return await getStorageItem<ChatMessage[]>(CHAT_HISTORY_KEY, []);
+  return await getStorageItem<ChatMessage[]>('autoform_chat_history', []);
 }
 
 export async function saveChatHistory(messages: ChatMessage[]): Promise<void> {
-  // Retain the last 50 messages to keep storage fast
   const trimmed = messages.slice(-50);
-  await setStorageItem(CHAT_HISTORY_KEY, trimmed);
+  await setStorageItem('autoform_chat_history', trimmed);
 }
 
 export async function clearChatHistory(): Promise<void> {
-  await setStorageItem(CHAT_HISTORY_KEY, []);
+  await setStorageItem('autoform_chat_history', []);
 }
