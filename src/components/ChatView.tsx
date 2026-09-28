@@ -473,7 +473,6 @@ export function ChatView({
             }
             disabled={isBusy}
           >
-            <Sparkles className="w-3 h-3 text-zinc-100" />
             <span>Fill Form</span>
           </button>
         </div>
