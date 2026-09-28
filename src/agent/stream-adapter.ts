@@ -107,6 +107,10 @@ async function streamOpenAI(
     messages.push({ role: 'system', content: systemPrompt });
   }
 
+  // Detect Groq specifically by checking for the exact Groq API endpoint.
+  // Standard providers (Mimo, DeepSeek, OpenAI, Claude, OpenRouter, MiniMax) are NEVER throttled or compacted.
+  const isGroq = endpoint.includes('api.groq.com/openai/v1/chat/completions');
+
   for (const m of context.messages) {
     if (m.role === 'system') {
       // Already captured in leading system message
@@ -160,9 +164,9 @@ async function streamOpenAI(
         ? m.content
         : JSON.stringify(m.content || '');
 
-      // Cap single tool output to 2500 characters to prevent huge dumps into context
-      if (text.length > 2500) {
-        text = text.slice(0, 2500) + '\n... [Remaining content trimmed to conserve context]';
+      // ONLY cap tool output for Groq free-tier due to its severe 7000 ITPM limit. Standard models get full tool output!
+      if (isGroq && text.length > 2500) {
+        text = text.slice(0, 2500) + '\n... [Remaining content trimmed for Groq rate limit]';
       }
 
       messages.push({
@@ -173,12 +177,14 @@ async function streamOpenAI(
     }
   }
 
-  // Compact older tool results in history so multi-turn sessions don't hit 413 / ITPM token limits
-  const totalMsgs = messages.length;
-  for (let i = 0; i < totalMsgs - 4; i++) {
-    const msg = messages[i];
-    if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.length > 350) {
-      msg.content = msg.content.slice(0, 350) + '\n... [Prior turn output compacted]';
+  // ONLY compact older tool results in history for Groq free tier. Standard models (Mimo, GPT-4o, Claude) keep full history!
+  if (isGroq) {
+    const totalMsgs = messages.length;
+    for (let i = 0; i < totalMsgs - 4; i++) {
+      const msg = messages[i];
+      if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.length > 350) {
+        msg.content = msg.content.slice(0, 350) + '\n... [Prior turn output compacted for Groq limit]';
+      }
     }
   }
 
@@ -203,13 +209,8 @@ async function streamOpenAI(
     payload.tool_choice = 'auto';
   }
 
-  // Detect Groq specifically by checking for the exact Groq API endpoint.
-  // This ensures users with their own direct Qwen/other provider keys are NEVER affected by Groq-specific limits.
-  const isGroq = endpoint.includes('api.groq.com/openai/v1/chat/completions');
-
   // If using Groq, clamp max_tokens to prevent OTPM (output tokens per minute) errors on Groq's free tier.
-  // This ONLY applies to Groq-routed requests. Direct Qwen, OpenAI, or other provider keys are unaffected.
-  // qwen3.8-27b has a 1000 OTPM limit — we use 450 so the agent can make ~2 calls/min (tool call + result processing).
+  // Standard models (Mimo, Claude, OpenAI, DeepSeek) are NEVER clamped.
   if (isGroq) {
     if ((config.model || '').includes('qwen')) {
       payload.max_tokens = 450;

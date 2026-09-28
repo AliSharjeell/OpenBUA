@@ -142,8 +142,12 @@ function inPageInspectForm(): PageFormSummary {
       label = elem.getAttribute('aria-label') || '';
     }
     if (!label && elem.id) {
-      const l = document.querySelector(`label[for="${CSS.escape(elem.id)}"]`);
-      if (l) label = l.textContent?.trim() || '';
+      try {
+        const l = document.querySelector(`label[for="${CSS.escape(elem.id)}"]`);
+        if (l) label = l.textContent?.trim() || '';
+      } catch {
+        // ignore invalid selector syntax
+      }
     }
     if (!label) {
       const parentLabel = elem.closest('label');
@@ -180,8 +184,14 @@ function inPageInspectForm(): PageFormSummary {
       }));
     }
 
-    const rect = elem.getBoundingClientRect();
-    const visible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(elem).display !== 'none';
+    let visible = false;
+    if (elem.offsetWidth > 0 || elem.offsetHeight > 0 || elem.getClientRects().length > 0) {
+      try {
+        visible = window.getComputedStyle(elem).display !== 'none';
+      } catch {
+        visible = true;
+      }
+    }
 
     fields.push({
       refId,
@@ -441,26 +451,51 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
   }
   if (!target && text) {
     const candidates = Array.from(document.querySelectorAll<HTMLElement>(
-      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], ytd-button-renderer, yt-button-shape, ytd-thumbnail, ytd-rich-item-renderer, [contenteditable="true"], [role="textbox"], [id*="placeholder"], [id*="comment"]'
+      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder'
     ));
     const tLower = text.toLowerCase().trim();
+
+    // 1. Exact match (highest priority)
     target = candidates.find((c) => {
       const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').toLowerCase().trim();
-      return val.includes(tLower);
+      return val === tLower;
     }) || null;
+
+    // 2. Exact word boundary match
+    if (!target) {
+      try {
+        const wordRegex = new RegExp(`(^|\\s|[^a-zA-Z0-9])${tLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\s|[^a-zA-Z0-9])`, 'i');
+        target = candidates.find((c) => {
+          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').trim();
+          return wordRegex.test(val);
+        }) || null;
+      } catch {}
+    }
+
+    // 3. Substring match, sorted by shortest length (most specific leaf element first)
+    if (!target) {
+      const matches = candidates
+        .map((c) => {
+          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').toLowerCase().trim();
+          return { elem: c, val, len: val.length };
+        })
+        .filter((item) => item.val.includes(tLower))
+        .sort((a, b) => a.len - b.len);
+      if (matches.length > 0) {
+        target = matches[0].elem;
+      }
+    }
   }
 
   if (!target) {
     return { success: false, message: `Button or element not found: ${refId || selector || text}` };
   }
 
-  const innerClickable = target.querySelector<HTMLElement>('a[href], button, [role="button"], [contenteditable="true"]') || target;
-  innerClickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  innerClickable.focus();
-  innerClickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-  innerClickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-  innerClickable.click();
-  return { success: true, message: `Clicked element "${(innerClickable.textContent || innerClickable.getAttribute('aria-label') || '').trim().slice(0, 30)}"` };
+  const clickable = target.closest<HTMLElement>('a[href], button, [role="button"], [contenteditable="true"]') || target;
+  clickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  clickable.focus();
+  clickable.click();
+  return { success: true, message: `Clicked element "${(clickable.textContent || clickable.getAttribute('aria-label') || '').trim().slice(0, 30)}"` };
 }
 
 // Inspect Form on Active Tab
@@ -474,14 +509,14 @@ export async function inspectActiveTabForm(): Promise<PageFormSummary> {
     throw new Error(`Chrome restricts extensions from accessing internal pages (${activeTab.url}). Please open a regular webpage or form (such as test-form.html) in your browser!`);
   }
 
-  // 1. Try sendMessageToTab first with quick timeout
+  // 1. Try sendMessageToTab first with generous 4-second timeout for rich SPAs
   try {
-    const response = await sendMessageToTab(activeTab.id, { action: 'INSPECT_PAGE_FORM' }, 2000);
+    const response = await sendMessageToTab(activeTab.id, { action: 'INSPECT_PAGE_FORM' }, 4000);
     if (response && response.success && response.data) {
       return response.data;
     }
   } catch (err: any) {
-    console.warn('[AutoForm AI] sendMessageToTab failed, falling back to direct executeScript:', err?.message || err);
+    console.warn('[OpenBUA] sendMessageToTab failed, falling back to direct executeScript:', err?.message || err);
   }
 
   // 2. Direct executeScript fallback (never hangs, 100% reliable)

@@ -27,14 +27,16 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
       const summary = await inspectActiveTabForm();
-      const visibleFields = summary.fields.filter(f => f.isVisible).slice(0, 20);
-      const buttons = summary.buttons.slice(0, 8);
+      const totalFields = summary.fields.length;
+      const visibleFields = summary.fields.filter(f => f.isVisible);
+      const fieldsToShow = visibleFields.slice(0, 50);
+      const buttons = summary.buttons.slice(0, 20);
       
-      let textOutput = `Found ${fieldsCount} fields (${summary.fields.filter(f => f.isVisible).length} visible, showing top ${visibleFields.length}) on page "${summary.title}":\n\n` +
+      let textOutput = `Found ${totalFields} fields (${visibleFields.length} visible, showing ${fieldsToShow.length}) on page "${summary.title}":\n\n` +
         `Current URL: ${summary.url}\n` +
         (summary.stepIndicators.length > 0 ? `Step Progress: ${summary.stepIndicators.join(' | ')}\n\n` : '') +
         `Fields:\n` +
-        visibleFields.map(f => {
+        fieldsToShow.map(f => {
           let desc = `- [refId: ${f.refId}] Label: "${f.label || f.name || f.placeholder || 'Unnamed'}" | Type: ${f.type}`;
           if (f.placeholder) desc += ` | Placeholder: "${f.placeholder}"`;
           if (f.value) desc += ` | Current Value: "${f.value}"`;
