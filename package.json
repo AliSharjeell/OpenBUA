@@ -16,6 +16,7 @@
     "@sinclair/typebox": "^0.34.47",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
+    "marked": "^18.0.14",
     "pdfjs-dist": "^4.10.38",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
