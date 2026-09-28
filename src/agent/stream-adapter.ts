@@ -189,11 +189,12 @@ async function streamOpenAI(
     payload.tool_choice = 'auto';
   }
 
-  const isGroq = config.apiKey.trim().startsWith('gsk_') || endpoint.includes('groq.com');
+  // Detect Groq specifically: endpoint must contain groq.com, OR key must start with gsk_ AND endpoint is not a known non-Groq provider.
+  // This ensures users with their own direct Qwen/other provider keys are NEVER affected by Groq-specific limits.
+  const isGroq = endpoint.includes('groq.com') || (config.apiKey.trim().startsWith('gsk_') && !endpoint.includes('dashscope') && !endpoint.includes('openai.com'));
 
-  // If using Groq, clamp max_tokens to prevent OTPM (output tokens per minute) errors.
-  // Groq's free tier has an OTPM limit (e.g. 1000 for qwen3.8-27b, 6000 for llama-3.3-70b).
-  // Without an explicit max_tokens, Groq defaults to model max context (up to 8192), exceeding the 1000 OTPM limit.
+  // If using Groq, clamp max_tokens to prevent OTPM (output tokens per minute) errors on Groq's free tier.
+  // This ONLY applies to Groq-routed requests. Direct Qwen, OpenAI, or other provider keys are unaffected.
   if (isGroq) {
     if ((config.model || '').includes('qwen')) {
       payload.max_tokens = 900;
