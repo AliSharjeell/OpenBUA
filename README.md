@@ -70,18 +70,18 @@ No technical knowledge or coding required. Follow these steps to install OpenBUA
 4. Click **Select Folder**.
 5. OpenBUA is now installed! Click the puzzle icon (Extensions) in your Chrome toolbar and click the pin icon next to **OpenBUA** so it stays visible on your toolbar.
 
-### Step 4: Configure Your AI Key (Or Get a Free Key)
+### Step 4: Configure Your AI Key 
 1. Click the **OpenBUA** icon on your Chrome toolbar to open the Side Panel.
 2. Click the **Settings** tab.
 3. Choose your provider:
    - **OpenAI Compatible**: for OpenAI (ChatGPT), Groq, OpenRouter, DeepSeek, or local Ollama.
    - **Anthropic Compatible**: for Claude or MiniMax.
-4. Paste your API Key and enter your Model ID (e.g. `qwen/qwen3.8-27b`, `gpt-4o`, `claude-3-7-sonnet-20250219`).
+4. Paste your API Key and enter your Model ID (e.g. `qwen/qwen3.8-27b`, `claude-opus-5-5`).
 5. Click **Test Connection** to make sure it works, then click **Save Settings**.
 
 ---
 
-**Disclaimer on Free Groq Keys**: Free-tier Groq accounts enforce severe rate limits on both input tokens per minute (ITPM ~7,000) and output tokens per minute (OTPM ~1,000). Autonomous browser agents inspect full web pages, navigate dynamic apps, and maintain multi-turn tool transcripts, which quickly exceed these free-tier quotas. If you plan on using free Groq keys, they have strict rate limiting and input/output token limits, so it will not work as intended and is not recommended. For fast, reliable, and uninterrupted web automation, use a standard API key from providers like Anthropic (Claude 3.7 Sonnet), OpenAI (GPT-4o), DeepSeek, Qwen (DashScope), or MiniMax.
+**Disclaimer on Free Groq Keys**: Free-tier Groq accounts enforce severe rate limits on both input tokens per minute (ITPM ~7,000) and output tokens per minute (OTPM ~1,000). Autonomous browser agents inspect full web pages, navigate dynamic apps, and maintain multi-turn tool transcripts, which quickly exceed these free-tier quotas. If you plan on using free Groq keys, they have strict rate limiting and input/output token limits, so it will not work as intended and is not recommended. For fast, reliable, and uninterrupted web automation, use a standard API key from providers like Anthropic (Claude Opus 5.5), OpenAI (GPT 6 Astra), DeepSeek, Qwen, or MiniMax.
 
 ---
 
