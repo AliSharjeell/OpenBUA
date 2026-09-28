@@ -71,9 +71,13 @@ export const DEFAULT_GLOBAL_MEMORIES: UserDocument[] = [
   },
 ];
 
-// Helper to get normalized tab key for scoped storage
+// Helper to get tab key for scoped storage
+// Scoped by Chrome tab ID so navigating to a new site/page within the SAME tab maintains chat history forever!
 export function getTabKey(tab?: { id?: number; url?: string; title?: string } | null): string {
   if (!tab) return 'default_tab';
+  if (typeof tab.id === 'number' && tab.id > 0) {
+    return `tab_${tab.id}`;
+  }
   if (tab.url) {
     try {
       const u = new URL(tab.url);
@@ -86,7 +90,7 @@ export function getTabKey(tab?: { id?: number; url?: string; title?: string } | 
       return tab.url.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
     }
   }
-  return tab.id ? `tab_${tab.id}` : 'default_tab';
+  return 'default_tab';
 }
 
 // Chrome storage wrapper with window.localStorage fallback

@@ -323,10 +323,18 @@ export function App() {
     init();
   }, []);
 
-  // When active browser tab changes, load its scoped chat history and tab memories
+  // When active browser tab ID changes, load its scoped chat history and tab memories
+  // If the user navigates to a new URL inside the SAME tab (tabId is identical), keep current messages and memories intact!
   useEffect(() => {
     if (!initialized || !activeBrowserTab) return;
     const tabKey = getTabKey(activeBrowserTab);
+    
+    // If the tabKey didn't change (e.g. user navigated to another website in the SAME tab),
+    // preserve current chat history and do not replace it with an empty array
+    if (currentTabKeyRef.current === tabKey && messages.length > 0) {
+      return;
+    }
+
     currentTabKeyRef.current = tabKey;
 
     let isMounted = true;
@@ -342,7 +350,7 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, [activeBrowserTab?.id, activeBrowserTab?.url, initialized]);
+  }, [activeBrowserTab?.id, initialized]);
 
   // Keep harness synchronized with active memories and current settings
   useEffect(() => {
