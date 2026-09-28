@@ -77,8 +77,12 @@ async function streamOpenAI(
   signal?: AbortSignal
 ): Promise<void> {
   let endpoint = config.baseUrl.trim().replace(/\/+$/, '');
-  if (!endpoint.endsWith('/chat/completions')) {
+  if (endpoint.endsWith('/chat/completions')) {
+    // already ends with /chat/completions
+  } else if (endpoint.endsWith('/v1')) {
     endpoint = `${endpoint}/chat/completions`;
+  } else {
+    endpoint = `${endpoint}/v1/chat/completions`;
   }
 
   // 1. Extract system prompt from context.messages (where pi-agent-core carries it)
@@ -129,14 +133,17 @@ async function streamOpenAI(
 
         toolCalls = m.content
           .filter((c: any) => c.type === 'toolCall')
-          .map((c: any) => ({
-            id: c.id,
-            type: 'function',
-            function: {
-              name: c.name,
-              arguments: typeof c.args === 'string' ? c.args : JSON.stringify(c.args || {}),
-            },
-          }));
+          .map((c: any) => {
+            const rawArgs = c.arguments || c.args || {};
+            return {
+              id: c.id,
+              type: 'function',
+              function: {
+                name: c.name,
+                arguments: typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs),
+              },
+            };
+          });
       }
 
       const msg: any = { role: 'assistant' };
@@ -309,10 +316,11 @@ async function streamOpenAI(
         parsedArgs = { raw: acc.argsStr };
       }
 
-      const toolCall: ToolCall = {
+      const toolCall: any = {
         type: 'toolCall',
         id: acc.id,
         name: acc.name,
+        arguments: parsedArgs,
         args: parsedArgs,
       };
 
@@ -348,7 +356,11 @@ async function streamAnthropic(
   signal?: AbortSignal
 ): Promise<void> {
   let endpoint = config.baseUrl.trim().replace(/\/+$/, '');
-  if (!endpoint.endsWith('/messages')) {
+  if (endpoint.endsWith('/messages')) {
+    // already ends with /messages
+  } else if (endpoint.endsWith('/v1')) {
+    endpoint = `${endpoint}/messages`;
+  } else {
     endpoint = `${endpoint}/v1/messages`;
   }
 
@@ -394,7 +406,7 @@ async function streamAnthropic(
               type: 'tool_use',
               id: block.id,
               name: block.name,
-              input: block.args || {},
+              input: block.arguments || block.args || {},
             });
           }
         }
@@ -514,10 +526,11 @@ async function streamAnthropic(
                 name: event.content_block.name,
                 jsonAccumulator: '',
               };
-              const toolCall: ToolCall = {
+              const toolCall: any = {
                 type: 'toolCall',
                 id: event.content_block.id,
                 name: event.content_block.name,
+                arguments: {},
                 args: {},
               };
               assistantMessage.content.push(toolCall);
@@ -574,8 +587,9 @@ async function streamAnthropic(
                 parsedInput = { raw: currentToolUse.jsonAccumulator };
               }
 
-              const toolCall = assistantMessage.content[currentBlockIndex] as ToolCall;
+              const toolCall = assistantMessage.content[currentBlockIndex] as any;
               if (toolCall) {
+                toolCall.arguments = parsedInput;
                 toolCall.args = parsedInput;
               }
               assistantMessage.stopReason = 'toolUse';
@@ -587,6 +601,7 @@ async function streamAnthropic(
                   type: 'toolCall',
                   id: currentToolUse.id,
                   name: currentToolUse.name,
+                  arguments: parsedInput,
                   args: parsedInput,
                 },
                 partial: assistantMessage,
