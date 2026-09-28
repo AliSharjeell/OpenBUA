@@ -18,8 +18,11 @@ async function buildExtension() {
     sourcemap: false,
   });
 
-  console.log('📋 [3/4] Copying manifest.json and icons to dist/...');
+  console.log('📋 [3/4] Copying manifest.json, test-form.html, and icons to dist/...');
   fs.copyFileSync('manifest.json', 'dist/manifest.json');
+  if (fs.existsSync('test-form.html')) {
+    fs.copyFileSync('test-form.html', 'dist/test-form.html');
+  }
 
   const iconsSrcDir = 'public/icons';
   const iconsDistDir = 'dist/icons';
