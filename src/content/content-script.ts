@@ -377,6 +377,12 @@ function fillFormFields(assignments: Array<{ refId?: string; selector?: string; 
       target = elementRefMap.get(item.refId)!;
     } else if (item.refId) {
       target = document.querySelector(`[data-autoform-ref="${CSS.escape(item.refId)}"]`);
+      if (!target) {
+        target = document.getElementById(item.refId);
+      }
+      if (!target) {
+        target = document.querySelector(`[name="${CSS.escape(item.refId)}"]`);
+      }
     } else if (item.selector) {
       target = document.querySelector(item.selector);
     }
