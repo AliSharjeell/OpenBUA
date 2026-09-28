@@ -514,6 +514,14 @@ async function streamAnthropic(
                 name: event.content_block.name,
                 jsonAccumulator: '',
               };
+              const toolCall: ToolCall = {
+                type: 'toolCall',
+                id: event.content_block.id,
+                name: event.content_block.name,
+                args: {},
+              };
+              assistantMessage.content.push(toolCall);
+              currentBlockIndex = assistantMessage.content.length - 1;
               stream.push({
                 type: 'toolcall_start',
                 contentIndex: currentBlockIndex,
@@ -536,7 +544,14 @@ async function streamAnthropic(
               });
             } else if (currentBlockType === 'tool_use' && event.delta?.type === 'input_json_delta') {
               if (currentToolUse) {
-                currentToolUse.jsonAccumulator += event.delta.partial_json || '';
+                const delta = event.delta.partial_json || '';
+                currentToolUse.jsonAccumulator += delta;
+                stream.push({
+                  type: 'toolcall_delta',
+                  contentIndex: currentBlockIndex,
+                  delta,
+                  partial: assistantMessage,
+                });
               }
             }
             break;
@@ -559,19 +574,21 @@ async function streamAnthropic(
                 parsedInput = { raw: currentToolUse.jsonAccumulator };
               }
 
-              const toolCall: ToolCall = {
-                type: 'toolCall',
-                id: currentToolUse.id,
-                name: currentToolUse.name,
-                args: parsedInput,
-              };
-
-              assistantMessage.content.push(toolCall);
+              const toolCall = assistantMessage.content[currentBlockIndex] as ToolCall;
+              if (toolCall) {
+                toolCall.args = parsedInput;
+              }
               assistantMessage.stopReason = 'toolUse';
+
               stream.push({
                 type: 'toolcall_end',
                 contentIndex: currentBlockIndex,
-                toolCall,
+                toolCall: toolCall || {
+                  type: 'toolCall',
+                  id: currentToolUse.id,
+                  name: currentToolUse.name,
+                  args: parsedInput,
+                },
                 partial: assistantMessage,
               });
               currentToolUse = null;
