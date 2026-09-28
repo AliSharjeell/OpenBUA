@@ -23,20 +23,21 @@ import {
 // 1. Inspect Form Elements on Current Tab
 const GetActiveTabFormSchema = Type.Object({
   includeButtons: Type.Optional(Type.Boolean({ description: 'Whether to include action buttons (Next, Submit, etc.)' })),
+  selector: Type.Optional(Type.String({ description: 'Optional CSS selector to scope inspection to a specific dialog or container (e.g. "[role=dialog]" or ".M9")' })),
 });
 
 export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
   name: 'get_active_tab_form',
   label: 'Inspect Active Form',
-  description: 'Inspect all form fields, input elements, textareas, dropdown selects, buttons, and multi-step indicators on the current tab.',
+  description: 'Inspect all form fields, input elements, textareas, dropdown selects, buttons, and multi-step indicators on the current tab. Automatically prioritizes active modals, popups, and compose windows.',
   parameters: GetActiveTabFormSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
-      const summary = await inspectActiveTabForm();
+      const summary = await inspectActiveTabForm(params.selector);
       const totalFields = summary.fields.length;
       const visibleFields = summary.fields.filter(f => f.isVisible);
-      const fieldsToShow = visibleFields.slice(0, 50);
-      const buttons = summary.buttons.slice(0, 20);
+      const fieldsToShow = visibleFields.slice(0, 100);
+      const buttons = summary.buttons.slice(0, 30);
       
       let textOutput = `Found ${totalFields} fields (${visibleFields.length} visible, showing ${fieldsToShow.length}) on page "${summary.title}":\n\n` +
         `Current URL: ${summary.url}\n` +
@@ -46,6 +47,7 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
           let desc = `- [refId: ${f.refId}] Label: "${f.label || f.name || f.placeholder || 'Unnamed'}" | Type: ${f.type}`;
           if (f.placeholder) desc += ` | Placeholder: "${f.placeholder}"`;
           if (f.value) desc += ` | Current Value: "${f.value}"`;
+          if (f.sectionHint) desc += ` | Section: "${f.sectionHint}"`;
           if (f.required) desc += ` (REQUIRED)`;
           if (f.options && f.options.length > 0) {
             desc += ` | Options: [${f.options.map(o => `"${o.label}" (value: "${o.value}")`).slice(0, 6).join(', ')}]`;
@@ -239,9 +241,16 @@ export const captureTabScreenshotTool: AgentTool<typeof CaptureTabScreenshotSche
   execute: async (): Promise<AgentToolResult> => {
     try {
       const dataUrl = await captureTabScreenshot();
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      const mimeType = match ? match[1] : 'image/jpeg';
+      const base64Data = match ? match[2] : dataUrl;
+
       return {
-        content: [{ type: 'text', text: 'Screenshot captured successfully.' }],
-        details: { dataUrl: dataUrl.slice(0, 100) + '...' },
+        content: [
+          { type: 'text', text: 'Screenshot captured successfully of current browser tab.' },
+          { type: 'image', data: base64Data, mimeType } as any,
+        ],
+        details: { dataUrl: dataUrl.slice(0, 100) + '...', size: base64Data.length },
       };
     } catch (err: any) {
       return {

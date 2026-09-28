@@ -92,6 +92,17 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - Example: scratchpad({ action: 'append', content: '1. Yann LeCun - Meta AI / NYU - World models architecture\n2. David Ha - Sakana AI...' })
    - This ensures you never lose collected data as you navigate across multiple tabs or pages.
    - Use 'scratchpad' action 'read' to review your progress, verify your count, and format your final response to the user.
+8. EMAIL & WEBMAIL AUTOMATION (Gmail, Outlook, Webmail):
+   - When asked to compose, draft, or send an email:
+   - If Gmail or webmail is already open or after navigating to it:
+   - Click the 'Compose' button via 'click_element' (text: 'Compose') if the compose window is not yet open.
+   - Call 'get_active_tab_form' to inspect the compose dialog fields. Active modal dialogs (like Gmail's 'New Message' compose window) are automatically prioritized at the very top of the fields list (af_1, af_2, etc.).
+   - Fill the fields using 'fill_form_fields':
+     * To recipient: refId from get_active_tab_form (or selector: 'input[aria-label*="To recipients" i]')
+     * Subject: refId from get_active_tab_form (or selector: 'input[name="subjectbox"]')
+     * Message body: refId from get_active_tab_form (or selector: 'div[role="textbox"][aria-label*="Message Body" i]')
+   - Review DOM verifications in the tool response.
+   - If the user instructed you to send the email, click the 'Send' button via 'click_element' (text: 'Send').
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();

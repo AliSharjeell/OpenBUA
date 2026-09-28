@@ -114,10 +114,25 @@ export async function sendMessageToTab<T = any>(tabId: number, message: any, tim
 }
 
 // In-page fallback script for direct DOM inspection without relying on message ports
-function inPageInspectForm(): PageFormSummary {
-  const elements = document.querySelectorAll<HTMLElement>(
-    'input:not([type="hidden"]), textarea, select, [role="textbox"], [role="combobox"], [role="checkbox"]'
-  );
+function inPageInspectForm(containerSelector?: string): PageFormSummary {
+  let root: ParentNode = document;
+  if (containerSelector) {
+    const customRoot = document.querySelector(containerSelector);
+    if (customRoot) root = customRoot;
+  }
+
+  const rawElements = Array.from(root.querySelectorAll<HTMLElement>(
+    'input:not([type="hidden"]), textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"], [role="combobox"], [role="checkbox"]'
+  ));
+
+  // Prioritize active dialogs / modals
+  const elements = rawElements.sort((a, b) => {
+    const aInDialog = a.closest('[role="dialog"], dialog, .M9, [aria-modal="true"], .modal') ? 1000 : 0;
+    const bInDialog = b.closest('[role="dialog"], dialog, .M9, [aria-modal="true"], .modal') ? 1000 : 0;
+    const aIsText = a.tagName === 'TEXTAREA' || a.isContentEditable || a.getAttribute('role') === 'textbox' ? 100 : 0;
+    const bIsText = b.tagName === 'TEXTAREA' || b.isContentEditable || b.getAttribute('role') === 'textbox' ? 100 : 0;
+    return (bInDialog + bIsText) - (aInDialog + aIsText);
+  });
 
   const fields: FormElementDescriptor[] = [];
   let counter = 0;
@@ -499,7 +514,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
 }
 
 // Inspect Form on Active Tab
-export async function inspectActiveTabForm(): Promise<PageFormSummary> {
+export async function inspectActiveTabForm(selector?: string): Promise<PageFormSummary> {
   const activeTab = await getActiveTab();
   if (!activeTab || !activeTab.id) {
     return getMockFormSummary();
@@ -511,7 +526,7 @@ export async function inspectActiveTabForm(): Promise<PageFormSummary> {
 
   // 1. Try sendMessageToTab first with generous 4-second timeout for rich SPAs
   try {
-    const response = await sendMessageToTab(activeTab.id, { action: 'INSPECT_PAGE_FORM' }, 4000);
+    const response = await sendMessageToTab(activeTab.id, { action: 'INSPECT_PAGE_FORM', selector }, 4000);
     if (response && response.success && response.data) {
       return response.data;
     }
@@ -525,6 +540,7 @@ export async function inspectActiveTabForm(): Promise<PageFormSummary> {
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPageInspectForm,
+        args: selector ? [selector] : [],
       });
       if (results && results[0] && results[0].result) {
         return results[0].result as PageFormSummary;
@@ -811,20 +827,21 @@ export async function navigateActiveTab(url: string): Promise<boolean> {
 
 export async function captureTabScreenshot(): Promise<string> {
   if (typeof chrome === 'undefined' || !chrome.tabs) {
-    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    return 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
   }
 
   const activeTab = await getActiveTab();
   const windowId = activeTab?.windowId;
 
   return new Promise((resolve, reject) => {
-    const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'png' };
+    // Use JPEG format with quality 80 for lightweight, fast screenshots (~150KB instead of 4MB PNG)
+    const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'jpeg', quality: 80 };
     
     // When called from a side panel, passing the active tab's windowId ensures capturing the browser window rather than side panel
     const captureCallback = (dataUrl?: string) => {
       if (chrome.runtime.lastError || !dataUrl) {
         // Fallback without windowId if window-specific call failed
-        chrome.tabs.captureVisibleTab({ format: 'png' }, (fallbackDataUrl) => {
+        chrome.tabs.captureVisibleTab(options, (fallbackDataUrl) => {
           if (chrome.runtime.lastError || !fallbackDataUrl) {
             reject(new Error(chrome.runtime.lastError?.message || 'Failed to capture tab screenshot'));
           } else {

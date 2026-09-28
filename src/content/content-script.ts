@@ -193,14 +193,70 @@ function readElementValue(el: HTMLElement): string {
   return (el.innerText || el.textContent || '').trim();
 }
 
-function inspectAllFormElements(): PageFormSummary {
+function getElementPriority(el: HTMLElement): number {
+  let score = 0;
+  // 1. Elements inside an active modal, dialog, or floating compose window get highest priority (e.g. Gmail Compose, modals, popups)
+  const inDialog = el.closest('[role="dialog"], dialog, .M9, [aria-modal="true"], .modal, div[aria-label*="New Message" i], div[aria-label*="Compose" i]');
+  if (inDialog) {
+    score += 1000;
+  }
+
+  // 2. Focused element gets bonus
+  if (document.activeElement === el || el.contains(document.activeElement)) {
+    score += 500;
+  }
+
+  // 3. Rich text, textarea, and main inputs get priority over generic table checkboxes
+  const tagName = el.tagName.toLowerCase();
+  const type = (el.getAttribute('type') || '').toLowerCase();
+  const isEditable = el.isContentEditable || el.getAttribute('role') === 'textbox';
+
+  if (isEditable || tagName === 'textarea') {
+    score += 200;
+  } else if (tagName === 'input' && !['checkbox', 'radio'].includes(type)) {
+    score += 150;
+  } else if (tagName === 'select') {
+    score += 100;
+  } else if (['checkbox', 'radio'].includes(type)) {
+    // If inside a table row (e.g. bulk email list checkboxes), lower score so it doesn't crowd out form fields
+    if (el.closest('tr, [role="row"], table')) {
+      score += 10;
+    } else {
+      score += 50;
+    }
+  }
+
+  return score;
+}
+
+function inspectAllFormElements(containerSelector?: string): PageFormSummary {
   // Clear stale references
   elementRefMap.clear();
   refCounter = 0;
 
-  const elements = document.querySelectorAll<HTMLElement>(
+  let root: ParentNode = document;
+  if (containerSelector) {
+    const customRoot = document.querySelector(containerSelector);
+    if (customRoot) root = customRoot;
+  }
+
+  // Also auto-detect active modal/dialog if one exists and no specific selector was provided
+  if (!containerSelector) {
+    const activeModal = document.querySelector<HTMLElement>(
+      'div[role="dialog"]:not([aria-hidden="true"]), dialog[open], .M9, div[aria-label*="New Message" i], div[aria-label*="Compose" i]'
+    );
+    // If an active compose window/modal is currently open, note it
+    if (activeModal && isElementVisible(activeModal)) {
+      // We will sort modal elements first via getElementPriority
+    }
+  }
+
+  const rawElements = Array.from(root.querySelectorAll<HTMLElement>(
     'input:not([type="hidden"]), textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"], [role="combobox"], [role="checkbox"], ytd-commentbox, #contenteditable-root, #simplebox-placeholder, #placeholder-area'
-  );
+  ));
+
+  // Sort elements by priority: active dialog/modal first, text inputs/textareas second, generic list checkboxes last
+  const elements = rawElements.sort((a, b) => getElementPriority(b) - getElementPriority(a));
 
   const fields: FormElementDescriptor[] = [];
 
@@ -227,11 +283,18 @@ function inspectAllFormElements(): PageFormSummary {
     const name = elem.getAttribute('name') || '';
     const placeholder = elem.getAttribute('placeholder') || '';
     const label = findLabelText(elem);
-    const sectionHint = findSectionHint(elem);
+    let sectionHint = findSectionHint(elem);
     const ariaLabel = elem.getAttribute('aria-label') || '';
     const required = elem.hasAttribute('required') || elem.getAttribute('aria-required') === 'true';
     const disabled = (elem as HTMLInputElement).disabled || elem.getAttribute('aria-disabled') === 'true';
     const readonly = (elem as HTMLInputElement).readOnly || elem.getAttribute('aria-readonly') === 'true';
+
+    // Enhance section hint if inside an active dialog/modal (e.g. Gmail "New Message")
+    const dialogParent = elem.closest<HTMLElement>('[role="dialog"], dialog, .M9, [aria-modal="true"], div[aria-label*="New Message" i], div[aria-label*="Compose" i]');
+    if (dialogParent) {
+      const dialogTitle = dialogParent.getAttribute('aria-label') || dialogParent.querySelector('h1, h2, h3, h4, [role="heading"], .aYF, .nH')?.textContent?.trim() || 'Active Modal/Dialog';
+      sectionHint = sectionHint ? `${dialogTitle} > ${sectionHint}` : dialogTitle;
+    }
 
     let value = readElementValue(elem);
     let checked: boolean | undefined = undefined;
@@ -273,10 +336,17 @@ function inspectAllFormElements(): PageFormSummary {
     });
   });
 
-  // Collect action buttons (Next, Submit, Continue, Back, Comment, Post, etc.)
-  const buttonElements = document.querySelectorAll<HTMLElement>(
+  // Collect action buttons (Next, Submit, Send, Continue, Back, Comment, Post, etc.)
+  const rawButtonElements = Array.from(root.querySelectorAll<HTMLElement>(
     'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"], ytd-button-renderer, yt-button-shape'
-  );
+  ));
+
+  // Prioritize buttons inside active dialog/modal first
+  const buttonElements = rawButtonElements.sort((a, b) => {
+    const aInDialog = a.closest('[role="dialog"], dialog, .M9, [aria-modal="true"], .modal') ? 100 : 0;
+    const bInDialog = b.closest('[role="dialog"], dialog, .M9, [aria-modal="true"], .modal') ? 100 : 0;
+    return bInDialog - aInDialog;
+  });
 
   const buttons: Array<{ refId: string; text: string; type: string; isSubmit: boolean; isNext: boolean; isPrevious: boolean }> = [];
 
@@ -286,11 +356,13 @@ function inspectAllFormElements(): PageFormSummary {
       btn.textContent ||
       (btn as HTMLInputElement).value ||
       btn.getAttribute('aria-label') ||
+      btn.getAttribute('data-tooltip') ||
+      btn.getAttribute('title') ||
       ''
     ).trim();
     if (!text || text.length > 50) return;
 
-    const lower = text.toLowerCase();
+    const lower = `${text} ${btn.getAttribute('data-tooltip') || ''} ${btn.getAttribute('title') || ''}`.toLowerCase();
     const isSubmit =
       lower.includes('submit') ||
       lower.includes('comment') ||
@@ -377,6 +449,23 @@ function setNativeValue(element: HTMLElement, value: string): void {
       } else {
         input.value = value;
       }
+
+      // For email inputs, comboboxes, and recipient fields (e.g. Gmail To / Cc / Bcc)
+      // Dispatch Enter and Tab keys to trigger recipient chip creation
+      const isRecipientInput =
+        type === 'email' ||
+        element.getAttribute('role') === 'combobox' ||
+        (element.getAttribute('aria-label') || '').toLowerCase().includes('to') ||
+        (element.getAttribute('aria-label') || '').toLowerCase().includes('recipient') ||
+        element.hasAttribute('peoplekit-id') ||
+        element.classList.contains('agP');
+
+      if (isRecipientInput) {
+        const keyInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+        input.dispatchEvent(new KeyboardEvent('keydown', keyInit));
+        input.dispatchEvent(new KeyboardEvent('keypress', keyInit));
+        input.dispatchEvent(new KeyboardEvent('keyup', keyInit));
+      }
     }
   } else if (tagName === 'textarea') {
     const textarea = element as HTMLTextAreaElement;
@@ -419,7 +508,7 @@ function setNativeValue(element: HTMLElement, value: string): void {
       select.value = value;
     }
   } else if (isContentEditable) {
-    // Rich editor (YouTube #contenteditable-root, Twitter/X, Discord, Slack, Reddit)
+    // Rich editor (YouTube #contenteditable-root, Gmail Message Body, Twitter/X, Discord, Slack, Reddit)
     // Select all existing content and replace via execCommand or textContent
     element.focus();
     const selection = window.getSelection();
@@ -458,7 +547,7 @@ function setNativeValue(element: HTMLElement, value: string): void {
     element.textContent = value;
   }
 
-  // Dispatch full event sequence to satisfy React, Vue, Angular, Svelte, Polymer
+  // Dispatch full event sequence to satisfy React, Vue, Angular, Svelte, Polymer, Closure
   element.dispatchEvent(new Event('focus', { bubbles: true }));
   element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
   element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
@@ -481,26 +570,103 @@ function flashHighlight(element: HTMLElement) {
   }, 1200);
 }
 
+function findTargetElement(refId?: string, selector?: string): HTMLElement | null {
+  if (refId && elementRefMap.has(refId)) {
+    return elementRefMap.get(refId)!;
+  }
+  if (refId) {
+    const target =
+      document.querySelector<HTMLElement>(`[data-autoform-ref="${CSS.escape(refId)}"]`) ||
+      document.getElementById(refId) ||
+      document.querySelector<HTMLElement>(`[name="${CSS.escape(refId)}"]`);
+    if (target) return target;
+  }
+
+  if (selector) {
+    try {
+      const target = document.querySelector<HTMLElement>(selector);
+      if (target) return target;
+    } catch {
+      // Invalid selector syntax, continue to semantic fallback
+    }
+
+    const sLower = selector.toLowerCase();
+
+    // 1. Email / "To" recipient fallback (Gmail, Yahoo, Outlook, contact forms)
+    if (sLower.includes('to') || sLower.includes('recipient')) {
+      const emailCandidates = [
+        'input[aria-label*="To recipients" i]',
+        'input[aria-label*="To" i]',
+        '[role="combobox"][aria-label*="To" i]',
+        '[role="combobox"][aria-label*="recipient" i]',
+        'input[peoplekit-id]',
+        'input.agP',
+        'div[aria-label*="To recipients" i] input',
+        'div[role="dialog"] input[type="text"]',
+        'div[role="dialog"] [role="combobox"]',
+        'input[name="to"]',
+        'textarea[name="to"]',
+        'input[type="email"]',
+      ];
+      for (const sel of emailCandidates) {
+        try {
+          const el = document.querySelector<HTMLElement>(sel);
+          if (el && isElementVisible(el)) return el;
+        } catch {}
+      }
+    }
+
+    // 2. Subject field fallback
+    if (sLower.includes('subject')) {
+      const subjectCandidates = [
+        'input[name="subjectbox"]',
+        'input[name="subject"]',
+        'input[aria-label*="Subject" i]',
+        'input[placeholder*="Subject" i]',
+        'div[role="dialog"] input[name*="subject" i]',
+      ];
+      for (const sel of subjectCandidates) {
+        try {
+          const el = document.querySelector<HTMLElement>(sel);
+          if (el && isElementVisible(el)) return el;
+        } catch {}
+      }
+    }
+
+    // 3. Message Body / Content fallback
+    if (sLower.includes('body') || sLower.includes('message') || sLower.includes('content') || sLower.includes('comment')) {
+      const bodyCandidates = [
+        'div[role="textbox"][aria-label*="Message Body" i]',
+        'div[role="textbox"][aria-label*="Message" i]',
+        'div[role="textbox"][aria-label*="Body" i]',
+        'div[role="dialog"] div[contenteditable="true"]',
+        'div[role="dialog"] [role="textbox"]',
+        'div[contenteditable="true"][aria-label*="Message" i]',
+        'div[contenteditable="true"]',
+        'textarea[name="body"]',
+        'textarea[name="message"]',
+        '#contenteditable-root',
+        'ytd-commentbox #contenteditable-root',
+      ];
+      for (const sel of bodyCandidates) {
+        try {
+          const el = document.querySelector<HTMLElement>(sel);
+          if (el && isElementVisible(el)) return el;
+        } catch {}
+      }
+    }
+  }
+
+  return null;
+}
+
 function fillFormFields(assignments: Array<{ refId?: string; selector?: string; value: string }>): FormFillResult {
   let successCount = 0;
   const errors: string[] = [];
   const verifications: FieldFillVerification[] = [];
 
   for (const item of assignments) {
-    let target: HTMLElement | null = null;
-    if (item.refId && elementRefMap.has(item.refId)) {
-      target = elementRefMap.get(item.refId)!;
-    } else if (item.refId) {
-      target = document.querySelector(`[data-autoform-ref="${CSS.escape(item.refId)}"]`);
-      if (!target) {
-        target = document.getElementById(item.refId);
-      }
-      if (!target) {
-        target = document.querySelector(`[name="${CSS.escape(item.refId)}"]`);
-      }
-    } else if (item.selector) {
-      target = document.querySelector(item.selector);
-    }
+    const target = findTargetElement(item.refId, item.selector);
 
     if (!target) {
       const err = `Field not found: ${item.refId || item.selector}`;
@@ -521,19 +687,27 @@ function fillFormFields(assignments: Array<{ refId?: string; selector?: string; 
 
       // Verify the value in DOM immediately after setting
       const actualValue = readElementValue(target);
-      const isVerified = actualValue.length > 0 && (
-        actualValue.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 15)) ||
-        item.value.toLowerCase().includes(actualValue.toLowerCase().trim().slice(0, 15)) ||
-        actualValue === item.value ||
-        (target as HTMLInputElement).type === 'checkbox' ||
-        (target as HTMLInputElement).type === 'radio'
-      );
+
+      // In Gmail and email clients, setting a recipient creates a chip and clears the input
+      const parentContainer = target.closest('tr, td, .form-group, div.M9, div[role="dialog"], div[aria-label*="To" i]');
+      const containerText = parentContainer ? (parentContainer.innerText || parentContainer.textContent || '') : '';
+      const isRecipientChip = containerText.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 10));
+
+      const isVerified =
+        isRecipientChip ||
+        (actualValue.length > 0 && (
+          actualValue.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 15)) ||
+          item.value.toLowerCase().includes(actualValue.toLowerCase().trim().slice(0, 15)) ||
+          actualValue === item.value ||
+          (target as HTMLInputElement).type === 'checkbox' ||
+          (target as HTMLInputElement).type === 'radio'
+        ));
 
       verifications.push({
         refId: item.refId || '',
         selector: item.selector,
         requestedValue: item.value,
-        actualValue,
+        actualValue: isRecipientChip ? `[Recipient Chip Created: "${item.value}"]` : actualValue,
         verified: isVerified,
         elementFound: true,
       });
@@ -570,23 +744,31 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   } else if (selector) {
     target = document.querySelector(selector);
   } else if (text) {
-    const candidates = Array.from(document.querySelectorAll<HTMLElement>(
-      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder'
+    const rawCandidates = Array.from(document.querySelectorAll<HTMLElement>(
+      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, [data-tooltip]'
     ));
+
+    // Prioritize candidates inside an active modal / dialog first
+    const candidates = rawCandidates.sort((a, b) => {
+      const aInDialog = a.closest('[role="dialog"], dialog, .M9, [aria-modal="true"], .modal') ? 100 : 0;
+      const bInDialog = b.closest('[role="dialog"], dialog, .M9, [aria-modal="true"], .modal') ? 100 : 0;
+      return bInDialog - aInDialog;
+    });
+
     const tLower = text.toLowerCase().trim();
 
-    // 1. Exact match (highest priority — e.g. exact "Comment" button)
+    // 1. Exact match (highest priority — e.g. exact "Send" or "Comment" button)
     target = candidates.find(c => {
-      const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').toLowerCase().trim();
-      return val === tLower;
+      const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').toLowerCase().trim();
+      return val === tLower || val.startsWith(tLower);
     }) || null;
 
-    // 2. Exact word boundary match (e.g. matching "Comment" without matching "Sort by")
+    // 2. Exact word boundary match
     if (!target) {
       try {
         const wordRegex = new RegExp(`(^|\\s|[^a-zA-Z0-9])${tLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\s|[^a-zA-Z0-9])`, 'i');
         target = candidates.find(c => {
-          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').trim();
+          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').trim();
           return wordRegex.test(val);
         }) || null;
       } catch {
@@ -598,7 +780,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
     if (!target) {
       const matches = candidates
         .map(c => {
-          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').toLowerCase().trim();
+          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').toLowerCase().trim();
           return { elem: c, val, len: val.length };
         })
         .filter(item => item.val.includes(tLower))
@@ -613,7 +795,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
     return { success: false, message: `Element to click not found (refId: ${refId}, selector: ${selector}, text: ${text})` };
   }
 
-  // If clicked on an inner element (like yt-formatted-string), find the clickable parent button/anchor
+  // If clicked on an inner element (like yt-formatted-string or span), find the clickable parent button/anchor
   const clickable = target.closest<HTMLElement>('a[href], button, [role="button"], [contenteditable="true"]') || target;
 
   clickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -622,7 +804,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   clickable.focus();
   clickable.click();
 
-  return { success: true, message: `Clicked element successfully (${clickable.tagName.toLowerCase()}: "${(clickable.textContent || clickable.getAttribute('aria-label') || '').trim().slice(0, 40)}")` };
+  return { success: true, message: `Clicked element successfully (${clickable.tagName.toLowerCase()}: "${(clickable.textContent || clickable.getAttribute('aria-label') || clickable.getAttribute('data-tooltip') || '').trim().slice(0, 40)}")` };
 }
 
 function scrollPage(direction: 'up' | 'down' | 'top' | 'bottom' | 'element', selector?: string): { success: boolean } {
@@ -652,7 +834,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   try {
     switch (request.action) {
       case 'INSPECT_PAGE_FORM': {
-        const summary = inspectAllFormElements();
+        const summary = inspectAllFormElements(request.selector);
         sendResponse({ success: true, data: summary });
         break;
       }
@@ -676,6 +858,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
 
       case 'GET_PAGE_TEXT': {
+        // 0. Extract active modal / dialog text (Gmail compose, popups, overlays)
+        const activeModals = Array.from(document.querySelectorAll<HTMLElement>(
+          'div[role="dialog"]:not([aria-hidden="true"]), dialog[open], .M9, div[aria-label*="New Message" i], div[aria-label*="Compose" i]'
+        ));
+        let modalExcerpt = '';
+        if (activeModals.length > 0) {
+          modalExcerpt = activeModals
+            .map((m) => (m.innerText || m.textContent || '').trim())
+            .filter((t) => t.length > 0)
+            .join('\n\n');
+        }
+
         // 1. Gather interactive / item links (especially video links, search results, nav links)
         const links: string[] = [];
         const seenLinks = new Set<string>();
@@ -715,6 +909,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         mainText = mainText.replace(/\n\s*\n\s*\n/g, '\n\n').slice(0, 10000);
 
         let formatted = `Title: ${document.title}\nURL: ${window.location.href}\n\n`;
+        if (modalExcerpt) {
+          formatted += `### Active Dialog / Compose Window Content:\n${modalExcerpt}\n\n`;
+        }
         if (links.length > 0) {
           formatted += `### Key Links / Videos on Page:\n${links.join('\n')}\n\n`;
         }

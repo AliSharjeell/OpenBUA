@@ -111,7 +111,33 @@ async function streamOpenAI(
   // Standard providers (Mimo, DeepSeek, OpenAI, Claude, OpenRouter, MiniMax) are NEVER throttled or compacted.
   const isGroq = endpoint.includes('api.groq.com/openai/v1/chat/completions');
 
+  const flushPendingImages = (targetArray: any[]) => {
+    if (pendingToolImages.length > 0 && !isGroq) {
+      for (const img of pendingToolImages) {
+        targetArray.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: '[Screenshot of current browser tab for visual inspection]:' },
+            {
+              type: 'image_url',
+              image_url: {
+                url: `data:${img.mimeType || 'image/jpeg'};base64,${img.data}`,
+              },
+            },
+          ],
+        });
+      }
+      pendingToolImages.length = 0;
+    }
+  };
+
+  const pendingToolImages: Array<{ data: string; mimeType?: string }> = [];
+
   for (const m of context.messages) {
+    if (m.role !== 'toolResult') {
+      flushPendingImages(messages);
+    }
+
     if (m.role === 'system') {
       // Already captured in leading system message
       continue;
@@ -159,10 +185,18 @@ async function streamOpenAI(
       messages.push(msg);
     } else if (m.role === 'toolResult') {
       let text = Array.isArray(m.content)
-        ? m.content.map((c: any) => c.text || '').join('\n')
+        ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('\n')
         : typeof m.content === 'string'
         ? m.content
         : JSON.stringify(m.content || '');
+
+      const imageBlocks = Array.isArray(m.content)
+        ? m.content.filter((c: any) => c.type === 'image' && c.data)
+        : [];
+
+      if (imageBlocks.length > 0) {
+        pendingToolImages.push(...imageBlocks);
+      }
 
       // ONLY cap tool output for Groq free-tier due to its severe 7000 ITPM limit. Standard models get full tool output!
       if (isGroq && text.length > 2500) {
@@ -172,10 +206,13 @@ async function streamOpenAI(
       messages.push({
         role: 'tool',
         tool_call_id: m.toolCallId,
-        content: text,
+        content: text || 'Success',
       });
     }
   }
+
+  // Flush any remaining tool images at end of conversation history
+  flushPendingImages(messages);
 
   // ONLY compact older tool results in history for Groq free tier. Standard models (Mimo, GPT-4o, Claude) keep full history!
   if (isGroq) {
@@ -575,11 +612,33 @@ async function streamAnthropic(
 
       rawMessages.push({ role: 'assistant', content: contentBlocks });
     } else if (m.role === 'toolResult') {
-      const text = Array.isArray(m.content)
-        ? m.content.map((c: any) => c.text || '').join('\n')
+      const textParts = Array.isArray(m.content)
+        ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('\n')
         : typeof m.content === 'string'
         ? m.content
         : JSON.stringify(m.content || '');
+
+      const imageBlocks = Array.isArray(m.content)
+        ? m.content.filter((c: any) => c.type === 'image' && c.data)
+        : [];
+
+      const toolResultContent: any[] = [];
+      if (textParts.trim()) {
+        toolResultContent.push({ type: 'text', text: textParts });
+      }
+      for (const img of imageBlocks) {
+        toolResultContent.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: img.mimeType || 'image/jpeg',
+            data: img.data,
+          },
+        });
+      }
+      if (toolResultContent.length === 0) {
+        toolResultContent.push({ type: 'text', text: 'Success' });
+      }
 
       rawMessages.push({
         role: 'user',
@@ -587,7 +646,7 @@ async function streamAnthropic(
           {
             type: 'tool_result',
             tool_use_id: m.toolCallId,
-            content: text || 'Success',
+            content: toolResultContent,
           },
         ],
       });
