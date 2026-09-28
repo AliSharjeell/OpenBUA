@@ -210,7 +210,7 @@ export function ChatView({
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
             <div>
-              <h3 className="font-semibold text-zinc-200 text-xs">openBUA Ready</h3>
+              <h3 className="font-semibold text-zinc-200 text-xs">OpenBUA Ready</h3>
               <p className="text-[11px] text-zinc-400 mt-1 max-w-[260px]">
                 Autonomous browser use agent using your active browser to research, interact, and fill forms.
               </p>
@@ -475,7 +475,7 @@ export function ChatView({
           <Textarea
             ref={textareaRef}
             rows={1}
-            placeholder="Ask openBUA"
+            placeholder="Ask OpenBUA"
             value={input}
             onChange={(e) => {
               setInput(e.target.value);

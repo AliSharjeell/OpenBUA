@@ -1,14 +1,14 @@
-# openBUA (Open Browser Use Agent)
+# OpenBUA (Open Browser Use Agent)
 
-**openBUA** is an open-source, autonomous browser use Chrome Extension (Manifest V3) that runs directly inside your everyday browser. Unlike cloud browser-use tools that require spun-up headless containers, login bypass proxies, or remote servers, openBUA operates right inside your existing Chrome instance with all your active sessions, cookies, and logins already available.
+**OpenBUA** is an open-source, autonomous browser use Chrome Extension (Manifest V3) that runs directly inside your everyday browser. Unlike cloud browser-use tools that require spun-up headless containers, login bypass proxies, or remote servers, OpenBUA operates right inside your existing Chrome instance with all your active sessions, cookies, and logins already available.
 
-Built with **`@earendil-works/pi-agent-core`** and **`@earendil-works/pi-ai`**, openBUA equips AI models with real-time DOM perception, intelligent multi-step navigation, native synthetic event form-filling, and local persistent memory.
+Built with **`@earendil-works/pi-agent-core`** and **`@earendil-works/pi-ai`**, OpenBUA equips AI models with real-time DOM perception, intelligent multi-step navigation, native synthetic event form-filling, and local persistent memory.
 
 ---
 
-## What Can openBUA Do?
+## What Can OpenBUA Do?
 
-Because openBUA runs directly in your existing browser, it can perform complex autonomous workflows without needing you to log in again:
+Because OpenBUA runs directly in your existing browser, it can perform complex autonomous workflows without needing you to log in again:
 
 - **Autonomous Web Research & Lead Generation**:
   - Example: *"Search LinkedIn for 'world models PhD' researchers, extract profiles across pages, and compile a structured table with names, headlines, and locations."*
@@ -25,7 +25,7 @@ Because openBUA runs directly in your existing browser, it can perform complex a
 
 ## Key Features
 
-- **Runs in Your Existing Browser**: Zero headless emulators or cloud browsers. openBUA leverages your everyday authenticated sessions (Google, GitHub, LinkedIn, Twitter/X, internal company portals).
+- **Runs in Your Existing Browser**: Zero headless emulators or cloud browsers. OpenBUA leverages your everyday authenticated sessions (Google, GitHub, LinkedIn, Twitter/X, internal company portals).
 - **100% Client-Side & Zero Backend**: Executes completely client-side in Chrome's Side Panel. Your API keys, browsing data, and documents never touch a third-party server.
 - **Multi-Tab Chat Sessions**: Create multiple concurrent chat sessions with individual persistent history stored forever in `chrome.storage.local`. Navigating or reloading pages in Chrome never wipes your chat history.
 - **Hybrid Memory Architecture**:
@@ -53,7 +53,7 @@ Because openBUA runs directly in your existing browser, it can perform complex a
 ## Architecture
 
 ```
-openBUA/
+OpenBUA/
 ├── manifest.json              # Chrome Manifest V3 configuration
 ├── sidepanel.html             # Side Panel HTML entry
 ├── vite.config.ts             # Vite build configuration
@@ -110,10 +110,10 @@ This compiles:
 2. Enable the **Developer mode** toggle in the top-right corner.
 3. Click **Load unpacked** in the top-left.
 4. Select the `dist` folder inside this project directory.
-5. Pin **openBUA** to your Chrome toolbar.
+5. Pin **OpenBUA** to your Chrome toolbar.
 
 ### 3. Configure Your Model (BYOK)
-1. Click the **openBUA** icon to open the Side Panel.
+1. Click the **OpenBUA** icon to open the Side Panel.
 2. Navigate to the **Settings** tab.
 3. Select your provider (**OpenAI Compatible** or **Anthropic Compatible**).
 4. Enter your API Key, Base URL (optional), and Model ID (e.g. `claude-3-7-sonnet-20250219`, `gpt-4o`, `minimax-text-01`).
@@ -128,7 +128,7 @@ Open any web form (or open `test-form.html` in Chrome) and click the **Fill acti
 ```
 Inspect the form on this page, match it against my stored profile, and fill in all fields.
 ```
-openBUA will inspect the DOM, retrieve matching data from your memory store, fill the fields using native synthetic events, and report what was filled.
+OpenBUA will inspect the DOM, retrieve matching data from your memory store, fill the fields using native synthetic events, and report what was filled.
 
 ### 2. Deep Web Research & Data Extraction
 Navigate to any directory, search results page, or social platform and ask:
