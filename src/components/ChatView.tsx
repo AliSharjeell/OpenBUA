@@ -547,6 +547,10 @@ export function ChatView({
             >
               {activeDocsCount} memories active
             </span>
+            <span className="text-zinc-600">|</span>
+            <span className="text-zinc-400 truncate max-w-[120px]" title={settings.activeProvider === 'anthropic' ? settings.anthropic.model : settings.openai.model}>
+              {settings.activeProvider === 'anthropic' ? settings.anthropic.model : settings.openai.model}
+            </span>
           </div>
 
           {messages.length > 0 && (

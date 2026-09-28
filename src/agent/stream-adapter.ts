@@ -191,6 +191,17 @@ async function streamOpenAI(
 
   const isGroq = config.apiKey.trim().startsWith('gsk_') || endpoint.includes('groq.com');
 
+  // If using Groq, clamp max_tokens to prevent OTPM (output tokens per minute) errors.
+  // Groq's free tier has an OTPM limit (e.g. 1000 for qwen3.8-27b, 6000 for llama-3.3-70b).
+  // Without an explicit max_tokens, Groq defaults to model max context (up to 8192), exceeding the 1000 OTPM limit.
+  if (isGroq) {
+    if ((config.model || '').includes('qwen')) {
+      payload.max_tokens = 900;
+    } else {
+      payload.max_tokens = 2048;
+    }
+  }
+
   let response: Response | null = null;
   const maxRetries = isGroq ? 4 : 1;
 
@@ -211,8 +222,16 @@ async function streamOpenAI(
 
     const errorBody = await response.text();
 
-    // Check for 429 Rate Limit (especially on Groq free tier)
+    // Check for 429 Rate Limit (both ITPM input tokens and OTPM output tokens on Groq free tier)
     if (response.status === 429 && isGroq && attempt < maxRetries) {
+      // If error specifically asks to reduce max_tokens (OTPM exceeded), clamp max_tokens smaller and retry immediately
+      if (errorBody.includes('reduce max_tokens') || errorBody.includes('OTPM')) {
+        const currentMax = payload.max_tokens || 1000;
+        payload.max_tokens = Math.max(350, Math.floor(currentMax * 0.7));
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+
       let waitSeconds = 6;
       try {
         // Parse "Please try again in 6.334285714s" from Groq error message

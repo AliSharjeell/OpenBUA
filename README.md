@@ -99,6 +99,8 @@ You do not need a paid subscription or credit card to use OpenBUA. Groq provides
 4. **Built-in Rate Limit Handling**:
    - Groq free tier has an input tokens-per-minute rate limit. OpenBUA has built-in smart rate-limit retry: if you reach a free tier limit, OpenBUA automatically pauses, displays a countdown timer, and resumes your task seamlessly without crashing!
 
+**Important Disclaimer**: Groq free accounts have strict rate limiting and limitations on both input and output tokens. This is great for testing and getting started, but for serious, fast, and reliable work, use a proper API key from a paid provider such as Claude, GPT, GLM, Qwen, Kimi, Meta, Minimax, Grok, Mimo, or DeepSeek.
+
 ---
 
 ## Alternative: Build from Source (For Developers)
