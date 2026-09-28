@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AutoForm AI - Autonomous Form Filling Agent",
+  "name": "openBUA - Open Browser Use Agent",
   "version": "1.0.0",
-  "description": "Client-side intelligent form filling extension powered by pi-agent-core and pi-ai with BYOK support",
+  "description": "Autonomous browser use Chrome extension that navigates, researches, interacts, and fills forms directly in your everyday browser.",
   "permissions": [
     "activeTab",
     "tabs",
@@ -14,7 +14,7 @@
     "<all_urls>"
   ],
   "action": {
-    "default_title": "Open AutoForm AI",
+    "default_title": "Open openBUA",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

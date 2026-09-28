@@ -210,9 +210,9 @@ export function ChatView({
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
             <div>
-              <h3 className="font-semibold text-zinc-200 text-xs">AutoForm AI Ready</h3>
+              <h3 className="font-semibold text-zinc-200 text-xs">openBUA Ready</h3>
               <p className="text-[11px] text-zinc-400 mt-1 max-w-[260px]">
-                Autonomous client-side form filler powered by pi-agent-core & pi-ai.
+                Autonomous browser use agent using your active browser to research, interact, and fill forms.
               </p>
             </div>
 
@@ -244,13 +244,6 @@ export function ChatView({
                 }
               >
                 <span>Fill active form automatically</span>
-                <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
-              </button>
-              <button
-                className="p-2 text-left rounded-xl bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800/80 text-[11px] text-zinc-300 hover:text-zinc-100 transition-colors flex items-center justify-between"
-                onClick={() => handleSend('What form fields are present on this page?')}
-              >
-                <span>List all form fields and types</span>
                 <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
               </button>
             </div>
@@ -482,7 +475,7 @@ export function ChatView({
           <Textarea
             ref={textareaRef}
             rows={1}
-            placeholder="Ask AutoForm"
+            placeholder="Ask openBUA"
             value={input}
             onChange={(e) => {
               setInput(e.target.value);

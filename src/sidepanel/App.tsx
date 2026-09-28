@@ -366,7 +366,7 @@ export function App() {
       <header className="h-11 px-3 border-b border-zinc-900 bg-zinc-950 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-xs tracking-tight text-zinc-100">
-            AutoForm <span className="text-zinc-400 font-normal">AI</span>
+            openBUA
           </span>
         </div>
 

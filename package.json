@@ -1,8 +1,8 @@
 {
-  "name": "form-filling-ai-extension",
+  "name": "openbua-extension",
   "version": "1.0.0",
   "private": true,
-  "description": "Client-side Chrome Extension for intelligent form filling powered by pi-agent-core and pi-ai",
+  "description": "openBUA - Open Browser Use Agent Chrome Extension powered by pi-agent-core and pi-ai",
   "type": "module",
   "scripts": {
     "dev": "vite",
