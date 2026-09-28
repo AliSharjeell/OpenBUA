@@ -86,6 +86,14 @@ export function ChatView({
         await harness.prompt(promptText);
       } catch (e: any) {
         console.error('[ChatView] Prompt error:', e);
+        const errorMsg: ChatMessage = {
+          id: `err-${Date.now()}`,
+          role: 'assistant',
+          content: `⚠️ ${e?.message || String(e)}`,
+          timestamp: Date.now(),
+          isStreaming: false,
+        };
+        onMessagesChange([...newMessages, errorMsg]);
       }
     }
   };

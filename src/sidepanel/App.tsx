@@ -145,6 +145,18 @@ export function App() {
               };
               saveChatHistory(updated);
               return updated;
+            } else if (assistantText || toolCalls.length > 0) {
+              const newAsst: ChatMessage = {
+                id: `asst-${Date.now()}`,
+                role: 'assistant',
+                content: assistantText,
+                toolCalls,
+                timestamp: Date.now(),
+                isStreaming: false,
+              };
+              const updated = [...prev, newAsst];
+              saveChatHistory(updated);
+              return updated;
             }
             return prev;
           });

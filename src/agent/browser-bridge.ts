@@ -89,6 +89,10 @@ export async function inspectActiveTabForm(): Promise<PageFormSummary> {
     return getMockFormSummary();
   }
 
+  if (activeTab.url && (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('chrome-extension://') || activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:'))) {
+    throw new Error(`Chrome restricts extensions from accessing internal pages (${activeTab.url}). Please open a regular webpage or form (such as test-form.html) in your browser!`);
+  }
+
   try {
     const response = await sendMessageToTab(activeTab.id, { action: 'INSPECT_PAGE_FORM' });
     if (response && response.success && response.data) {
@@ -109,6 +113,10 @@ export async function fillActiveTabFields(
   if (!activeTab || !activeTab.id) {
     console.log('[Dev Mock] Filled fields:', assignments);
     return { successCount: assignments.length, errors: [] };
+  }
+
+  if (activeTab.url && (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('chrome-extension://') || activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:'))) {
+    throw new Error(`Chrome restricts extensions from accessing internal pages (${activeTab.url}). Please open a regular webpage or form (such as test-form.html) in your browser!`);
   }
 
   const response = await sendMessageToTab(activeTab.id, {

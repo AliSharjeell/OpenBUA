@@ -43,29 +43,32 @@ export class FormAgentHarness {
     let docsSummary = '';
 
     if (activeDocs.length > 0) {
-      docsSummary = `\n\n### USER'S STORED KNOWLEDGE & DOCUMENTS:\nYou have access to the user's stored documents below. Use this exact data to fill web forms:\n`;
+      docsSummary = `\n\n### USER'S STORED KNOWLEDGE & DOCUMENTS:\nAll user documents, personal profile, resume, and data are stored below. Use this exact data to fill matching web forms:\n`;
       activeDocs.forEach((doc, idx) => {
         docsSummary += `\n--- Document [${idx + 1}]: ${doc.title} (${doc.type}) ---\n${doc.content}\n`;
       });
     } else {
-      docsSummary = `\n\nNo user documents are currently active in storage. If needed, ask the user or call get_user_documents.`;
+      docsSummary = `\n\nNo user documents are currently active in storage. If you need data, call get_user_documents or ask user.`;
     }
 
-    return `You are AutoForm AI, an autonomous browser extension agent specialized in inspecting and filling web forms.
+    return `You are AutoForm AI, an autonomous browser extension agent specialized in inspecting and filling web forms directly on the active browser tab.
 
-YOUR CAPABILITIES & PROTOCOL:
-1. Inspect the form: Call 'get_active_tab_form' to find all form fields, inputs, dropdown selects, textareas, checkboxes, radio buttons, and action buttons.
-2. Match with user data: Use the user's stored documents and profile data provided below to determine the best values for each field.
-3. Fill fields: Call 'fill_form_fields' with the assignments array.
-4. Multi-page & Multi-step forms: If the page has steps (e.g. "Step 1 of 4") or requires clicking "Next", "Continue", or "Save & Proceed", click that button using 'click_element', inspect the next step, and continue filling!
-5. Final Submission Safety: Do NOT click final "Submit" or "Apply" buttons without notifying the user, unless the user explicitly requested automatic submission.
-6. Provide a concise, clear summary of what you filled and any fields that were left empty or need user attention.
+CRITICAL RULES & OPERATING INSTRUCTIONS:
+1. DIRECT BROWSER DOM ACCESS: You have direct access to the user's active browser tab via the tool 'get_active_tab_form'.
+2. NEVER ASK THE USER TO SHARE SCREENSHOTS OR PASTE URLS: Never ask the user to share a screenshot, paste HTML, or provide the form fields manually. You MUST call 'get_active_tab_form' immediately to inspect the active tab's form yourself.
+3. NEVER ASK THE USER FOR PROFILE DETAILS: The user's complete profile, resume, and application data are already loaded above in "USER'S STORED KNOWLEDGE & DOCUMENTS" and accessible via 'get_user_documents'. Do NOT ask the user for their name, email, phone, or address; match them directly from their documents!
+4. MANDATORY PROTOCOL WHEN USER ASKS TO FILL OR SCAN:
+   - Step 1: Immediately call 'get_active_tab_form' to find all inputs, textareas, selects, checkboxes, and buttons.
+   - Step 2: Match each form field with the user's stored documents.
+   - Step 3: Call 'fill_form_fields' with the assignments array.
+   - Step 4: For multi-step forms (e.g. "Step 1 of 3", "Next: Experience"), click the next button using 'click_element', wait, inspect the next step, and continue filling!
+   - Step 5: Inform the user once the fields have been populated.
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
   }
 
-  private setupAgent() {
+  public setupAgent() {
     const activeProvider = this.settings.activeProvider;
     const providerConfig = activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
     const config = {
@@ -168,6 +171,9 @@ ${this.settings.systemInstruction || ''}`.trim();
         break;
 
       case 'turn_end':
+        if (event.message?.errorMessage) {
+          this.listeners.onError?.(event.message.errorMessage);
+        }
         this.listeners.onTurnComplete?.(
           this.currentStreamingText,
           Array.from(this.activeToolCalls.values())
@@ -181,23 +187,31 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public async prompt(input: string): Promise<void> {
+    const providerConfig =
+      this.settings.activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
+    if (!providerConfig.apiKey || !providerConfig.apiKey.trim()) {
+      const err = `Please enter your ${this.settings.activeProvider.toUpperCase()} API Key in Settings to continue.`;
+      this.listeners.onError?.(err);
+      this.listeners.onStatusChange?.(false);
+      throw new Error(err);
+    }
+
     if (!this.agent) {
       this.setupAgent();
     }
     if (!this.agent) throw new Error('Agent failed to initialize');
 
-    const providerConfig =
-      this.settings.activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
-    if (!providerConfig.apiKey || !providerConfig.apiKey.trim()) {
-      throw new Error(`Please enter your ${this.settings.activeProvider.toUpperCase()} API Key in Settings to continue.`);
-    }
-
     try {
+      this.listeners.onStatusChange?.(true);
       await this.agent.prompt(input);
     } catch (err: any) {
+      console.error('[FormAgentHarness] prompt execution error:', err);
       this.listeners.onError?.(err?.message || String(err));
-      this.listeners.onStatusChange?.(false);
+      // Re-setup agent on error so state is not locked
+      this.setupAgent();
       throw err;
+    } finally {
+      this.listeners.onStatusChange?.(false);
     }
   }
 
@@ -205,15 +219,14 @@ ${this.settings.systemInstruction || ''}`.trim();
     if (this.agent) {
       this.agent.abort();
       this.listeners.onStatusChange?.(false);
+      this.setupAgent();
     }
   }
 
   public reset() {
-    if (this.agent) {
-      this.agent.reset();
-      this.activeToolCalls.clear();
-      this.currentStreamingText = '';
-      this.listeners.onStatusChange?.(false);
-    }
+    this.activeToolCalls.clear();
+    this.currentStreamingText = '';
+    this.listeners.onStatusChange?.(false);
+    this.setupAgent();
   }
 }
