@@ -12,7 +12,13 @@ import {
   navigateActiveTab,
   captureTabScreenshot,
 } from './browser-bridge';
-import { loadDocuments } from '../services/storage';
+import {
+  loadDocuments,
+  getScratchpad,
+  saveScratchpad,
+  appendToScratchpad,
+  clearScratchpad,
+} from '../services/storage';
 
 // 1. Inspect Form Elements on Current Tab
 const GetActiveTabFormSchema = Type.Object({
@@ -347,7 +353,75 @@ export const getPageContentTool: AgentTool<typeof GetPageContentSchema> = {
   },
 };
 
-// All available tools for the AutoForm AI Agent
+// 11. Scratchpad / Research Notepad
+const ScratchpadSchema = Type.Object({
+  action: Type.Union([
+    Type.Literal('append'),
+    Type.Literal('read'),
+    Type.Literal('write'),
+    Type.Literal('clear'),
+  ], { description: 'Action to perform: "append" to add newly discovered items/research/notes, "read" to review all collected data, "write" to overwrite, "clear" to reset.' }),
+  content: Type.Optional(Type.String({ description: 'Text to append or write to the scratchpad (required for "append" and "write")' })),
+});
+
+export const scratchpadTool: AgentTool<typeof ScratchpadSchema> = {
+  name: 'scratchpad',
+  label: 'Research Scratchpad / Notepad',
+  description: 'A persistent session notepad for storing, appending, and organizing research findings, lists of people/leads/papers, URLs, or multi-step notes across long tasks. Use "append" as you find each item so you never forget or lose data across page navigations. Use "read" to view all collected findings.',
+  parameters: ScratchpadSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      const action = params.action;
+      if (action === 'append') {
+        const textToAppend = params.content || '';
+        if (!textToAppend.trim()) {
+          return {
+            content: [{ type: 'text', text: 'Error: content is required for append action.' }],
+            details: { success: false },
+          };
+        }
+        const updated = await appendToScratchpad(textToAppend);
+        const lineCount = updated.split('\n').filter(Boolean).length;
+        return {
+          content: [{ type: 'text', text: `Added to scratchpad successfully. Current scratchpad contains ${lineCount} items (${updated.length} chars).\n\nLatest entry added:\n${textToAppend}` }],
+          details: { success: true, action: 'append', totalChars: updated.length, lineCount },
+        };
+      } else if (action === 'read') {
+        const current = await getScratchpad();
+        const lineCount = current.split('\n').filter(Boolean).length;
+        return {
+          content: [{ type: 'text', text: current ? `Current Scratchpad Content (${lineCount} items / ${current.length} chars):\n\n${current}` : 'Scratchpad is currently empty.' }],
+          details: { success: true, action: 'read', content: current, lineCount },
+        };
+      } else if (action === 'write') {
+        const newContent = params.content || '';
+        await saveScratchpad(newContent);
+        return {
+          content: [{ type: 'text', text: `Scratchpad updated (${newContent.length} chars).` }],
+          details: { success: true, action: 'write', totalChars: newContent.length },
+        };
+      } else if (action === 'clear') {
+        await clearScratchpad();
+        return {
+          content: [{ type: 'text', text: 'Scratchpad cleared.' }],
+          details: { success: true, action: 'clear' },
+        };
+      }
+
+      return {
+        content: [{ type: 'text', text: 'Unknown action' }],
+        details: { success: false },
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Scratchpad error: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
+// All available tools for the OpenBUA Agent
 export const ALL_AGENT_TOOLS: AgentTool<any>[] = [
   getActiveTabFormTool,
   fillFormFieldsTool,
@@ -359,4 +433,5 @@ export const ALL_AGENT_TOOLS: AgentTool<any>[] = [
   switchBrowserTabTool,
   navigateBrowserTabTool,
   getPageContentTool,
+  scratchpadTool,
 ];

@@ -198,7 +198,7 @@ export function VaultView({ documents, onDocumentsChange }: VaultViewProps) {
               {isEditing ? 'Edit Document' : 'Create New Knowledge Document'}
             </CardTitle>
             <CardDescription className="text-[10px]">
-              This text is passed to AutoForm AI to fill matching form fields accurately.
+              This text is passed to OpenBUA to fill matching form fields accurately.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-3 space-y-3">

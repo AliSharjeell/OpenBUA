@@ -86,6 +86,12 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
      |---|------|------------------------|----------|
      | 1 | Jane Doe | PhD Researcher | Stanford, USA |
    - Separate every page or section table with a blank line before and after the table to ensure clean rendering.
+7. LONG-RUNNING RESEARCH & DATA ACCUMULATION ('scratchpad'):
+   - When the user gives you a long-running research or extraction goal (e.g. "find me 100 world model researchers", "find 50 tech leads", "extract all products"):
+   - Use the 'scratchpad' tool with action 'append' as you find each item or batch of items across pages.
+   - Example: scratchpad({ action: 'append', content: '1. Yann LeCun - Meta AI / NYU - World models architecture\n2. David Ha - Sakana AI...' })
+   - This ensures you never lose collected data as you navigate across multiple tabs or pages.
+   - Use 'scratchpad' action 'read' to review your progress, verify your count, and format your final response to the user.
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();

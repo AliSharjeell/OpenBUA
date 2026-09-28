@@ -532,7 +532,7 @@ export async function inspectActiveTabForm(): Promise<PageFormSummary> {
     } catch (scriptErr: any) {
       const msg = scriptErr?.message || String(scriptErr);
       if (msg.includes('Cannot access contents of url') || msg.includes('file:')) {
-        throw new Error(`Permission needed: To allow AutoForm AI to inspect local files (file:///...), please open chrome://extensions -> AutoForm AI Details -> toggle ON "Allow access to file URLs". Alternatively, test on any http:// or https:// webpage!`);
+        throw new Error(`Permission needed: To allow OpenBUA to inspect local files (file:///...), please open chrome://extensions -> OpenBUA Details -> toggle ON "Allow access to file URLs". Alternatively, test on any http:// or https:// webpage!`);
       }
       throw scriptErr;
     }
@@ -576,7 +576,7 @@ export async function fillActiveTabFields(
       return response.data as FormFillResult;
     }
   } catch (err: any) {
-    console.warn('[AutoForm AI] sendMessageToTab failed, falling back to direct executeScript:', err?.message || err);
+    console.warn('[OpenBUA] sendMessageToTab failed, falling back to direct executeScript:', err?.message || err);
   }
 
   // 2. Direct executeScript fallback
@@ -593,7 +593,7 @@ export async function fillActiveTabFields(
     } catch (scriptErr: any) {
       const msg = scriptErr?.message || String(scriptErr);
       if (msg.includes('Cannot access contents of url') || msg.includes('file:')) {
-        throw new Error(`Permission needed: Please enable "Allow access to file URLs" in chrome://extensions -> AutoForm AI Details to interact with local files.`);
+        throw new Error(`Permission needed: Please enable "Allow access to file URLs" in chrome://extensions -> OpenBUA Details to interact with local files.`);
       }
       throw scriptErr;
     }

@@ -17,7 +17,12 @@ import {
   FileText,
   Terminal,
   Upload,
+  BookOpen,
+  Copy,
+  Check,
+  X,
 } from 'lucide-react';
+import { getScratchpad, saveScratchpad, clearScratchpad } from '../services/storage';
 
 interface ChatViewProps {
   messages: ChatMessage[];
@@ -71,6 +76,12 @@ function getToolMeta(toolName: string) {
         desc: 'Adjusting viewport to reveal additional fields...',
         icon: ChevronDown,
       };
+    case 'scratchpad':
+      return {
+        label: 'Updating Scratchpad',
+        desc: 'Recording research data and notes in active session notepad...',
+        icon: BookOpen,
+      };
     default:
       return {
         label: `Running Tool: ${toolName}`,
@@ -96,9 +107,23 @@ export function ChatView({
   const [input, setInput] = useState('');
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [showScratchpad, setShowScratchpad] = useState(false);
+  const [scratchpadText, setScratchpadText] = useState('');
+  const [copiedScratchpad, setCopiedScratchpad] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load scratchpad content and listen for live agent updates
+  useEffect(() => {
+    getScratchpad().then((text) => setScratchpadText(text || ''));
+
+    const onScratchpadUpdate = (e: any) => {
+      setScratchpadText(e.detail?.content || '');
+    };
+    window.addEventListener('openbua_scratchpad_updated', onScratchpadUpdate);
+    return () => window.removeEventListener('openbua_scratchpad_updated', onScratchpadUpdate);
+  }, []);
 
   const activeDocsCount = documents.filter((d) => d.isActiveForContext).length;
   const currentKey =
@@ -436,7 +461,7 @@ export function ChatView({
               <div className="flex items-center gap-2.5 min-w-0">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400 shrink-0" />
                 <span className="text-[11px] text-zinc-300 font-medium truncate">
-                  AutoForm AI is reasoning & planning next action...
+                  OpenBUA is reasoning & planning next action...
                 </span>
               </div>
             )}
@@ -454,20 +479,106 @@ export function ChatView({
           </div>
         )}
 
-        {/* Round "Fill Form" Action Button directly above input box */}
+        {/* Scratchpad Panel (collapsible notepad for research, leads, and extracted lists) */}
+        {showScratchpad && (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 shadow-xl space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <BookOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="text-xs font-semibold text-zinc-200">Research Scratchpad</span>
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  ({scratchpadText.split('\n').filter(Boolean).length} items, {scratchpadText.length} chars)
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {scratchpadText.trim() && (
+                  <>
+                    <button
+                      type="button"
+                      className="px-2 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-750 text-zinc-200 border border-zinc-700/60 flex items-center gap-1 transition-colors active:scale-95"
+                      onClick={() => {
+                        navigator.clipboard.writeText(scratchpadText);
+                        setCopiedScratchpad(true);
+                        setTimeout(() => setCopiedScratchpad(false), 2000);
+                      }}
+                      title="Copy all scratchpad text"
+                    >
+                      {copiedScratchpad ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                      <span>{copiedScratchpad ? 'Copied' : 'Copy All'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="px-2 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-red-950/70 hover:text-red-300 text-zinc-400 border border-zinc-700/60 transition-colors active:scale-95"
+                      onClick={async () => {
+                        await clearScratchpad();
+                        setScratchpadText('');
+                      }}
+                      title="Clear scratchpad"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="p-1 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+                  onClick={() => setShowScratchpad(false)}
+                  title="Close Scratchpad"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            <Textarea
+              rows={4}
+              value={scratchpadText}
+              onChange={(e) => {
+                const val = e.target.value;
+                setScratchpadText(val);
+                saveScratchpad(val);
+              }}
+              placeholder="Scratchpad is empty. When OpenBUA collects researchers, leads, or multi-step notes, they will appear here in real time. You can also type or paste notes directly here."
+              className="w-full text-xs font-mono bg-zinc-950/80 border-zinc-800 text-zinc-200 rounded-lg p-2 resize-y min-h-[90px] max-h-[220px] focus-visible:ring-1 focus-visible:ring-amber-500/50"
+            />
+          </div>
+        )}
+
+        {/* Action Buttons directly above input box */}
         <div className="flex items-center justify-between">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-[11px] font-medium transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
-            onClick={() =>
-              handleSend(
-                'Inspect this current page form, cross-reference my active stored documents, and fill all matching fields.'
-              )
-            }
-            disabled={isBusy}
-          >
-            <span>Fill Form</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-[11px] font-medium transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+              onClick={() =>
+                handleSend(
+                  'Inspect this current page form, cross-reference my active stored documents, and fill all matching fields.'
+                )
+              }
+              disabled={isBusy}
+            >
+              <span>Fill Form</span>
+            </button>
+
+            <button
+              type="button"
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all shadow-sm active:scale-95 border ${
+                showScratchpad
+                  ? 'bg-amber-950/60 border-amber-800/80 text-amber-200'
+                  : 'bg-zinc-900 hover:bg-zinc-850 text-zinc-300 hover:text-zinc-100 border-zinc-800'
+              }`}
+              onClick={() => setShowScratchpad(!showScratchpad)}
+              title="Open Research Scratchpad / Notepad"
+            >
+              <BookOpen className="w-3 h-3 text-amber-400" />
+              <span>Scratchpad</span>
+              {scratchpadText.trim() && (
+                <span className="bg-amber-900/80 text-amber-300 border border-amber-700/80 px-1.5 py-0.2 rounded-full text-[9px]">
+                  {scratchpadText.split('\n').filter(Boolean).length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Rounder Input Box */}

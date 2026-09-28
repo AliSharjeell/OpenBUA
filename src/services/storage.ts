@@ -332,3 +332,38 @@ export async function clearChatHistory(): Promise<void> {
   await setStorageItem('autoform_chat_history', []);
 }
 
+// ========================================================
+// Session-Scoped Agent Scratchpad / Research Notepad
+// ========================================================
+const SCRATCHPAD_PREFIX = 'openbua_scratchpad_';
+
+export async function getScratchpad(sessionId = 'default'): Promise<string> {
+  const key = `${SCRATCHPAD_PREFIX}${encodeURIComponent(sessionId)}`;
+  return await getStorageItem<string>(key, '');
+}
+
+export async function saveScratchpad(content: string, sessionId = 'default'): Promise<void> {
+  const key = `${SCRATCHPAD_PREFIX}${encodeURIComponent(sessionId)}`;
+  await setStorageItem(key, content);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('openbua_scratchpad_updated', { detail: { content, sessionId } }));
+  }
+}
+
+export async function appendToScratchpad(entry: string, sessionId = 'default'): Promise<string> {
+  const current = await getScratchpad(sessionId);
+  const trimmed = entry.trim();
+  const updated = current ? `${current}\n\n${trimmed}` : trimmed;
+  await saveScratchpad(updated, sessionId);
+  return updated;
+}
+
+export async function clearScratchpad(sessionId = 'default'): Promise<void> {
+  const key = `${SCRATCHPAD_PREFIX}${encodeURIComponent(sessionId)}`;
+  await setStorageItem(key, '');
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('openbua_scratchpad_updated', { detail: { content: '', sessionId } }));
+  }
+}
+
+
