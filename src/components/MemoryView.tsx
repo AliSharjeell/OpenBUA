@@ -202,14 +202,14 @@ export function MemoryView({
               />
               <Button
                 variant="outline"
-                size="sm"
-                className="h-7 px-2.5 text-[11px] gap-1.5 rounded-full border-zinc-800 bg-zinc-900/80 hover:bg-zinc-850"
+                size="icon"
+                className="h-7 w-7 rounded-full border-zinc-800 bg-zinc-900/80 hover:bg-zinc-850 text-zinc-300 shadow-xs"
                 disabled={isUploading}
+                title={isUploading ? 'Importing file...' : 'Upload MD or PDF'}
                 asChild
               >
                 <span>
-                  <Upload className="w-3.5 h-3.5 text-zinc-300" />
-                  {isUploading ? 'Importing...' : 'Upload'}
+                  <Upload className="w-3.5 h-3.5" />
                 </span>
               </Button>
             </label>
@@ -229,10 +229,10 @@ export function MemoryView({
         </div>
 
         {/* Sub-Tabs: Global Memory vs Current Tab Memory */}
-        <div className="flex items-center bg-zinc-900/90 p-1 rounded-xl border border-zinc-800">
+        <div className="flex items-center bg-zinc-900/90 p-1 rounded-full border border-zinc-800">
           <button
             type="button"
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-lg text-[11px] font-medium transition-all ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-all ${
               memoryScope === 'global'
                 ? 'bg-zinc-800 text-zinc-100 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -251,7 +251,7 @@ export function MemoryView({
 
           <button
             type="button"
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-lg text-[11px] font-medium transition-all ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-all ${
               memoryScope === 'tab'
                 ? 'bg-zinc-800 text-zinc-100 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
