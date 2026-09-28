@@ -162,6 +162,9 @@ export function ChatView({
     const newMessages = [...messages, userMsg];
     onMessagesChange(newMessages);
     setInput('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
 
     if (harness) {
       try {
@@ -257,133 +260,147 @@ export function ChatView({
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+            className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1.5`}
           >
-            {/* Message Bubble */}
-            <div
-              className={`max-w-[88%] rounded-2xl p-3 text-xs ${
-                msg.role === 'user'
-                  ? 'bg-zinc-800 text-zinc-100 rounded-br-sm shadow-sm'
-                  : 'bg-zinc-900/90 border border-zinc-800 text-zinc-200 rounded-bl-sm shadow-sm'
-              }`}
-            >
-              {/* Tool Calls inside assistant message */}
-              {msg.toolCalls && msg.toolCalls.length > 0 && (
-                <div className="space-y-1.5 mb-2.5">
-                  {msg.toolCalls.map((tc) => {
-                    const isExpanded = expandedTools[tc.id];
-                    const meta = getToolMeta(tc.toolName);
-                    const Icon = meta.icon;
-                    return (
-                      <div
-                        key={tc.id}
-                        className={`rounded-xl border overflow-hidden text-[11px] transition-all ${
-                          tc.status === 'running'
-                            ? 'border-zinc-700 bg-zinc-900/90 shadow-sm'
-                            : tc.status === 'error'
-                            ? 'border-red-900/60 bg-red-950/20'
-                            : 'border-zinc-800/90 bg-zinc-950/80'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          className="w-full p-2 px-2.5 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
-                          onClick={() => toggleToolExpand(tc.id)}
+            {/* Thinking / Reasoning Section (Outside Message Bubble, lighter text color) */}
+            {msg.role === 'assistant' && msg.thinking && msg.thinking.trim().length > 0 && (
+              <div className="max-w-[92%] px-1 text-[11px] text-zinc-400 font-sans leading-relaxed flex items-start gap-1.5 py-0.5">
+                <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500 shrink-0 font-medium select-none mt-0.5">
+                  Thinking:
+                </span>
+                <div className="text-zinc-400 italic font-normal select-text whitespace-pre-wrap">
+                  {msg.thinking}
+                </div>
+              </div>
+            )}
+
+            {/* Message Bubble (rendered if content or tool calls exist, or if still streaming) */}
+            {(msg.content || (msg.toolCalls && msg.toolCalls.length > 0) || (msg.isStreaming && !msg.thinking)) && (
+              <div
+                className={`max-w-[88%] rounded-2xl p-3 text-xs ${
+                  msg.role === 'user'
+                    ? 'bg-zinc-800 text-zinc-100 rounded-br-sm shadow-sm'
+                    : 'bg-zinc-900/90 border border-zinc-800 text-zinc-200 rounded-bl-sm shadow-sm'
+                }`}
+              >
+                {/* Tool Calls inside assistant message */}
+                {msg.toolCalls && msg.toolCalls.length > 0 && (
+                  <div className="space-y-1.5 mb-2.5">
+                    {msg.toolCalls.map((tc) => {
+                      const isExpanded = expandedTools[tc.id];
+                      const meta = getToolMeta(tc.toolName);
+                      const Icon = meta.icon;
+                      return (
+                        <div
+                          key={tc.id}
+                          className={`rounded-xl border overflow-hidden text-[11px] transition-all ${
+                            tc.status === 'running'
+                              ? 'border-zinc-700 bg-zinc-900/90 shadow-sm'
+                              : tc.status === 'error'
+                              ? 'border-red-900/60 bg-red-950/20'
+                              : 'border-zinc-800/90 bg-zinc-950/80'
+                          }`}
                         >
-                          <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-300 min-w-0 pr-2">
-                            <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                            <span className="font-semibold text-zinc-200">{tc.toolName}</span>
-                            <span className="font-sans text-[10px] text-zinc-400 truncate">
-                              • {meta.label}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {tc.status === 'running' ? (
-                              <span className="flex items-center gap-1 text-[10px] text-amber-300 font-medium">
-                                <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-                                <span>Running</span>
+                          <button
+                            type="button"
+                            className="w-full p-2 px-2.5 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
+                            onClick={() => toggleToolExpand(tc.id)}
+                          >
+                            <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-300 min-w-0 pr-2">
+                              <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                              <span className="font-semibold text-zinc-200">{tc.toolName}</span>
+                              <span className="font-sans text-[10px] text-zinc-400 truncate">
+                                • {meta.label}
                               </span>
-                            ) : tc.status === 'error' ? (
-                              <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium">
-                                <AlertCircle className="w-3 h-3 text-red-400" />
-                                <span>Failed</span>
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                <span>Completed</span>
-                              </span>
-                            )}
-                            {isExpanded ? (
-                              <ChevronDown className="w-3 h-3 text-zinc-500 ml-0.5" />
-                            ) : (
-                              <ChevronRight className="w-3 h-3 text-zinc-500 ml-0.5" />
-                            )}
-                          </div>
-                        </button>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {tc.status === 'running' ? (
+                                <span className="flex items-center gap-1 text-[10px] text-amber-300 font-medium">
+                                  <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                                  <span>Running</span>
+                                </span>
+                              ) : tc.status === 'error' ? (
+                                <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium">
+                                  <AlertCircle className="w-3 h-3 text-red-400" />
+                                  <span>Failed</span>
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                  <span>Completed</span>
+                                </span>
+                              )}
+                              {isExpanded ? (
+                                <ChevronDown className="w-3 h-3 text-zinc-500 ml-0.5" />
+                              ) : (
+                                <ChevronRight className="w-3 h-3 text-zinc-500 ml-0.5" />
+                              )}
+                            </div>
+                          </button>
 
-                        {isExpanded && (
-                          <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 font-mono text-[10px] text-zinc-400 space-y-2 overflow-x-auto max-h-56 overflow-y-auto">
-                            {tc.args && Object.keys(tc.args).length > 0 && (
-                              <div>
-                                <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
-                                  Arguments:
-                                </span>
-                                <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap">
-                                  {JSON.stringify(tc.args, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                            {tc.result && (
-                              <div>
-                                <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
-                                  Output / Result:
-                                </span>
-                                <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap">
-                                  {typeof tc.result === 'string'
-                                    ? tc.result
-                                    : JSON.stringify(tc.result, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                            {tc.errorMessage && (
-                              <div>
-                                <span className="text-red-400 block font-medium mb-0.5 font-sans">
-                                  Error:
-                                </span>
-                                <pre className="text-red-300 bg-red-950/40 p-1.5 rounded-lg border border-red-900/40 whitespace-pre-wrap">
-                                  {tc.errorMessage}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                          {isExpanded && (
+                            <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 font-mono text-[10px] text-zinc-400 space-y-2 overflow-x-auto max-h-56 overflow-y-auto">
+                              {tc.args && Object.keys(tc.args).length > 0 && (
+                                <div>
+                                  <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
+                                    Arguments:
+                                  </span>
+                                  <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap">
+                                    {JSON.stringify(tc.args, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                              {tc.result && (
+                                <div>
+                                  <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
+                                    Output / Result:
+                                  </span>
+                                  <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap">
+                                    {typeof tc.result === 'string'
+                                      ? tc.result
+                                      : JSON.stringify(tc.result, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                              {tc.errorMessage && (
+                                <div>
+                                  <span className="text-red-400 block font-medium mb-0.5 font-sans">
+                                    Error:
+                                  </span>
+                                  <pre className="text-red-300 bg-red-950/40 p-1.5 rounded-lg border border-red-900/40 whitespace-pre-wrap">
+                                    {tc.errorMessage}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Message Content: Formatted Markdown for Assistant, text for User */}
+                {msg.content && (
+                  <div>
+                    {msg.role === 'assistant' ? (
+                      <MarkdownRenderer content={msg.content} />
+                    ) : (
+                      <div className="whitespace-pre-wrap leading-relaxed select-text font-sans">
+                        {msg.content}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    )}
+                  </div>
+                )}
 
-              {/* Message Content: Formatted Markdown for Assistant, text for User */}
-              {msg.content && (
-                <div>
-                  {msg.role === 'assistant' ? (
-                    <MarkdownRenderer content={msg.content} />
-                  ) : (
-                    <div className="whitespace-pre-wrap leading-relaxed select-text font-sans">
-                      {msg.content}
-                    </div>
-                  )}
-                </div>
-              )}
+                {/* Live Streaming Indicator */}
+                {msg.isStreaming && !msg.content && (
+                  <span className="inline-block w-1.5 h-3.5 bg-zinc-300 ml-1 animate-pulse" />
+                )}
+              </div>
+            )}
 
-              {/* Live Streaming Indicator */}
-              {msg.isStreaming && (
-                <span className="inline-block w-1.5 h-3.5 bg-zinc-300 ml-1 animate-pulse" />
-              )}
-            </div>
-
-            <span className="text-[9px] text-zinc-600 mt-1 px-1">
+            <span className="text-[9px] text-zinc-600 px-1">
               {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
@@ -468,9 +485,16 @@ export function ChatView({
             rows={1}
             placeholder="Ask AutoForm"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              // Auto-expand textarea height as text lines increase (up to 160px)
+              if (textareaRef.current) {
+                textareaRef.current.style.height = 'auto';
+                textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+              }
+            }}
             onKeyDown={handleKeyDown}
-            className="border-0 bg-transparent min-h-[38px] max-h-24 resize-none py-2 px-2 text-xs focus-visible:ring-0 focus:outline-none"
+            className="border-0 bg-transparent min-h-[38px] max-h-40 resize-none py-2 px-2 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed"
             disabled={isBusy || !hasKey}
           />
 

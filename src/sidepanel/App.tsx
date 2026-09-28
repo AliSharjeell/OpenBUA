@@ -184,6 +184,32 @@ export function App() {
             }
           });
         },
+        onThinkingDelta: (thinkingText) => {
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === 'assistant' && last.isStreaming) {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...last,
+                thinking: thinkingText,
+              };
+              return updated;
+            } else {
+              return [
+                ...prev,
+                {
+                  id: `asst-${Date.now()}`,
+                  role: 'assistant',
+                  content: '',
+                  thinking: thinkingText,
+                  timestamp: Date.now(),
+                  isStreaming: true,
+                  toolCalls: [],
+                },
+              ];
+            }
+          });
+        },
         onToolCallStart: (toolCall) => {
           setActiveTool(toolCall);
           setMessages((prev) => {
@@ -241,7 +267,7 @@ export function App() {
             return prev;
           });
         },
-        onTurnComplete: (assistantText, toolCalls) => {
+        onTurnComplete: (assistantText, toolCalls, thinkingText) => {
           setActiveTool(null);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
@@ -252,13 +278,15 @@ export function App() {
                 ...last,
                 content: assistantText || last.content,
                 toolCalls: toolCalls.length > 0 ? toolCalls : last.toolCalls,
+                thinking: thinkingText || last.thinking,
                 isStreaming: false,
               };
-            } else if (assistantText || toolCalls.length > 0) {
+            } else if (assistantText || toolCalls.length > 0 || thinkingText) {
               const newAsst: ChatMessage = {
                 id: `asst-${Date.now()}`,
                 role: 'assistant',
                 content: assistantText,
+                thinking: thinkingText,
                 toolCalls,
                 timestamp: Date.now(),
                 isStreaming: false,

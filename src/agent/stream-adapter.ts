@@ -246,6 +246,16 @@ async function streamOpenAI(
         const delta = choice.delta;
         if (!delta) continue;
 
+        // Reasoning / Thinking delta (e.g., DeepSeek R1, OpenAI o1/o3-mini, Minimax)
+        const reasoningDelta = delta.reasoning_content || delta.reasoning || delta.thought || '';
+        if (reasoningDelta) {
+          stream.push({
+            type: 'thinking_delta' as any,
+            delta: reasoningDelta,
+            partial: assistantMessage,
+          });
+        }
+
         // Text delta
         if (delta.content) {
           if (!textContentBlock) {
@@ -595,14 +605,7 @@ async function streamAnthropic(
                 partial: assistantMessage,
               });
             } else if (event.content_block?.type === 'thinking') {
-              currentBlockType = 'text';
-              const textBlock: TextContent = { type: 'text', text: '' };
-              assistantMessage.content.push(textBlock);
-              stream.push({
-                type: 'text_start',
-                contentIndex: currentBlockIndex,
-                partial: assistantMessage,
-              });
+              currentBlockType = 'thinking' as any;
             } else if (event.content_block?.type === 'tool_use') {
               currentBlockType = 'tool_use';
               currentToolUse = {
@@ -629,11 +632,15 @@ async function streamAnthropic(
           }
 
           case 'content_block_delta': {
-            if (
-              (currentBlockType === 'text') &&
-              (event.delta?.type === 'text_delta' || event.delta?.type === 'thinking_delta')
-            ) {
-              const delta = event.delta.text || event.delta.thinking || '';
+            if (currentBlockType === ('thinking' as any) || event.delta?.type === 'thinking_delta') {
+              const delta = event.delta?.thinking || event.delta?.text || '';
+              stream.push({
+                type: 'thinking_delta' as any,
+                delta,
+                partial: assistantMessage,
+              });
+            } else if (currentBlockType === 'text' && event.delta?.type === 'text_delta') {
+              const delta = event.delta.text || '';
               const block = assistantMessage.content[currentBlockIndex] as TextContent;
               if (block) block.text += delta;
               stream.push({

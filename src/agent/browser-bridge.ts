@@ -699,14 +699,33 @@ export async function captureTabScreenshot(): Promise<string> {
     return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   }
 
+  const activeTab = await getActiveTab();
+  const windowId = activeTab?.windowId;
+
   return new Promise((resolve, reject) => {
-    chrome.tabs.captureVisibleTab({ format: 'png' }, (dataUrl) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
+    const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'png' };
+    
+    // When called from a side panel, passing the active tab's windowId ensures capturing the browser window rather than side panel
+    const captureCallback = (dataUrl?: string) => {
+      if (chrome.runtime.lastError || !dataUrl) {
+        // Fallback without windowId if window-specific call failed
+        chrome.tabs.captureVisibleTab({ format: 'png' }, (fallbackDataUrl) => {
+          if (chrome.runtime.lastError || !fallbackDataUrl) {
+            reject(new Error(chrome.runtime.lastError?.message || 'Failed to capture tab screenshot'));
+          } else {
+            resolve(fallbackDataUrl);
+          }
+        });
       } else {
         resolve(dataUrl);
       }
-    });
+    };
+
+    if (typeof windowId === 'number') {
+      chrome.tabs.captureVisibleTab(windowId, options, captureCallback);
+    } else {
+      chrome.tabs.captureVisibleTab(options, captureCallback);
+    }
   });
 }
 

@@ -6,9 +6,10 @@ import { AppSettings, UserDocument, ToolCallState, ChatMessage } from '../types'
 
 export interface AgentUpdateListeners {
   onMessageDelta?: (text: string) => void;
+  onThinkingDelta?: (text: string) => void;
   onToolCallStart?: (toolCall: ToolCallState) => void;
   onToolCallEnd?: (toolCall: ToolCallState) => void;
-  onTurnComplete?: (assistantText: string, toolCalls: ToolCallState[]) => void;
+  onTurnComplete?: (assistantText: string, toolCalls: ToolCallState[], thinkingText?: string) => void;
   onError?: (error: string) => void;
   onStatusChange?: (isBusy: boolean) => void;
 }
@@ -20,6 +21,7 @@ export class FormAgentHarness {
   private listeners: AgentUpdateListeners = {};
   private activeToolCalls = new Map<string, ToolCallState>();
   private currentStreamingText = '';
+  private currentThinkingText = '';
 
   constructor(settings: AppSettings, documents: UserDocument[], listeners?: AgentUpdateListeners) {
     this.settings = settings;
@@ -117,11 +119,13 @@ ${this.settings.systemInstruction || ''}`.trim();
       case 'agent_start':
         this.listeners.onStatusChange?.(true);
         this.currentStreamingText = '';
+        this.currentThinkingText = '';
         this.activeToolCalls.clear();
         break;
 
       case 'turn_start':
         this.currentStreamingText = '';
+        this.currentThinkingText = '';
         break;
 
       case 'message_update':
@@ -130,6 +134,9 @@ ${this.settings.systemInstruction || ''}`.trim();
           if (ame.type === 'text_delta') {
             this.currentStreamingText += ame.delta;
             this.listeners.onMessageDelta?.(this.currentStreamingText);
+          } else if (ame.type === 'thinking_delta') {
+            this.currentThinkingText += ame.delta;
+            this.listeners.onThinkingDelta?.(this.currentThinkingText);
           } else if (ame.type === 'toolcall_start') {
             const tc = ame.partial?.content?.[ame.contentIndex];
             if (tc && tc.type === 'toolCall') {
@@ -201,7 +208,8 @@ ${this.settings.systemInstruction || ''}`.trim();
         }
         this.listeners.onTurnComplete?.(
           this.currentStreamingText,
-          Array.from(this.activeToolCalls.values())
+          Array.from(this.activeToolCalls.values()),
+          this.currentThinkingText || undefined
         );
         break;
 
