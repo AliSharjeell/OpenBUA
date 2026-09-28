@@ -4,7 +4,7 @@ import {
   UserDocument,
   ChatMessage,
   ToolCallState,
-  BrowserTabInfo,
+  ChatSession,
 } from '../types';
 import {
   loadSettings,
@@ -13,7 +13,10 @@ import {
   saveTabMemory,
   loadChatHistoryForTab,
   saveChatHistoryForTab,
-  getTabKey,
+  loadChatSessions,
+  saveChatSessions,
+  createNewChatSession,
+  deleteChatSession,
   DEFAULT_SETTINGS,
 } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
@@ -27,8 +30,8 @@ import {
   Layers,
   Scan,
   Settings,
-  Zap,
-  Globe,
+  Plus,
+  X,
 } from 'lucide-react';
 
 export function App() {
@@ -37,114 +40,39 @@ export function App() {
   const [globalMemories, setGlobalMemories] = useState<UserDocument[]>([]);
   const [tabMemories, setTabMemories] = useState<UserDocument[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [openTabs, setOpenTabs] = useState<BrowserTabInfo[]>([]);
-  const [activeBrowserTab, setActiveBrowserTab] = useState<BrowserTabInfo | null>(null);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string>('session_default');
   const [isBusy, setIsBusy] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolCallState | null>(null);
   const [initialized, setInitialized] = useState(false);
 
   const harnessRef = useRef<FormAgentHarness | null>(null);
-  const currentTabKeyRef = useRef<string>('default_tab');
+  const currentTabKeyRef = useRef<string>('session_default');
 
-  // Keep currentTabKeyRef updated
+  // Keep currentTabKeyRef synchronized with activeSessionId
   useEffect(() => {
-    currentTabKeyRef.current = getTabKey(activeBrowserTab);
-  }, [activeBrowserTab]);
+    currentTabKeyRef.current = activeSessionId;
+  }, [activeSessionId]);
 
-  // Query and observe open browser tabs
-  useEffect(() => {
-    async function refreshTabs() {
-      if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-        try {
-          const tabs = await chrome.tabs.query({ currentWindow: true });
-          const mapped: BrowserTabInfo[] = tabs
-            .filter((t) => typeof t.id === 'number')
-            .map((t) => ({
-              id: t.id!,
-              title: t.title || 'Untitled Tab',
-              url: t.url || '',
-              favIconUrl: t.favIconUrl,
-              active: Boolean(t.active),
-            }));
-          setOpenTabs(mapped);
-
-          const active = mapped.find((t) => t.active);
-          if (active) {
-            setActiveBrowserTab((prev) => {
-              if (!prev || prev.id !== active.id || prev.url !== active.url) {
-                return active;
-              }
-              return prev;
-            });
-          } else if (mapped.length > 0) {
-            setActiveBrowserTab((prev) => prev || mapped[0]);
-          }
-        } catch (err) {
-          console.error('Failed to query browser tabs:', err);
-        }
-      } else {
-        // Fallback for local development preview
-        const mockTabs: BrowserTabInfo[] = [
-          {
-            id: 1,
-            title: 'Job Application - Greenhouse',
-            url: 'https://boards.greenhouse.io/demo/jobs/1',
-            active: true,
-          },
-          {
-            id: 2,
-            title: 'Customer Onboarding Form',
-            url: 'https://form.example.com/onboarding',
-            active: false,
-          },
-        ];
-        setOpenTabs(mockTabs);
-        setActiveBrowserTab((prev) => prev || mockTabs[0]);
-      }
-    }
-
-    refreshTabs();
-
-    if (typeof chrome !== 'undefined' && chrome.tabs) {
-      const handleActivated = () => refreshTabs();
-      const handleUpdated = (
-        tabId: number,
-        changeInfo: chrome.tabs.TabChangeInfo
-      ) => {
-        if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url) {
-          refreshTabs();
-        }
-      };
-      const handleRemoved = () => refreshTabs();
-      const handleCreated = () => refreshTabs();
-
-      chrome.tabs.onActivated.addListener(handleActivated);
-      chrome.tabs.onUpdated.addListener(handleUpdated);
-      chrome.tabs.onRemoved.addListener(handleRemoved);
-      chrome.tabs.onCreated.addListener(handleCreated);
-
-      return () => {
-        chrome.tabs.onActivated.removeListener(handleActivated);
-        chrome.tabs.onUpdated.removeListener(handleUpdated);
-        chrome.tabs.onRemoved.removeListener(handleRemoved);
-        chrome.tabs.onCreated.removeListener(handleCreated);
-      };
-    }
-  }, []);
-
-  // Initial load of settings and global memories, and instantiate harness
+  // Initial load of settings, sessions, memories, and harness
   useEffect(() => {
     async function init() {
       const loadedSettings = await loadSettings();
       const loadedGlobal = await loadGlobalMemories();
-      const initialTabKey = currentTabKeyRef.current;
+      const loadedSessions = await loadChatSessions();
+      
+      const firstSessionId = loadedSessions[0]?.id || 'session_default';
+      currentTabKeyRef.current = firstSessionId;
+
       const [loadedTabMems, loadedChat] = await Promise.all([
-        loadTabMemories(initialTabKey),
-        loadChatHistoryForTab(initialTabKey),
+        loadTabMemories(firstSessionId),
+        loadChatHistoryForTab(firstSessionId),
       ]);
 
       setSettings(loadedSettings);
       setGlobalMemories(loadedGlobal);
+      setSessions(loadedSessions);
+      setActiveSessionId(firstSessionId);
       setTabMemories(loadedTabMems);
       setMessages(loadedChat);
 
@@ -323,34 +251,37 @@ export function App() {
     init();
   }, []);
 
-  // When active browser tab ID changes, load its scoped chat history and tab memories
-  // If the user navigates to a new URL inside the SAME tab (tabId is identical), keep current messages and memories intact!
-  useEffect(() => {
-    if (!initialized || !activeBrowserTab) return;
-    const tabKey = getTabKey(activeBrowserTab);
-    
-    // If the tabKey didn't change (e.g. user navigated to another website in the SAME tab),
-    // preserve current chat history and do not replace it with an empty array
-    if (currentTabKeyRef.current === tabKey && messages.length > 0) {
-      return;
+  // When active session changes, load its scoped chat history and tab memories
+  const handleSelectSession = async (sessionId: string) => {
+    if (sessionId === activeSessionId) return;
+    setActiveSessionId(sessionId);
+    currentTabKeyRef.current = sessionId;
+    const [tMems, msgs] = await Promise.all([
+      loadTabMemories(sessionId),
+      loadChatHistoryForTab(sessionId),
+    ]);
+    setTabMemories(tMems);
+    setMessages(msgs);
+  };
+
+  const handleCreateSession = async () => {
+    const newSession = await createNewChatSession();
+    const updated = await loadChatSessions();
+    setSessions(updated);
+    await handleSelectSession(newSession.id);
+  };
+
+  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    const updated = await deleteChatSession(sessionId);
+    setSessions(updated);
+    if (activeSessionId === sessionId) {
+      const nextSession = updated[0];
+      if (nextSession) {
+        await handleSelectSession(nextSession.id);
+      }
     }
-
-    currentTabKeyRef.current = tabKey;
-
-    let isMounted = true;
-    Promise.all([
-      loadTabMemories(tabKey),
-      loadChatHistoryForTab(tabKey),
-    ]).then(([tMems, msgs]) => {
-      if (!isMounted) return;
-      setTabMemories(tMems);
-      setMessages(msgs);
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activeBrowserTab?.id, initialized]);
+  };
 
   // Keep harness synchronized with active memories and current settings
   useEffect(() => {
@@ -362,12 +293,7 @@ export function App() {
     harnessRef.current.updateConfig(settings, activeDocs);
   }, [settings, globalMemories, tabMemories]);
 
-  const handleSelectBrowserTab = (tab: BrowserTabInfo) => {
-    setActiveBrowserTab(tab);
-    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.update) {
-      chrome.tabs.update(tab.id, { active: true }, () => {});
-    }
-  };
+
 
   const handleSettingsSaved = (updated: AppSettings) => {
     setSettings(updated);
@@ -456,49 +382,49 @@ export function App() {
         </div>
       </header>
 
-      {/* Open Browser Tabs Switcher Bar */}
-      {openTabs.length > 0 && (
-        <div className="h-9 px-2 bg-zinc-950/90 border-b border-zinc-900 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-          <div className="flex items-center gap-1 text-[10px] text-zinc-500 shrink-0 mr-0.5 font-medium">
-            <Globe className="w-3 h-3 text-zinc-500" />
-            <span>Tabs:</span>
-          </div>
-          {openTabs.map((tab) => {
-            const isActive = activeBrowserTab?.id === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => handleSelectBrowserTab(tab)}
-                title={`${tab.title}\n${tab.url}`}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] max-w-[130px] shrink-0 transition-all border outline-none ${
-                  isActive
-                    ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-sm border-zinc-100'
-                    : 'bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/80 border-zinc-850/60'
-                }`}
-              >
-                {tab.favIconUrl ? (
-                  <img
-                    src={tab.favIconUrl}
-                    alt=""
-                    className="w-3 h-3 rounded-xs shrink-0 object-contain"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <Globe
-                    className={`w-3 h-3 shrink-0 ${
-                      isActive ? 'text-zinc-950' : 'text-zinc-500'
-                    }`}
-                  />
-                )}
-                <span className="truncate">{tab.title || 'Untitled'}</span>
-              </button>
-            );
-          })}
+      {/* Chat Tabs Switcher Bar */}
+      <div className="h-9 px-2 bg-zinc-950/90 border-b border-zinc-900 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+        <div className="flex items-center gap-1 text-[10px] text-zinc-500 shrink-0 mr-0.5 font-medium">
+          <MessageSquare className="w-3 h-3 text-zinc-500" />
+          <span>Chats:</span>
         </div>
-      )}
+        {sessions.map((sess) => {
+          const isActive = activeSessionId === sess.id;
+          return (
+            <div
+              key={sess.id}
+              onClick={() => handleSelectSession(sess.id)}
+              className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] max-w-[130px] shrink-0 transition-all border outline-none cursor-pointer ${
+                isActive
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-sm border-zinc-100'
+                  : 'bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/80 border-zinc-850/60'
+              }`}
+            >
+              <span className="truncate">{sess.title}</span>
+              {sessions.length > 1 && (
+                <button
+                  type="button"
+                  title="Close tab"
+                  onClick={(e) => handleDeleteSession(e, sess.id)}
+                  className={`p-0.5 rounded-full hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors ${
+                    isActive ? 'text-zinc-950 hover:bg-zinc-300' : 'text-zinc-500 hover:text-zinc-200'
+                  }`}
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+        <button
+          type="button"
+          onClick={handleCreateSession}
+          title="New Chat Tab"
+          className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 border border-zinc-800 transition-colors shrink-0"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
 
       {/* Main Tab Bar */}
       <nav className="h-9 px-2 border-b border-zinc-900 bg-zinc-950/60 flex items-center justify-between shrink-0">
@@ -576,7 +502,7 @@ export function App() {
         {activeNavTab === 'memory' && (
           <MemoryView
             currentTabKey={currentTabKeyRef.current}
-            currentTabTitle={activeBrowserTab?.title}
+            currentTabTitle={sessions.find((s) => s.id === activeSessionId)?.title || 'Current Chat'}
             globalMemories={globalMemories}
             tabMemories={tabMemories}
             onGlobalMemoriesChange={handleGlobalMemoriesChange}

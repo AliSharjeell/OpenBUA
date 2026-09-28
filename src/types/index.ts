@@ -39,6 +39,13 @@ export interface UserDocument {
   tabUrlPattern?: string; // Optional domain or URL pattern for tab-specific memory
 }
 
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface BrowserTabInfo {
   id: number;
   title: string;

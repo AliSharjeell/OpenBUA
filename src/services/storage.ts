@@ -1,6 +1,6 @@
 // Local storage service using chrome.storage.local with browser fallback for dev/testing
 
-import { AppSettings, UserDocument, ChatMessage } from '../types';
+import { AppSettings, UserDocument, ChatMessage, ChatSession } from '../types';
 
 const SETTINGS_KEY = 'autoform_settings';
 const GLOBAL_MEMORY_KEY = 'autoform_global_memory';
@@ -245,6 +245,61 @@ export async function toggleDocumentActive(id: string): Promise<UserDocument[]> 
 }
 
 // ========================================================
+// Chat Sessions Management (General Chat Tabs)
+// ========================================================
+const CHAT_SESSIONS_KEY = 'autoform_chat_sessions';
+
+export async function loadChatSessions(): Promise<ChatSession[]> {
+  const sessions = await getStorageItem<ChatSession[]>(CHAT_SESSIONS_KEY, []);
+  if (sessions.length === 0) {
+    const defaultSession: ChatSession = {
+      id: 'session_default',
+      title: 'Chat 1',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await setStorageItem(CHAT_SESSIONS_KEY, [defaultSession]);
+    return [defaultSession];
+  }
+  return sessions;
+}
+
+export async function saveChatSessions(sessions: ChatSession[]): Promise<void> {
+  await setStorageItem(CHAT_SESSIONS_KEY, sessions);
+}
+
+export async function createNewChatSession(title?: string): Promise<ChatSession> {
+  const sessions = await loadChatSessions();
+  const num = sessions.length + 1;
+  const newSession: ChatSession = {
+    id: `session_${Date.now()}`,
+    title: title || `Chat ${num}`,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  const updated = [...sessions, newSession];
+  await saveChatSessions(updated);
+  return newSession;
+}
+
+export async function deleteChatSession(sessionId: string): Promise<ChatSession[]> {
+  const sessions = await loadChatSessions();
+  const updated = sessions.filter((s) => s.id !== sessionId);
+  const finalSessions = updated.length > 0 ? updated : [
+    {
+      id: `session_${Date.now()}`,
+      title: 'Chat 1',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    },
+  ];
+  await saveChatSessions(finalSessions);
+  // Also clear messages and tab memories associated with deleted session
+  await clearChatHistoryForTab(sessionId);
+  return finalSessions;
+}
+
+// ========================================================
 // Tab-Scoped Chat History
 // ========================================================
 export async function loadChatHistoryForTab(tabKey: string): Promise<ChatMessage[]> {
@@ -254,7 +309,7 @@ export async function loadChatHistoryForTab(tabKey: string): Promise<ChatMessage
 
 export async function saveChatHistoryForTab(tabKey: string, messages: ChatMessage[]): Promise<void> {
   const key = `${CHAT_HISTORY_PREFIX}${encodeURIComponent(tabKey)}`;
-  const trimmed = messages.slice(-50);
+  const trimmed = messages.slice(-100);
   await setStorageItem(key, trimmed);
 }
 
@@ -269,10 +324,11 @@ export async function loadChatHistory(): Promise<ChatMessage[]> {
 }
 
 export async function saveChatHistory(messages: ChatMessage[]): Promise<void> {
-  const trimmed = messages.slice(-50);
+  const trimmed = messages.slice(-100);
   await setStorageItem('autoform_chat_history', trimmed);
 }
 
 export async function clearChatHistory(): Promise<void> {
   await setStorageItem('autoform_chat_history', []);
 }
+
