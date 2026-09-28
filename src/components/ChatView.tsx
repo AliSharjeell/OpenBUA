@@ -27,10 +27,58 @@ interface ChatViewProps {
   onMessagesChange: (msgs: ChatMessage[]) => void;
   harness: FormAgentHarness | null;
   isBusy: boolean;
+  activeTool: ToolCallState | null;
   settings: AppSettings;
   documents: UserDocument[];
   onNavigateToSettings: () => void;
   onNavigateToVault: () => void;
+}
+
+function getToolMeta(toolName: string) {
+  switch (toolName) {
+    case 'get_active_tab_form':
+      return {
+        label: 'Inspecting Page Form Elements',
+        desc: 'Scanning active browser tab DOM for input fields, selects, and buttons...',
+        icon: Scan,
+      };
+    case 'fill_form_fields':
+      return {
+        label: 'Auto-Filling Form Inputs',
+        desc: 'Setting input values matched from your stored documents...',
+        icon: Sparkles,
+      };
+    case 'click_element':
+      return {
+        label: 'Clicking Button / Advancing',
+        desc: 'Clicking button to advance to next step or submit form...',
+        icon: ArrowRight,
+      };
+    case 'get_user_documents':
+      return {
+        label: 'Searching Document Vault',
+        desc: 'Retrieving user profile and stored document data...',
+        icon: FileText,
+      };
+    case 'capture_tab_screenshot':
+      return {
+        label: 'Capturing Screenshot',
+        desc: 'Taking visual snapshot of the webpage for verification...',
+        icon: Camera,
+      };
+    case 'scroll_page':
+      return {
+        label: 'Scrolling Page',
+        desc: 'Adjusting viewport to reveal additional fields...',
+        icon: ChevronDown,
+      };
+    default:
+      return {
+        label: `Running Tool: ${toolName}`,
+        desc: 'Communicating with active browser tab...',
+        icon: Terminal,
+      };
+  }
 }
 
 export function ChatView({
@@ -38,6 +86,7 @@ export function ChatView({
   onMessagesChange,
   harness,
   isBusy,
+  activeTool,
   settings,
   documents,
   onNavigateToSettings,
@@ -59,7 +108,7 @@ export function ChatView({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isBusy]);
+  }, [messages, isBusy, activeTool]);
 
   const handleSend = async (textToSend?: string) => {
     const promptText = (textToSend || input).trim();
@@ -245,56 +294,90 @@ export function ChatView({
             >
               {/* Tool Calls inside assistant message */}
               {msg.toolCalls && msg.toolCalls.length > 0 && (
-                <div className="space-y-1.5 mb-2">
+                <div className="space-y-1.5 mb-2.5">
                   {msg.toolCalls.map((tc) => {
                     const isExpanded = expandedTools[tc.id];
+                    const meta = getToolMeta(tc.toolName);
+                    const Icon = meta.icon;
                     return (
                       <div
                         key={tc.id}
-                        className="rounded border border-zinc-800 bg-zinc-950/70 overflow-hidden text-[11px]"
+                        className={`rounded-md border overflow-hidden text-[11px] transition-all ${
+                          tc.status === 'running'
+                            ? 'border-zinc-700 bg-zinc-900/90 shadow-sm'
+                            : tc.status === 'error'
+                            ? 'border-red-900/60 bg-red-950/20'
+                            : 'border-zinc-800/90 bg-zinc-950/80'
+                        }`}
                       >
                         <button
                           type="button"
-                          className="w-full p-1.5 px-2 flex items-center justify-between hover:bg-zinc-900/60 transition-colors"
+                          className="w-full p-2 px-2.5 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
                           onClick={() => toggleToolExpand(tc.id)}
                         >
-                          <div className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-300">
-                            <Terminal className="w-3 h-3 text-zinc-500" />
-                            <span>{tc.toolName}</span>
+                          <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-300 min-w-0 pr-2">
+                            <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            <span className="font-semibold text-zinc-200">{tc.toolName}</span>
+                            <span className="font-sans text-[10px] text-zinc-400 truncate">
+                              • {meta.label}
+                            </span>
                           </div>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1.5 shrink-0">
                             {tc.status === 'running' ? (
-                              <Loader2 className="w-3 h-3 animate-spin text-zinc-400" />
+                              <span className="flex items-center gap-1 text-[10px] text-amber-300 font-medium">
+                                <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                                <span>Running</span>
+                              </span>
                             ) : tc.status === 'error' ? (
-                              <AlertCircle className="w-3 h-3 text-red-400" />
+                              <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium">
+                                <AlertCircle className="w-3 h-3 text-red-400" />
+                                <span>Failed</span>
+                              </span>
                             ) : (
-                              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                              <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                <span>Completed</span>
+                              </span>
                             )}
                             {isExpanded ? (
-                              <ChevronDown className="w-3 h-3 text-zinc-500" />
+                              <ChevronDown className="w-3 h-3 text-zinc-500 ml-0.5" />
                             ) : (
-                              <ChevronRight className="w-3 h-3 text-zinc-500" />
+                              <ChevronRight className="w-3 h-3 text-zinc-500 ml-0.5" />
                             )}
                           </div>
                         </button>
 
                         {isExpanded && (
-                          <div className="p-2 border-t border-zinc-900 bg-zinc-950 font-mono text-[10px] text-zinc-400 space-y-1 overflow-x-auto max-h-48 overflow-y-auto">
+                          <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 font-mono text-[10px] text-zinc-400 space-y-2 overflow-x-auto max-h-56 overflow-y-auto">
                             {tc.args && Object.keys(tc.args).length > 0 && (
                               <div>
-                                <span className="text-zinc-500 block">Arguments:</span>
-                                <pre className="text-zinc-300 whitespace-pre-wrap">
+                                <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
+                                  Arguments:
+                                </span>
+                                <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded border border-zinc-850 whitespace-pre-wrap">
                                   {JSON.stringify(tc.args, null, 2)}
                                 </pre>
                               </div>
                             )}
                             {tc.result && (
-                              <div className="mt-1 pt-1 border-t border-zinc-900">
-                                <span className="text-zinc-500 block">Result:</span>
-                                <pre className="text-zinc-300 whitespace-pre-wrap">
+                              <div>
+                                <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
+                                  Output / Result:
+                                </span>
+                                <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded border border-zinc-850 whitespace-pre-wrap">
                                   {typeof tc.result === 'string'
                                     ? tc.result
                                     : JSON.stringify(tc.result, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            {tc.errorMessage && (
+                              <div>
+                                <span className="text-red-400 block font-medium mb-0.5 font-sans">
+                                  Error:
+                                </span>
+                                <pre className="text-red-300 bg-red-950/40 p-1.5 rounded border border-red-900/40 whitespace-pre-wrap">
+                                  {tc.errorMessage}
                                 </pre>
                               </div>
                             )}
@@ -330,6 +413,56 @@ export function ChatView({
 
       {/* Input Box Footer */}
       <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 space-y-2">
+        {/* Live Active Tool Execution Banner */}
+        {isBusy && (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/95 p-2 px-3 shadow-lg flex items-center justify-between gap-3 animate-in fade-in duration-200">
+            {activeTool ? (
+              (() => {
+                const meta = getToolMeta(activeTool.toolName);
+                const Icon = meta.icon;
+                return (
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-6 h-6 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0 text-zinc-100">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-300" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold text-zinc-100 truncate">
+                          {meta.label}
+                        </span>
+                        <span className="font-mono text-[9px] px-1 py-0.2 bg-zinc-950 border border-zinc-800 rounded text-zinc-400">
+                          {activeTool.toolName}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-zinc-400 truncate">
+                        {meta.desc}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400 shrink-0" />
+                <span className="text-[11px] text-zinc-300 font-medium truncate">
+                  AutoForm AI is reasoning & planning next action...
+                </span>
+              </div>
+            )}
+
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-6 px-2 text-[10px] shrink-0"
+              onClick={handleStop}
+              title="Stop generation"
+            >
+              <Square className="w-2.5 h-2.5 mr-1 fill-current" />
+              Stop
+            </Button>
+          </div>
+        )}
+
         <div className="relative flex items-end bg-zinc-900 rounded-lg border border-zinc-800 focus-within:border-zinc-700 transition-colors">
           <Textarea
             ref={textareaRef}
