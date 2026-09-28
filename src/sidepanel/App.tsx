@@ -10,11 +10,13 @@ import {
   loadSettings,
   loadGlobalMemories,
   loadTabMemories,
+  saveTabMemory,
   loadChatHistoryForTab,
   saveChatHistoryForTab,
   getTabKey,
   DEFAULT_SETTINGS,
 } from '../services/storage';
+import { readFileContent } from '../services/pdf-parser';
 import { FormAgentHarness } from '../agent/form-agent';
 import { ChatView } from '../components/ChatView';
 import { MemoryView } from '../components/MemoryView';
@@ -343,6 +345,28 @@ export function App() {
     setTabMemories(updated);
   };
 
+  const handleChatDocumentUpload = async (file: File): Promise<UserDocument> => {
+    const parsed = await readFileContent(file);
+    const tabKey = currentTabKeyRef.current;
+    const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
+    const newDoc: UserDocument = {
+      id: `mem-${Date.now()}`,
+      title: cleanTitle,
+      type: parsed.type,
+      content: parsed.content,
+      summary: `${file.name} uploaded from chat`,
+      createdAt: Date.now(),
+      sizeBytes: file.size,
+      tags: ['chat-upload'],
+      isActiveForContext: true,
+      isGlobal: false,
+      tabUrlPattern: tabKey,
+    };
+    await saveTabMemory(tabKey, newDoc);
+    setTabMemories((prev) => [newDoc, ...prev]);
+    return newDoc;
+  };
+
   const handleMessagesChange = (updatedMsgs: ChatMessage[]) => {
     setMessages(updatedMsgs);
     saveChatHistoryForTab(currentTabKeyRef.current, updatedMsgs);
@@ -414,9 +438,9 @@ export function App() {
                 type="button"
                 onClick={() => handleSelectBrowserTab(tab)}
                 title={`${tab.title}\n${tab.url}`}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] max-w-[130px] shrink-0 transition-all border ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] max-w-[130px] shrink-0 transition-all border outline-none ${
                   isActive
-                    ? 'bg-zinc-850 text-zinc-100 border-zinc-700 font-medium shadow-xs'
+                    ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-sm border-zinc-100'
                     : 'bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/80 border-zinc-850/60'
                 }`}
               >
@@ -432,7 +456,7 @@ export function App() {
                 ) : (
                   <Globe
                     className={`w-3 h-3 shrink-0 ${
-                      isActive ? 'text-zinc-300' : 'text-zinc-500'
+                      isActive ? 'text-zinc-950' : 'text-zinc-500'
                     }`}
                   />
                 )}
@@ -445,12 +469,12 @@ export function App() {
 
       {/* Main Tab Bar */}
       <nav className="h-9 px-2 border-b border-zinc-900 bg-zinc-950/60 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1 w-full">
+        <div className="flex items-center gap-1.5 w-full">
           <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-md text-[11px] font-medium transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
               activeNavTab === 'chat'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800/80 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40'
+                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
             }`}
             onClick={() => setActiveNavTab('chat')}
           >
@@ -459,25 +483,25 @@ export function App() {
           </button>
 
           <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-md text-[11px] font-medium transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
               activeNavTab === 'memory'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800/80 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40'
+                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
             }`}
             onClick={() => setActiveNavTab('memory')}
           >
             <Layers className="w-3.5 h-3.5" />
             <span>Memory</span>
-            <span className="ml-0.5 text-[9px] px-1 py-0.2 bg-zinc-800 rounded-full text-zinc-300">
+            <span className="ml-0.5 text-[9px] px-1.5 py-0.2 bg-zinc-800 rounded-full text-zinc-300">
               {activeDocuments.length}
             </span>
           </button>
 
           <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-md text-[11px] font-medium transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
               activeNavTab === 'inspector'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800/80 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40'
+                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
             }`}
             onClick={() => setActiveNavTab('inspector')}
           >
@@ -486,10 +510,10 @@ export function App() {
           </button>
 
           <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-md text-[11px] font-medium transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
               activeNavTab === 'settings'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800/80 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40'
+                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
             }`}
             onClick={() => setActiveNavTab('settings')}
           >
@@ -512,6 +536,7 @@ export function App() {
             documents={activeDocuments}
             onNavigateToSettings={() => setActiveNavTab('settings')}
             onNavigateToMemory={() => setActiveNavTab('memory')}
+            onUploadDocument={handleChatDocumentUpload}
           />
         )}
 
