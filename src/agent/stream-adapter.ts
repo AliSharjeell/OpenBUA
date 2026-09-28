@@ -189,15 +189,16 @@ async function streamOpenAI(
     payload.tool_choice = 'auto';
   }
 
-  // Detect Groq specifically: endpoint must contain groq.com, OR key must start with gsk_ AND endpoint is not a known non-Groq provider.
+  // Detect Groq specifically by checking for the exact Groq API endpoint.
   // This ensures users with their own direct Qwen/other provider keys are NEVER affected by Groq-specific limits.
-  const isGroq = endpoint.includes('groq.com') || (config.apiKey.trim().startsWith('gsk_') && !endpoint.includes('dashscope') && !endpoint.includes('openai.com'));
+  const isGroq = endpoint.includes('api.groq.com/openai/v1/chat/completions');
 
   // If using Groq, clamp max_tokens to prevent OTPM (output tokens per minute) errors on Groq's free tier.
   // This ONLY applies to Groq-routed requests. Direct Qwen, OpenAI, or other provider keys are unaffected.
+  // qwen3.8-27b has a 1000 OTPM limit — we use 450 so the agent can make ~2 calls/min (tool call + result processing).
   if (isGroq) {
     if ((config.model || '').includes('qwen')) {
-      payload.max_tokens = 900;
+      payload.max_tokens = 450;
     } else {
       payload.max_tokens = 2048;
     }
@@ -225,11 +226,13 @@ async function streamOpenAI(
 
     // Check for 429 Rate Limit (both ITPM input tokens and OTPM output tokens on Groq free tier)
     if (response.status === 429 && isGroq && attempt < maxRetries) {
-      // If error specifically asks to reduce max_tokens (OTPM exceeded), clamp max_tokens smaller and retry immediately
+      // If error specifically asks to reduce max_tokens (OTPM exceeded), clamp max_tokens smaller and retry after a short wait
       if (errorBody.includes('reduce max_tokens') || errorBody.includes('OTPM')) {
-        const currentMax = payload.max_tokens || 1000;
-        payload.max_tokens = Math.max(350, Math.floor(currentMax * 0.7));
-        await new Promise((r) => setTimeout(r, 1000));
+        const currentMax = payload.max_tokens || 450;
+        payload.max_tokens = Math.max(200, Math.floor(currentMax * 0.5));
+        // Wait a few seconds for OTPM budget to partially reset
+        stream.push({ type: 'text_delta', delta: `⏳ Groq output limit hit. Retrying with shorter response (max ${payload.max_tokens} tokens)...\n` });
+        await new Promise((r) => setTimeout(r, 5000));
         continue;
       }
 
