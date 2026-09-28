@@ -1,25 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, ToolCallState, AppSettings, UserDocument } from '../types';
 import { FormAgentHarness } from '../agent/form-agent';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { Button } from './ui/button';
 import { Textarea } from './ui/input';
-import { Badge } from './ui/card';
 import {
   Send,
   Square,
   Sparkles,
-  Scan,
   ChevronRight,
   ChevronDown,
   CheckCircle2,
   AlertCircle,
   Loader2,
   Trash2,
-  Camera,
-  ArrowRight,
   FileText,
   Terminal,
-  ExternalLink,
 } from 'lucide-react';
 
 interface ChatViewProps {
@@ -31,7 +27,8 @@ interface ChatViewProps {
   settings: AppSettings;
   documents: UserDocument[];
   onNavigateToSettings: () => void;
-  onNavigateToVault: () => void;
+  onNavigateToMemory: () => void;
+  onNavigateToVault?: () => void;
 }
 
 function getToolMeta(toolName: string) {
@@ -40,31 +37,31 @@ function getToolMeta(toolName: string) {
       return {
         label: 'Inspecting Page Form Elements',
         desc: 'Scanning active browser tab DOM for input fields, selects, and buttons...',
-        icon: Scan,
+        icon: Terminal,
       };
     case 'fill_form_fields':
       return {
         label: 'Auto-Filling Form Inputs',
-        desc: 'Setting input values matched from your stored documents...',
+        desc: 'Setting input values matched from your stored memories...',
         icon: Sparkles,
       };
     case 'click_element':
       return {
         label: 'Clicking Button / Advancing',
         desc: 'Clicking button to advance to next step or submit form...',
-        icon: ArrowRight,
+        icon: Terminal,
       };
     case 'get_user_documents':
       return {
-        label: 'Searching Document Vault',
-        desc: 'Retrieving user profile and stored document data...',
+        label: 'Searching Stored Memory',
+        desc: 'Retrieving user profile and stored memory data...',
         icon: FileText,
       };
     case 'capture_tab_screenshot':
       return {
         label: 'Capturing Screenshot',
         desc: 'Taking visual snapshot of the webpage for verification...',
-        icon: Camera,
+        icon: Terminal,
       };
     case 'scroll_page':
       return {
@@ -90,6 +87,7 @@ export function ChatView({
   settings,
   documents,
   onNavigateToSettings,
+  onNavigateToMemory,
   onNavigateToVault,
 }: ChatViewProps) {
   const [input, setInput] = useState('');
@@ -101,6 +99,8 @@ export function ChatView({
   const currentKey =
     settings.activeProvider === 'anthropic' ? settings.anthropic.apiKey : settings.openai.apiKey;
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
+
+  const handleOpenMemory = onNavigateToMemory || onNavigateToVault;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -169,61 +169,6 @@ export function ChatView({
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
-      {/* Quick Action Chips */}
-      <div className="p-2 border-b border-zinc-900 bg-zinc-950/80 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-[10px] gap-1 shrink-0 bg-zinc-900/60 border-zinc-800 text-zinc-200 hover:bg-zinc-800"
-          onClick={() =>
-            handleSend(
-              'Inspect this current page form, cross-reference my active stored documents, and fill all matching fields.'
-            )
-          }
-          disabled={isBusy}
-        >
-          <Sparkles className="w-2.5 h-2.5 text-zinc-100" />
-          Fill Form
-        </Button>
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-[10px] gap-1 shrink-0 bg-zinc-900/60 border-zinc-800 text-zinc-300 hover:bg-zinc-800"
-          onClick={() => handleSend('Inspect and list all fields and action buttons on this tab.')}
-          disabled={isBusy}
-        >
-          <Scan className="w-2.5 h-2.5" />
-          Inspect Fields
-        </Button>
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-[10px] gap-1 shrink-0 bg-zinc-900/60 border-zinc-800 text-zinc-300 hover:bg-zinc-800"
-          onClick={() =>
-            handleSend(
-              'Proceed to the next page or step of this form, inspect the new fields, and fill them.'
-            )
-          }
-          disabled={isBusy}
-        >
-          <ArrowRight className="w-2.5 h-2.5" />
-          Next Step
-        </Button>
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-[10px] gap-1 shrink-0 bg-zinc-900/60 border-zinc-800 text-zinc-300 hover:bg-zinc-800"
-          onClick={() => handleSend('Take a screenshot of the current page and check its visual state.')}
-          disabled={isBusy}
-        >
-          <Camera className="w-2.5 h-2.5" />
-          Screenshot
-        </Button>
-      </div>
-
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3.5">
         {messages.length === 0 && (
@@ -242,7 +187,7 @@ export function ChatView({
               <div className="p-2.5 bg-amber-950/40 border border-amber-900/60 rounded-md text-amber-300 text-[11px] flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>Add your API Key in Settings to get started.</span>
-                <Button size="sm" variant="outline" className="h-6 text-[10px] ml-auto" onClick={onNavigateToSettings}>
+                <Button size="sm" variant="outline" className="h-6 text-[10px] ml-auto rounded-full" onClick={onNavigateToSettings}>
                   Settings
                 </Button>
               </div>
@@ -251,16 +196,16 @@ export function ChatView({
             {activeDocsCount === 0 && (
               <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-md text-zinc-400 text-[11px] flex items-center gap-2">
                 <FileText className="w-4 h-4 shrink-0" />
-                <span>No active documents in Vault.</span>
-                <Button size="sm" variant="outline" className="h-6 text-[10px] ml-auto" onClick={onNavigateToVault}>
-                  Add Data
+                <span>No active memories stored.</span>
+                <Button size="sm" variant="outline" className="h-6 text-[10px] ml-auto rounded-full" onClick={handleOpenMemory}>
+                  Add Memory
                 </Button>
               </div>
             )}
 
             <div className="pt-2 flex flex-col gap-1.5 w-full max-w-[280px]">
               <button
-                className="p-2 text-left rounded-md bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800/80 text-[11px] text-zinc-300 hover:text-zinc-100 transition-colors flex items-center justify-between"
+                className="p-2 text-left rounded-xl bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800/80 text-[11px] text-zinc-300 hover:text-zinc-100 transition-colors flex items-center justify-between"
                 onClick={() =>
                   handleSend('Scan this webpage form, match with my profile, and fill all inputs.')
                 }
@@ -269,7 +214,7 @@ export function ChatView({
                 <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
               </button>
               <button
-                className="p-2 text-left rounded-md bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800/80 text-[11px] text-zinc-300 hover:text-zinc-100 transition-colors flex items-center justify-between"
+                className="p-2 text-left rounded-xl bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800/80 text-[11px] text-zinc-300 hover:text-zinc-100 transition-colors flex items-center justify-between"
                 onClick={() => handleSend('What form fields are present on this page?')}
               >
                 <span>📋 List all form fields and types</span>
@@ -286,10 +231,10 @@ export function ChatView({
           >
             {/* Message Bubble */}
             <div
-              className={`max-w-[88%] rounded-lg p-2.5 text-xs ${
+              className={`max-w-[88%] rounded-2xl p-3 text-xs ${
                 msg.role === 'user'
-                  ? 'bg-zinc-800 text-zinc-100 rounded-br-none shadow-sm'
-                  : 'bg-zinc-900/90 border border-zinc-800 text-zinc-200 rounded-bl-none shadow-sm'
+                  ? 'bg-zinc-800 text-zinc-100 rounded-br-sm shadow-sm'
+                  : 'bg-zinc-900/90 border border-zinc-800 text-zinc-200 rounded-bl-sm shadow-sm'
               }`}
             >
               {/* Tool Calls inside assistant message */}
@@ -302,7 +247,7 @@ export function ChatView({
                     return (
                       <div
                         key={tc.id}
-                        className={`rounded-md border overflow-hidden text-[11px] transition-all ${
+                        className={`rounded-xl border overflow-hidden text-[11px] transition-all ${
                           tc.status === 'running'
                             ? 'border-zinc-700 bg-zinc-900/90 shadow-sm'
                             : tc.status === 'error'
@@ -354,7 +299,7 @@ export function ChatView({
                                 <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
                                   Arguments:
                                 </span>
-                                <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded border border-zinc-850 whitespace-pre-wrap">
+                                <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap">
                                   {JSON.stringify(tc.args, null, 2)}
                                 </pre>
                               </div>
@@ -364,7 +309,7 @@ export function ChatView({
                                 <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
                                   Output / Result:
                                 </span>
-                                <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded border border-zinc-850 whitespace-pre-wrap">
+                                <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap">
                                   {typeof tc.result === 'string'
                                     ? tc.result
                                     : JSON.stringify(tc.result, null, 2)}
@@ -376,7 +321,7 @@ export function ChatView({
                                 <span className="text-red-400 block font-medium mb-0.5 font-sans">
                                   Error:
                                 </span>
-                                <pre className="text-red-300 bg-red-950/40 p-1.5 rounded border border-red-900/40 whitespace-pre-wrap">
+                                <pre className="text-red-300 bg-red-950/40 p-1.5 rounded-lg border border-red-900/40 whitespace-pre-wrap">
                                   {tc.errorMessage}
                                 </pre>
                               </div>
@@ -389,10 +334,16 @@ export function ChatView({
                 </div>
               )}
 
-              {/* Message Text Content */}
+              {/* Message Content: Formatted Markdown for Assistant, text for User */}
               {msg.content && (
-                <div className="whitespace-pre-wrap leading-relaxed select-text font-sans">
-                  {msg.content}
+                <div>
+                  {msg.role === 'assistant' ? (
+                    <MarkdownRenderer content={msg.content} />
+                  ) : (
+                    <div className="whitespace-pre-wrap leading-relaxed select-text font-sans">
+                      {msg.content}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -415,14 +366,14 @@ export function ChatView({
       <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 space-y-2">
         {/* Live Active Tool Execution Banner */}
         {isBusy && (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/95 p-2 px-3 shadow-lg flex items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/95 p-2 px-3 shadow-lg flex items-center justify-between gap-3 animate-in fade-in duration-200">
             {activeTool ? (
               (() => {
                 const meta = getToolMeta(activeTool.toolName);
                 const Icon = meta.icon;
                 return (
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-6 h-6 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0 text-zinc-100">
+                    <div className="w-6 h-6 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0 text-zinc-100">
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-300" />
                     </div>
                     <div className="min-w-0">
@@ -430,7 +381,7 @@ export function ChatView({
                         <span className="text-[11px] font-semibold text-zinc-100 truncate">
                           {meta.label}
                         </span>
-                        <span className="font-mono text-[9px] px-1 py-0.2 bg-zinc-950 border border-zinc-800 rounded text-zinc-400">
+                        <span className="font-mono text-[9px] px-1 py-0.2 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-400">
                           {activeTool.toolName}
                         </span>
                       </div>
@@ -453,7 +404,7 @@ export function ChatView({
             <Button
               variant="destructive"
               size="sm"
-              className="h-6 px-2 text-[10px] shrink-0"
+              className="h-6 px-2 text-[10px] shrink-0 rounded-full"
               onClick={handleStop}
               title="Stop generation"
             >
@@ -463,7 +414,25 @@ export function ChatView({
           </div>
         )}
 
-        <div className="relative flex items-end bg-zinc-900 rounded-lg border border-zinc-800 focus-within:border-zinc-700 transition-colors">
+        {/* Round "Fill Form" Action Button directly above input box */}
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-[11px] font-medium transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+            onClick={() =>
+              handleSend(
+                'Inspect this current page form, cross-reference my active stored documents, and fill all matching fields.'
+              )
+            }
+            disabled={isBusy}
+          >
+            <Sparkles className="w-3 h-3 text-zinc-100" />
+            <span>Fill Form</span>
+          </button>
+        </div>
+
+        {/* Rounder Input Box */}
+        <div className="relative flex items-end bg-zinc-900/90 rounded-2xl border border-zinc-800 focus-within:border-zinc-700 transition-colors p-1 pl-2">
           <Textarea
             ref={textareaRef}
             rows={1}
@@ -475,7 +444,7 @@ export function ChatView({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="border-0 bg-transparent min-h-[38px] max-h-24 resize-none py-2.5 px-3 text-xs focus-visible:ring-0"
+            className="border-0 bg-transparent min-h-[38px] max-h-24 resize-none py-2 px-2 text-xs focus-visible:ring-0 focus:outline-none"
             disabled={isBusy || !hasKey}
           />
 
@@ -484,16 +453,16 @@ export function ChatView({
               <Button
                 variant="destructive"
                 size="icon"
-                className="h-7 w-7 rounded-md"
+                className="h-8 w-8 rounded-full shadow-sm"
                 onClick={handleStop}
                 title="Stop generation"
               >
-                <Square className="w-3 h-3 fill-current" />
+                <Square className="w-3.5 h-3.5 fill-current" />
               </Button>
             ) : (
               <Button
                 size="icon"
-                className="h-7 w-7 rounded-md bg-zinc-100 text-zinc-950 hover:bg-zinc-200"
+                className="h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 hover:bg-zinc-200 shadow-sm"
                 onClick={() => handleSend()}
                 disabled={!input.trim() || !hasKey}
                 title="Send (Enter)"
@@ -507,16 +476,12 @@ export function ChatView({
         {/* Footer Status Bar */}
         <div className="flex items-center justify-between text-[10px] text-zinc-500 px-1">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-zinc-400">
-              {settings.activeProvider === 'anthropic' ? settings.anthropic.model : settings.openai.model}
-            </span>
-            <span>•</span>
             <span
               className="hover:text-zinc-300 cursor-pointer"
-              onClick={onNavigateToVault}
-              title="Active knowledge documents"
+              onClick={handleOpenMemory}
+              title="Active stored memory"
             >
-              {activeDocsCount} docs active
+              {activeDocsCount} memories active
             </span>
           </div>
 
