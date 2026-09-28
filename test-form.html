@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AutoForm AI - Multi-Step Test Form</title>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0f172a; color: #f8fafc; display: flex; justify-content: center; padding: 40px 20px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; width: 100%; max-width: 640px; padding: 32px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.4); }
+    h1 { font-size: 20px; margin-top: 0; color: #f1f5f9; }
+    p { font-size: 13px; color: #94a3b8; }
+    .steps { display: flex; gap: 12px; margin-bottom: 24px; border-bottom: 1px solid #334155; padding-bottom: 16px; }
+    .step-badge { font-size: 11px; padding: 4px 10px; border-radius: 9999px; background: #0f172a; color: #64748b; font-weight: 500; }
+    .step-badge.active { background: #38bdf8; color: #0f172a; font-weight: 600; }
+    .form-group { margin-bottom: 18px; }
+    label { display: block; font-size: 12px; font-weight: 500; color: #cbd5e1; margin-bottom: 6px; }
+    label span.req { color: #f43f5e; }
+    input[type="text"], input[type="email"], input[type="tel"], select, textarea {
+      width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #f8fafc; font-size: 13px; transition: border-color 0.2s;
+    }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #38bdf8; }
+    .row { display: flex; gap: 16px; }
+    .row > div { flex: 1; }
+    .btn-row { display: flex; justify-content: space-between; margin-top: 28px; }
+    button { padding: 10px 20px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; }
+    .btn-next { background: #38bdf8; color: #0f172a; font-weight: 600; }
+    .btn-next:hover { background: #7dd3fc; }
+    .btn-back { background: #334155; color: #cbd5e1; }
+    .btn-back:hover { background: #475569; }
+    .btn-submit { background: #22c55e; color: #0f172a; font-weight: 600; }
+    .btn-submit:hover { background: #4ade80; }
+    .success-alert { display: none; background: #064e3b; border: 1px solid #059669; color: #6ee7b7; padding: 16px; border-radius: 6px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Software Engineering Application Form</h1>
+    <p>Test page for AutoForm AI extension. Supports multi-step navigation and reactive input detection.</p>
+
+    <div class="steps">
+      <div id="step-ind-1" class="step-badge active">Step 1: Personal Info</div>
+      <div id="step-ind-2" class="step-badge">Step 2: Experience & Details</div>
+      <div id="step-ind-3" class="step-badge">Step 3: Review & Submit</div>
+    </div>
+
+    <form id="multi-step-form" onsubmit="event.preventDefault();">
+      <!-- Step 1 -->
+      <div id="step-1">
+        <div class="row">
+          <div class="form-group">
+            <label for="first_name">First Name <span class="req">*</span></label>
+            <input type="text" id="first_name" name="firstName" placeholder="e.g. Alex" required>
+          </div>
+          <div class="form-group">
+            <label for="last_name">Last Name <span class="req">*</span></label>
+            <input type="text" id="last_name" name="lastName" placeholder="e.g. Mercer" required>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="form-group">
+            <label for="email">Email Address <span class="req">*</span></label>
+            <input type="email" id="email" name="email" placeholder="alex@example.com" required>
+          </div>
+          <div class="form-group">
+            <label for="phone">Phone Number</label>
+            <input type="tel" id="phone" name="phone" placeholder="+1 (555) 000-0000">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="form-group">
+            <label for="city">City</label>
+            <input type="text" id="city" name="city" placeholder="Seattle">
+          </div>
+          <div class="form-group">
+            <label for="state">State / Province</label>
+            <input type="text" id="state" name="state" placeholder="WA">
+          </div>
+        </div>
+
+        <div class="btn-row" style="justify-content: flex-end;">
+          <button type="button" class="btn-next" onclick="goToStep(2)">Next: Experience &rarr;</button>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div id="step-2" style="display: none;">
+        <div class="form-group">
+          <label for="job_title">Current Job Title</label>
+          <input type="text" id="job_title" name="jobTitle" placeholder="Senior Software Engineer">
+        </div>
+
+        <div class="row">
+          <div class="form-group">
+            <label for="company">Current Company</label>
+            <input type="text" id="company" name="company" placeholder="HyperScale Systems">
+          </div>
+          <div class="form-group">
+            <label for="years_exp">Years of Experience <span class="req">*</span></label>
+            <select id="years_exp" name="yearsOfExperience" required>
+              <option value="">Select experience level...</option>
+              <option value="entry">0-2 years</option>
+              <option value="mid">3-5 years</option>
+              <option value="senior">6+ years</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="linkedin_url">LinkedIn URL</label>
+          <input type="text" id="linkedin_url" name="linkedin" placeholder="https://linkedin.com/in/username">
+        </div>
+
+        <div class="form-group">
+          <label for="summary_text">Professional Summary / Cover Note</label>
+          <textarea id="summary_text" name="summary" rows="3" placeholder="Briefly describe your experience and skills..."></textarea>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" class="btn-back" onclick="goToStep(1)">&larr; Back</button>
+          <button type="button" class="btn-next" onclick="goToStep(3)">Next: Review &rarr;</button>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div id="step-3" style="display: none;">
+        <div class="form-group">
+          <label>Review Notice</label>
+          <p style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
+            Please ensure all your information is filled accurately before completing your application.
+          </p>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="terms" name="terms" required style="width: 16px; height: 16px;">
+          <label for="terms" style="margin-bottom: 0;">I confirm all information provided is accurate <span class="req">*</span></label>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" class="btn-back" onclick="goToStep(2)">&larr; Back</button>
+          <button type="button" class="btn-submit" onclick="submitForm()">Submit Application</button>
+        </div>
+      </div>
+    </form>
+
+    <div id="success-alert" class="success-alert">
+      <h3>🎉 Application Submitted!</h3>
+      <p style="color: #a7f3d0; margin-bottom: 0;">Form submission successful. All fields filled and validated.</p>
+    </div>
+  </div>
+
+  <script>
+    function goToStep(step) {
+      document.getElementById('step-1').style.display = step === 1 ? 'block' : 'none';
+      document.getElementById('step-2').style.display = step === 2 ? 'block' : 'none';
+      document.getElementById('step-3').style.display = step === 3 ? 'block' : 'none';
+
+      document.getElementById('step-ind-1').className = 'step-badge ' + (step === 1 ? 'active' : '');
+      document.getElementById('step-ind-2').className = 'step-badge ' + (step === 2 ? 'active' : '');
+      document.getElementById('step-ind-3').className = 'step-badge ' + (step === 3 ? 'active' : '');
+    }
+
+    function submitForm() {
+      document.getElementById('multi-step-form').style.display = 'none';
+      document.getElementById('success-alert').style.display = 'block';
+    }
+  </script>
+</body>
+</html>
