@@ -171,16 +171,12 @@ export function SettingsView({ settings, onSettingsSaved }: SettingsViewProps) {
         <div>
           <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
             <Key className="w-4 h-4 text-zinc-300" />
-            BYOK Provider Settings
+            Model & Provider Settings
           </h2>
           <p className="text-[11px] text-zinc-400">
-            Bring Your Own Key: OpenAI, Anthropic, Minimax, Mimo, OpenRouter
+            Configure BYOK endpoints and models (OpenAI, Anthropic, Minimax, MiMo, etc.)
           </p>
         </div>
-        <Badge variant={isKeyConfigured ? 'success' : 'warning'} className="gap-1">
-          {isKeyConfigured ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
-          {isKeyConfigured ? 'Key Configured' : 'Key Missing'}
-        </Badge>
       </div>
 
       {/* Provider Switcher Tabs */}
