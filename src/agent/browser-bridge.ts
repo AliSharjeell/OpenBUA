@@ -604,8 +604,10 @@ export async function scrollActiveTab(
   return response || { success: false };
 }
 
-// Get Page Text
+// Get Page Text — wrapped in a hard timeout to prevent hanging on SPAs like YouTube
 export async function getActiveTabPageContent(): Promise<{ text: string; title: string; url: string }> {
+  const fallback = { text: '', title: '', url: '' };
+
   const activeTab = await getActiveTab();
   if (!activeTab || !activeTab.id) {
     return {
@@ -615,10 +617,23 @@ export async function getActiveTabPageContent(): Promise<{ text: string; title: 
     };
   }
 
-  const response = await sendMessageToTab(activeTab.id, { action: 'GET_PAGE_TEXT' }, 2000).catch(() => null);
-  if (response && response.success) {
-    return { text: response.text, title: response.title, url: response.url };
-  }
+  // Hard 5-second timeout to prevent the tool from hanging forever
+  const result = await Promise.race([
+    (async () => {
+      // Force re-inject content script before sending message (handles SPA navigations like YouTube)
+      await ensureContentScriptInjected(activeTab.id!).catch(() => {});
+      const response = await sendMessageToTab(activeTab.id!, { action: 'GET_PAGE_TEXT' }, 3000).catch(() => null);
+      if (response && response.success) {
+        return { text: response.text, title: response.title, url: response.url };
+      }
+      return null;
+    })(),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+  ]);
+
+  if (result) return result;
+
+  // Fallback: use tab metadata if content script communication failed
   return {
     text: activeTab.title || 'Web page',
     title: activeTab.title || '',
