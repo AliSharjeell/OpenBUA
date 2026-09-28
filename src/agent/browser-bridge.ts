@@ -1,6 +1,4 @@
-// Browser bridge to communicate with Chrome Extension APIs and content script
-
-import { PageFormSummary, FormElementDescriptor } from '../types';
+import { PageFormSummary, FormElementDescriptor, FormFillResult } from '../types';
 
 export interface TabInfo {
   id: number;
@@ -224,9 +222,28 @@ function inPageInspectForm(): PageFormSummary {
 }
 
 // In-page fallback script for directly setting field values in tab
-function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; value: string }>): { successCount: number; errors: string[] } {
+function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; value: string }>): {
+  successCount: number;
+  errors: string[];
+  verifications: Array<{
+    refId: string;
+    selector?: string;
+    requestedValue: string;
+    actualValue: string;
+    verified: boolean;
+    elementFound: boolean;
+  }>;
+} {
   let successCount = 0;
   const errors: string[] = [];
+  const verifications: Array<{
+    refId: string;
+    selector?: string;
+    requestedValue: string;
+    actualValue: string;
+    verified: boolean;
+    elementFound: boolean;
+  }> = [];
 
   for (const item of assignments) {
     let target: HTMLElement | null = null;
@@ -245,11 +262,35 @@ function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; 
 
     if (!target) {
       errors.push(`Field not found: ${item.refId || item.selector}`);
+      verifications.push({
+        refId: item.refId || '',
+        selector: item.selector,
+        requestedValue: item.value,
+        actualValue: '',
+        verified: false,
+        elementFound: false,
+      });
       continue;
     }
 
     try {
       const tagName = target.tagName.toLowerCase();
+      const isContentEditable = target.isContentEditable || target.getAttribute('contenteditable') === 'true' || target.getAttribute('role') === 'textbox';
+
+      // Rich text placeholder activation (YouTube, etc.)
+      if (isContentEditable || tagName === 'div') {
+        const parentBox = target.closest('ytd-commentbox, ytd-comments-header-renderer, #simple-box, .comment-simplebox') || target.parentElement;
+        if (parentBox) {
+          const placeholder = parentBox.querySelector<HTMLElement>('#simplebox-placeholder, #placeholder, [id*="placeholder"]');
+          if (placeholder && placeholder !== target) {
+            placeholder.click();
+            placeholder.focus();
+          }
+        }
+      }
+
+      target.focus();
+
       if (tagName === 'input') {
         const input = target as HTMLInputElement;
         const type = (input.getAttribute('type') || 'text').toLowerCase();
@@ -286,11 +327,33 @@ function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; 
         } else {
           sel.value = item.value;
         }
+      } else if (isContentEditable) {
+        // Selection replacement and insertText for rich text editors
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        let execSuccess = false;
+        try {
+          execSuccess = document.execCommand('insertText', false, item.value);
+        } catch {
+          execSuccess = false;
+        }
+        if (!execSuccess || !target.innerText.includes(item.value.slice(0, 10))) {
+          target.innerText = item.value;
+        }
+      } else {
+        target.textContent = item.value;
       }
 
       // Event dispatching
       target.dispatchEvent(new Event('focus', { bubbles: true }));
-      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
+      target.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      target.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
       target.dispatchEvent(new Event('change', { bubbles: true }));
       target.dispatchEvent(new Event('blur', { bubbles: true }));
 
@@ -300,13 +363,55 @@ function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; 
         target!.style.outline = '';
       }, 1500);
 
-      successCount++;
+      // Verify DOM actual value
+      let actualVal = '';
+      if (tagName === 'input') {
+        const inp = target as HTMLInputElement;
+        actualVal = inp.type === 'checkbox' || inp.type === 'radio' ? String(inp.checked) : inp.value;
+      } else if (tagName === 'textarea') {
+        actualVal = (target as HTMLTextAreaElement).value;
+      } else if (tagName === 'select') {
+        actualVal = (target as HTMLSelectElement).value;
+      } else {
+        actualVal = target.innerText || target.textContent || '';
+      }
+
+      const verified = actualVal.length > 0 && (
+        actualVal.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 15)) ||
+        item.value.toLowerCase().includes(actualVal.toLowerCase().trim().slice(0, 15)) ||
+        actualVal === item.value ||
+        (target as HTMLInputElement).type === 'checkbox' ||
+        (target as HTMLInputElement).type === 'radio'
+      );
+
+      verifications.push({
+        refId: item.refId || '',
+        selector: item.selector,
+        requestedValue: item.value,
+        actualValue: actualVal,
+        verified,
+        elementFound: true,
+      });
+
+      if (verified) {
+        successCount++;
+      } else {
+        errors.push(`Field ${item.refId || item.selector} DOM value remained empty or mismatch`);
+      }
     } catch (e: any) {
       errors.push(`Error filling ${item.refId}: ${e?.message || e}`);
+      verifications.push({
+        refId: item.refId || '',
+        selector: item.selector,
+        requestedValue: item.value,
+        actualValue: '',
+        verified: false,
+        elementFound: true,
+      });
     }
   }
 
-  return { successCount, errors };
+  return { successCount, errors, verifications };
 }
 
 // In-page fallback script for clicking buttons
@@ -379,11 +484,22 @@ export async function inspectActiveTabForm(): Promise<PageFormSummary> {
 // Fill fields on active tab
 export async function fillActiveTabFields(
   assignments: Array<{ refId?: string; selector?: string; value: string }>
-): Promise<{ successCount: number; errors: string[] }> {
+): Promise<FormFillResult> {
   const activeTab = await getActiveTab();
   if (!activeTab || !activeTab.id) {
     console.log('[Dev Mock] Filled fields:', assignments);
-    return { successCount: assignments.length, errors: [] };
+    return {
+      successCount: assignments.length,
+      errors: [],
+      verifications: assignments.map(a => ({
+        refId: a.refId || '',
+        selector: a.selector,
+        requestedValue: a.value,
+        actualValue: a.value,
+        verified: true,
+        elementFound: true,
+      })),
+    };
   }
 
   if (activeTab.url && (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('chrome-extension://') || activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:'))) {
@@ -397,7 +513,7 @@ export async function fillActiveTabFields(
       assignments,
     }, 2000);
     if (response && response.success && response.data) {
-      return response.data;
+      return response.data as FormFillResult;
     }
   } catch (err: any) {
     console.warn('[AutoForm AI] sendMessageToTab failed, falling back to direct executeScript:', err?.message || err);
@@ -412,7 +528,7 @@ export async function fillActiveTabFields(
         args: [assignments],
       });
       if (results && results[0] && results[0].result) {
-        return results[0].result as { successCount: number; errors: string[] };
+        return results[0].result as FormFillResult;
       }
     } catch (scriptErr: any) {
       const msg = scriptErr?.message || String(scriptErr);

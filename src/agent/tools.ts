@@ -76,16 +76,33 @@ const FillFormFieldsSchema = Type.Object({
 export const fillFormFieldsTool: AgentTool<typeof FillFormFieldsSchema> = {
   name: 'fill_form_fields',
   label: 'Fill Form Fields',
-  description: 'Fills form fields on the active webpage with the provided values. Compatible with React, Vue, and standard HTML forms.',
+  description: 'Fills form fields on the active webpage with the provided values. Compatible with React, Vue, contenteditable rich text editors, and standard HTML forms.',
   parameters: FillFormFieldsSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
       const result = await fillActiveTabFields(params.assignments);
-      const text = `Successfully filled ${result.successCount} of ${params.assignments.length} fields.` +
-        (result.errors.length > 0 ? `\nErrors:\n${result.errors.join('\n')}` : '');
+      
+      const verificationLines = (result.verifications || []).map((v) => {
+        const id = v.refId || v.selector || 'field';
+        if (v.verified) {
+          return `  - [${id}]: ✅ VERIFIED (DOM value: "${v.actualValue.slice(0, 50)}")`;
+        } else if (!v.elementFound) {
+          return `  - [${id}]: ❌ ELEMENT NOT FOUND`;
+        } else {
+          return `  - [${id}]: ⚠️ UNVERIFIED / EMPTY in DOM (Requested: "${v.requestedValue.slice(0, 30)}", Actual on page: "${v.actualValue.slice(0, 30)}")`;
+        }
+      });
+
+      let text = `Filled ${result.successCount} of ${params.assignments.length} fields successfully.\n`;
+      if (verificationLines.length > 0) {
+        text += `DOM Verifications:\n${verificationLines.join('\n')}\n`;
+      }
+      if (result.errors.length > 0) {
+        text += `Errors:\n${result.errors.join('\n')}`;
+      }
 
       return {
-        content: [{ type: 'text', text }],
+        content: [{ type: 'text', text: text.trim() }],
         details: { ...result, assignments: params.assignments },
       };
     } catch (err: any) {

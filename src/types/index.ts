@@ -100,3 +100,20 @@ export interface PageFormSummary {
     isPrevious: boolean;
   }>;
 }
+
+export interface FieldFillVerification {
+  refId?: string;
+  selector?: string;
+  requestedValue: string;
+  actualValue: string;
+  verified: boolean;
+  status: string;
+}
+
+export interface FormFillResult {
+  successCount: number;
+  totalRequested: number;
+  verifiedCount: number;
+  errors: string[];
+  verifications: FieldFillVerification[];
+}

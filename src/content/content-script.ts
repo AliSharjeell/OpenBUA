@@ -154,21 +154,66 @@ function detectStepIndicators(): string[] {
   return steps.slice(0, 5);
 }
 
+function readElementValue(el: HTMLElement): string {
+  if (!el) return '';
+  const tagName = el.tagName.toLowerCase();
+  if (tagName === 'input') {
+    const input = el as HTMLInputElement;
+    if (input.type === 'checkbox' || input.type === 'radio') {
+      return input.checked ? 'true' : 'false';
+    }
+    return input.value || '';
+  }
+  if (tagName === 'textarea') {
+    return (el as HTMLTextAreaElement).value || '';
+  }
+  if (tagName === 'select') {
+    const sel = el as HTMLSelectElement;
+    return sel.options[sel.selectedIndex]?.text || sel.value || '';
+  }
+  if (
+    el.isContentEditable ||
+    el.getAttribute('contenteditable') === 'true' ||
+    el.getAttribute('contenteditable') === '' ||
+    el.getAttribute('role') === 'textbox'
+  ) {
+    return (el.innerText || el.textContent || '').trim();
+  }
+  // Check child elements for contenteditable or inputs (e.g. YouTube ytd-commentbox, container DIVs)
+  const innerEditable = el.querySelector<HTMLElement>(
+    '[contenteditable="true"], [contenteditable=""], [role="textbox"], textarea, input'
+  );
+  if (innerEditable && innerEditable !== el) {
+    return readElementValue(innerEditable);
+  }
+  return (el.innerText || el.textContent || '').trim();
+}
+
 function inspectAllFormElements(): PageFormSummary {
   // Clear stale references
   elementRefMap.clear();
   refCounter = 0;
 
   const elements = document.querySelectorAll<HTMLElement>(
-    'input:not([type="hidden"]), textarea, select, [role="textbox"], [role="combobox"], [role="checkbox"]'
+    'input:not([type="hidden"]), textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"], [role="combobox"], [role="checkbox"], ytd-commentbox, #contenteditable-root, #simplebox-placeholder, #placeholder-area'
   );
 
   const fields: FormElementDescriptor[] = [];
 
   elements.forEach((elem) => {
     const tagName = elem.tagName.toLowerCase();
-    const type = (elem.getAttribute('type') || (tagName === 'textarea' ? 'textarea' : tagName === 'select' ? 'select' : 'text')).toLowerCase();
-    
+    const isEditable =
+      elem.isContentEditable ||
+      elem.getAttribute('contenteditable') === 'true' ||
+      elem.getAttribute('contenteditable') === '';
+
+    const type = isEditable
+      ? 'contenteditable'
+      : (
+          elem.getAttribute('type') ||
+          (tagName === 'textarea' ? 'textarea' : tagName === 'select' ? 'select' : 'text')
+        ).toLowerCase();
+
     // Ignore submit/reset buttons here (handled in buttons)
     if (['submit', 'reset', 'button', 'image'].includes(type)) return;
 
@@ -184,7 +229,7 @@ function inspectAllFormElements(): PageFormSummary {
     const disabled = (elem as HTMLInputElement).disabled || elem.getAttribute('aria-disabled') === 'true';
     const readonly = (elem as HTMLInputElement).readOnly || elem.getAttribute('aria-readonly') === 'true';
 
-    let value = '';
+    let value = readElementValue(elem);
     let checked: boolean | undefined = undefined;
     let options: Array<{ value: string; label: string; selected: boolean }> | undefined = undefined;
 
@@ -193,21 +238,14 @@ function inspectAllFormElements(): PageFormSummary {
       if (type === 'checkbox' || type === 'radio') {
         checked = input.checked;
         value = input.value || (input.checked ? 'true' : 'false');
-      } else {
-        value = input.value || '';
       }
-    } else if (tagName === 'textarea') {
-      value = (elem as HTMLTextAreaElement).value || '';
     } else if (tagName === 'select') {
       const select = elem as HTMLSelectElement;
-      value = select.value || '';
-      options = Array.from(select.options).map(opt => ({
+      options = Array.from(select.options).map((opt) => ({
         value: opt.value,
         label: opt.text.trim(),
         selected: opt.selected,
       }));
-    } else {
-      value = elem.textContent || '';
     }
 
     fields.push({
@@ -227,25 +265,47 @@ function inspectAllFormElements(): PageFormSummary {
       selector: `[data-autoform-ref="${refId}"]`,
       options,
       sectionHint,
-      ariaLabel
+      ariaLabel,
     });
   });
 
-  // Collect action buttons (Next, Submit, Continue, Back, etc.)
+  // Collect action buttons (Next, Submit, Continue, Back, Comment, Post, etc.)
   const buttonElements = document.querySelectorAll<HTMLElement>(
-    'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"]'
+    'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"], ytd-button-renderer, yt-button-shape'
   );
 
   const buttons: Array<{ refId: string; text: string; type: string; isSubmit: boolean; isNext: boolean; isPrevious: boolean }> = [];
 
-  buttonElements.forEach(btn => {
+  buttonElements.forEach((btn) => {
     if (!isElementVisible(btn)) return;
-    const text = (btn.textContent || (btn as HTMLInputElement).value || btn.getAttribute('aria-label') || '').trim();
+    const text = (
+      btn.textContent ||
+      (btn as HTMLInputElement).value ||
+      btn.getAttribute('aria-label') ||
+      ''
+    ).trim();
     if (!text || text.length > 50) return;
 
     const lower = text.toLowerCase();
-    const isSubmit = lower.includes('submit') || lower.includes('finish') || lower.includes('complete') || lower.includes('apply');
-    const isNext = lower.includes('next') || lower.includes('continue') || lower.includes('proceed') || lower.includes('save & next') || lower.includes('save and continue');
+    const isSubmit =
+      lower.includes('submit') ||
+      lower.includes('comment') ||
+      lower.includes('post') ||
+      lower.includes('reply') ||
+      lower.includes('send') ||
+      lower.includes('publish') ||
+      lower.includes('tweet') ||
+      lower.includes('finish') ||
+      lower.includes('complete') ||
+      lower.includes('apply');
+
+    const isNext =
+      lower.includes('next') ||
+      lower.includes('continue') ||
+      lower.includes('proceed') ||
+      lower.includes('save & next') ||
+      lower.includes('save and continue');
+
     const isPrevious = lower.includes('back') || lower.includes('prev') || lower.includes('previous');
 
     const refId = generateRefId(btn);
@@ -264,13 +324,29 @@ function inspectAllFormElements(): PageFormSummary {
     url: window.location.href,
     fields,
     stepIndicators: detectStepIndicators(),
-    buttons: buttons.slice(0, 10),
+    buttons: buttons.slice(0, 40),
   };
 }
 
 function setNativeValue(element: HTMLElement, value: string): void {
   const tagName = element.tagName.toLowerCase();
-  
+  const isContentEditable = element.isContentEditable || element.getAttribute('contenteditable') === 'true' || element.getAttribute('role') === 'textbox';
+
+  // 1. YouTube / Rich Text Placeholder activation
+  // If element is inside or adjacent to a placeholder (e.g. YouTube #simplebox-placeholder), activate it first
+  if (isContentEditable || tagName === 'div') {
+    const parentBox = element.closest('ytd-commentbox, ytd-comments-header-renderer, #simple-box, .comment-simplebox') || element.parentElement;
+    if (parentBox) {
+      const placeholder = parentBox.querySelector<HTMLElement>('#simplebox-placeholder, #placeholder, [id*="placeholder"]');
+      if (placeholder && placeholder !== element) {
+        placeholder.click();
+        placeholder.focus();
+      }
+    }
+  }
+
+  element.focus();
+
   if (tagName === 'input') {
     const input = element as HTMLInputElement;
     const type = (input.getAttribute('type') || 'text').toLowerCase();
@@ -308,7 +384,6 @@ function setNativeValue(element: HTMLElement, value: string): void {
     }
   } else if (tagName === 'select') {
     const select = element as HTMLSelectElement;
-    // Find matching option
     let matchIndex = -1;
     const valLower = value.toLowerCase().trim();
     for (let i = 0; i < select.options.length; i++) {
@@ -318,7 +393,6 @@ function setNativeValue(element: HTMLElement, value: string): void {
         break;
       }
     }
-    // Fallback: partial match on label
     if (matchIndex === -1) {
       for (let i = 0; i < select.options.length; i++) {
         const opt = select.options[i];
@@ -340,11 +414,47 @@ function setNativeValue(element: HTMLElement, value: string): void {
     } else {
       select.value = value;
     }
+  } else if (isContentEditable) {
+    // Rich editor (YouTube #contenteditable-root, Twitter/X, Discord, Slack, Reddit)
+    // Select all existing content and replace via execCommand or textContent
+    element.focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    let insertedViaExec = false;
+    try {
+      insertedViaExec = document.execCommand('insertText', false, value);
+    } catch {
+      insertedViaExec = false;
+    }
+
+    if (!insertedViaExec || !element.innerText.includes(value.trim().slice(0, 10))) {
+      element.innerText = value;
+    }
+
+    // Dispatch specialized InputEvent for frameworks like Draft.js, Slate, Lexical, Polymer
+    try {
+      const inputEvent = new InputEvent('input', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: value,
+      });
+      element.dispatchEvent(inputEvent);
+    } catch {
+      // Fallback to standard Event
+    }
   } else {
+    // Standard block element or custom input
     element.textContent = value;
   }
 
-  // Dispatch full event sequence to satisfy React, Vue, Angular, Svelte
+  // Dispatch full event sequence to satisfy React, Vue, Angular, Svelte, Polymer
   element.dispatchEvent(new Event('focus', { bubbles: true }));
   element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
   element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
@@ -367,9 +477,10 @@ function flashHighlight(element: HTMLElement) {
   }, 1200);
 }
 
-function fillFormFields(assignments: Array<{ refId?: string; selector?: string; value: string }>): { successCount: number; errors: string[] } {
+function fillFormFields(assignments: Array<{ refId?: string; selector?: string; value: string }>): FormFillResult {
   let successCount = 0;
   const errors: string[] = [];
+  const verifications: FieldFillVerification[] = [];
 
   for (const item of assignments) {
     let target: HTMLElement | null = null;
@@ -388,19 +499,61 @@ function fillFormFields(assignments: Array<{ refId?: string; selector?: string; 
     }
 
     if (!target) {
-      errors.push(`Field not found: ${item.refId || item.selector}`);
+      const err = `Field not found: ${item.refId || item.selector}`;
+      errors.push(err);
+      verifications.push({
+        refId: item.refId || '',
+        selector: item.selector,
+        requestedValue: item.value,
+        actualValue: '',
+        verified: false,
+        elementFound: false,
+      });
       continue;
     }
 
     try {
       setNativeValue(target, item.value);
-      successCount++;
+
+      // Verify the value in DOM immediately after setting
+      const actualValue = readElementValue(target);
+      const isVerified = actualValue.length > 0 && (
+        actualValue.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 15)) ||
+        item.value.toLowerCase().includes(actualValue.toLowerCase().trim().slice(0, 15)) ||
+        actualValue === item.value ||
+        (target as HTMLInputElement).type === 'checkbox' ||
+        (target as HTMLInputElement).type === 'radio'
+      );
+
+      verifications.push({
+        refId: item.refId || '',
+        selector: item.selector,
+        requestedValue: item.value,
+        actualValue,
+        verified: isVerified,
+        elementFound: true,
+      });
+
+      if (isVerified) {
+        successCount++;
+      } else {
+        errors.push(`Field ${item.refId || item.selector} was filled but DOM value remained empty/mismatched (Actual: "${actualValue.slice(0, 40)}")`);
+      }
     } catch (e: any) {
-      errors.push(`Error setting field ${item.refId || item.selector}: ${e?.message || e}`);
+      const errMsg = `Error setting field ${item.refId || item.selector}: ${e?.message || e}`;
+      errors.push(errMsg);
+      verifications.push({
+        refId: item.refId || '',
+        selector: item.selector,
+        requestedValue: item.value,
+        actualValue: '',
+        verified: false,
+        elementFound: true,
+      });
     }
   }
 
-  return { successCount, errors };
+  return { successCount, errors, verifications };
 }
 
 function clickElement(refId?: string, selector?: string, text?: string): { success: boolean; message: string } {
@@ -413,24 +566,29 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   } else if (selector) {
     target = document.querySelector(selector);
   } else if (text) {
-    const candidates = Array.from(document.querySelectorAll<HTMLElement>('button, a, input[type="submit"], input[type="button"], [role="button"]'));
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>(
+      'button, a, input[type="submit"], input[type="button"], [role="button"], ytd-button-renderer, yt-button-shape'
+    ));
     const tLower = text.toLowerCase().trim();
-    target = candidates.find(c => (c.textContent || (c as HTMLInputElement).value || '').toLowerCase().trim().includes(tLower)) || null;
+    target = candidates.find(c => (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || '').toLowerCase().trim().includes(tLower)) || null;
   }
 
   if (!target) {
     return { success: false, message: `Element to click not found (refId: ${refId}, selector: ${selector}, text: ${text})` };
   }
 
-  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  flashHighlight(target);
+  // If the target is a custom wrapper like ytd-button-renderer, find the inner clickable button/anchor
+  const innerClickable = target.querySelector<HTMLElement>('button, a, [role="button"]') || target;
 
-  target.focus();
-  target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-  target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-  target.click();
+  innerClickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  flashHighlight(innerClickable);
 
-  return { success: true, message: `Clicked element successfully (${target.tagName.toLowerCase()}: "${(target.textContent || '').trim().slice(0, 30)}")` };
+  innerClickable.focus();
+  innerClickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+  innerClickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+  innerClickable.click();
+
+  return { success: true, message: `Clicked element successfully (${innerClickable.tagName.toLowerCase()}: "${(innerClickable.textContent || innerClickable.getAttribute('aria-label') || '').trim().slice(0, 30)}")` };
 }
 
 function scrollPage(direction: 'up' | 'down' | 'top' | 'bottom' | 'element', selector?: string): { success: boolean } {
