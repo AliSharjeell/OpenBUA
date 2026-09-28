@@ -141,34 +141,44 @@ ${this.settings.systemInstruction || ''}`.trim();
         }
         break;
 
-      case 'tool_execution_start':
-        if (event.toolCall) {
-          const tc = event.toolCall;
-          const toolState: ToolCallState = {
-            id: tc.id,
-            toolName: tc.name,
-            args: tc.args || {},
+      case 'tool_execution_start': {
+        const anyEvt = event as any;
+        const toolCallId = anyEvt.toolCallId || anyEvt.toolCall?.id || `tc_${Date.now()}`;
+        const toolName = anyEvt.toolName || anyEvt.toolCall?.name || 'tool';
+        const args = anyEvt.args || anyEvt.toolCall?.args || {};
+
+        let toolState = this.activeToolCalls.get(toolCallId);
+        if (!toolState) {
+          toolState = {
+            id: toolCallId,
+            toolName,
+            args,
             status: 'running',
             timestamp: Date.now(),
           };
-          this.activeToolCalls.set(tc.id, toolState);
-          this.listeners.onToolCallStart?.(toolState);
+          this.activeToolCalls.set(toolCallId, toolState);
+        } else {
+          toolState.status = 'running';
+          if (args && Object.keys(args).length > 0) toolState.args = args;
         }
+        this.listeners.onToolCallStart?.(toolState);
         break;
+      }
 
-      case 'tool_execution_end':
-        if (event.toolCall) {
-          const existing = this.activeToolCalls.get(event.toolCall.id);
-          if (existing) {
-            existing.status = event.isError ? 'error' : 'success';
-            existing.result = event.result?.details || event.result?.content?.[0]?.text;
-            if (event.isError) {
-              existing.errorMessage = String(event.result?.content?.[0]?.text || 'Tool failed');
-            }
-            this.listeners.onToolCallEnd?.(existing);
+      case 'tool_execution_end': {
+        const anyEvt = event as any;
+        const toolCallId = anyEvt.toolCallId || anyEvt.toolCall?.id;
+        const existing = toolCallId ? this.activeToolCalls.get(toolCallId) : null;
+        if (existing) {
+          existing.status = anyEvt.isError ? 'error' : 'success';
+          existing.result = anyEvt.result?.details || anyEvt.result?.content?.[0]?.text || anyEvt.result;
+          if (anyEvt.isError) {
+            existing.errorMessage = String(anyEvt.result?.content?.[0]?.text || anyEvt.result?.error || 'Tool failed');
           }
+          this.listeners.onToolCallEnd?.(existing);
         }
         break;
+      }
 
       case 'turn_end':
         if (event.message?.errorMessage) {
