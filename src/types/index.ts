@@ -35,6 +35,16 @@ export interface UserDocument {
   sizeBytes: number;
   tags?: string[];
   isActiveForContext: boolean;
+  isGlobal?: boolean; // true for General/Global memory consistent across all tabs
+  tabUrlPattern?: string; // Optional domain or URL pattern for tab-specific memory
+}
+
+export interface BrowserTabInfo {
+  id: number;
+  title: string;
+  url: string;
+  favIconUrl?: string;
+  active: boolean;
 }
 
 export interface ToolCallState {
