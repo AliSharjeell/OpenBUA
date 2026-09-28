@@ -48,49 +48,6 @@ Because OpenBUA runs directly in your existing browser, it can perform complex a
   - Designed with Tailwind CSS shades of zinc and Geist font.
   - Rounded pill tab selectors, markdown preview rendering with `marked`, and collapsible execution traces for tool calls.
 
----
-
-## Architecture
-
-```
-OpenBUA/
-├── manifest.json              # Chrome Manifest V3 configuration
-├── sidepanel.html             # Side Panel HTML entry
-├── vite.config.ts             # Vite build configuration
-├── tailwind.config.js         # Dark-zinc palette & Geist font theme
-├── scripts/
-│   ├── build-extension.js     # Production build & bundling pipeline
-│   └── generate-icons.js      # Extension icons generator
-├── src/
-│   ├── background/
-│   │   └── service-worker.ts  # MV3 service worker & side panel launcher
-│   ├── content/
-│   │   └── content-script.ts  # DOM scanner, native input setter & event dispatcher
-│   ├── agent/
-│   │   ├── form-agent.ts      # Main agent harness wrapping pi-agent-core Agent
-│   │   ├── stream-adapter.ts  # BYOK streaming adapter (OpenAI & Anthropic SSE)
-│   │   ├── tools.ts           # Browser use tool schemas & executors
-│   │   └── browser-bridge.ts  # Chrome tabs & scripting communication bridge
-│   ├── services/
-│   │   ├── storage.ts         # Scoped local storage service (chrome.storage.local)
-│   │   └── pdf-parser.ts      # In-browser PDF & text extractor
-│   ├── components/
-│   │   ├── ChatView.tsx       # Main chat interface with tool visualizer & file uploader
-│   │   ├── MemoryView.tsx     # Global & Tab memory manager with toggle controls
-│   │   ├── MarkdownRenderer.tsx # GitHub Flavored Markdown renderer
-│   │   ├── InspectorView.tsx  # Live DOM element scanner & interactive triggers
-│   │   ├── SettingsView.tsx   # BYOK provider, endpoint & key settings
-│   │   └── ui/                # UI component primitives (Button, Input, Card, Badge)
-│   ├── sidepanel/
-│   │   ├── App.tsx            # Application root with persistent chat session tabs
-│   │   └── main.tsx           # React entry point
-│   └── types/
-│       └── index.ts           # TypeScript interfaces and contracts
-└── test-form.html             # Multi-step test form for verification
-```
-
----
-
 ## Quick Installation Guide (For New Users)
 
 No technical knowledge or coding required. Follow these steps to install OpenBUA in your browser in under 2 minutes:
@@ -136,6 +93,47 @@ npm run build
 ```
 
 Then in `chrome://extensions` with Developer mode enabled, click **Load unpacked** and select the `dist` folder.
+
+---
+
+## Architecture
+
+```
+OpenBUA/
+├── manifest.json              # Chrome Manifest V3 configuration
+├── sidepanel.html             # Side Panel HTML entry
+├── vite.config.ts             # Vite build configuration
+├── tailwind.config.js         # Dark-zinc palette & Geist font theme
+├── scripts/
+│   ├── build-extension.js     # Production build & bundling pipeline
+│   └── generate-icons.js      # Extension icons generator
+├── src/
+│   ├── background/
+│   │   └── service-worker.ts  # MV3 service worker & side panel launcher
+│   ├── content/
+│   │   └── content-script.ts  # DOM scanner, native input setter & event dispatcher
+│   ├── agent/
+│   │   ├── form-agent.ts      # Main agent harness wrapping pi-agent-core Agent
+│   │   ├── stream-adapter.ts  # BYOK streaming adapter (OpenAI & Anthropic SSE)
+│   │   ├── tools.ts           # Browser use tool schemas & executors
+│   │   └── browser-bridge.ts  # Chrome tabs & scripting communication bridge
+│   ├── services/
+│   │   ├── storage.ts         # Scoped local storage service (chrome.storage.local)
+│   │   └── pdf-parser.ts      # In-browser PDF & text extractor
+│   ├── components/
+│   │   ├── ChatView.tsx       # Main chat interface with tool visualizer & file uploader
+│   │   ├── MemoryView.tsx     # Global & Tab memory manager with toggle controls
+│   │   ├── MarkdownRenderer.tsx # GitHub Flavored Markdown renderer
+│   │   ├── InspectorView.tsx  # Live DOM element scanner & interactive triggers
+│   │   ├── SettingsView.tsx   # BYOK provider, endpoint & key settings
+│   │   └── ui/                # UI component primitives (Button, Input, Card, Badge)
+│   ├── sidepanel/
+│   │   ├── App.tsx            # Application root with persistent chat session tabs
+│   │   └── main.tsx           # React entry point
+│   └── types/
+│       └── index.ts           # TypeScript interfaces and contracts
+└── test-form.html             # Multi-step test form for verification
+```
 
 ---
 
