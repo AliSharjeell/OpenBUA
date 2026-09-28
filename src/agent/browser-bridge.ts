@@ -30,70 +30,86 @@ export async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
   });
 }
 
-export async function ensureContentScriptInjected(tabId: number): Promise<boolean> {
+export async function ensureContentScriptInjected(tabId: number, timeoutMs = 2500): Promise<boolean> {
   if (typeof chrome === 'undefined' || !chrome.scripting) {
     return false;
   }
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['content.js'],
-    });
-    await new Promise((r) => setTimeout(r, 100));
-    return true;
-  } catch (e: any) {
-    console.warn('[AutoForm AI] Content script injection notice:', e?.message || e);
-    return false;
-  }
+  return Promise.race([
+    (async () => {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['content.js'],
+        });
+        await new Promise((r) => setTimeout(r, 100));
+        return true;
+      } catch (e: any) {
+        console.warn('[OpenBUA] Content script injection notice:', e?.message || e);
+        return false;
+      }
+    })(),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+  ]);
 }
 
-export async function sendMessageToTab<T = any>(tabId: number, message: any, timeoutMs = 2500): Promise<T> {
+export async function sendMessageToTab<T = any>(tabId: number, message: any, timeoutMs = 3000): Promise<T> {
   if (typeof chrome === 'undefined' || !chrome.tabs) {
     throw new Error('Chrome extension APIs not available in current environment');
   }
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    const cleanup = () => {
+      settled = true;
+      clearTimeout(timer);
+    };
+
     const timer = setTimeout(() => {
       if (!settled) {
-        settled = true;
-        reject(new Error(`Timeout waiting for response from active tab (timeout ${timeoutMs}ms)`));
+        cleanup();
+        reject(new Error(`Timeout waiting for response from tab ${tabId} (${timeoutMs}ms)`));
       }
     }, timeoutMs);
 
-    chrome.tabs.sendMessage(tabId, message, async (response) => {
-      if (settled) return;
+    try {
+      chrome.tabs.sendMessage(tabId, message, async (response) => {
+        if (settled) return;
 
-      if (chrome.runtime.lastError) {
-        // Try injecting content script and retry once
-        try {
-          const injected = await ensureContentScriptInjected(tabId);
-          if (injected) {
-            chrome.tabs.sendMessage(tabId, message, (retryResponse) => {
-              if (settled) return;
-              clearTimeout(timer);
-              settled = true;
-              if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-              } else {
-                resolve(retryResponse);
-              }
-            });
-            return;
+        if (chrome.runtime.lastError) {
+          // Tab might not have content script yet; try injecting once
+          try {
+            const injected = await ensureContentScriptInjected(tabId, 2000);
+            if (injected && !settled) {
+              chrome.tabs.sendMessage(tabId, message, (retryResponse) => {
+                if (settled) return;
+                cleanup();
+                if (chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                  resolve(retryResponse);
+                }
+              });
+              return;
+            }
+          } catch {
+            // ignore
           }
-        } catch {
-          // Fall through to error
-        }
 
-        clearTimeout(timer);
-        settled = true;
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        clearTimeout(timer);
-        settled = true;
-        resolve(response);
+          if (!settled) {
+            cleanup();
+            reject(new Error(chrome.runtime.lastError.message));
+          }
+        } else {
+          cleanup();
+          resolve(response);
+        }
+      });
+    } catch (e: any) {
+      if (!settled) {
+        cleanup();
+        reject(e);
       }
-    });
+    }
   });
 }
 
@@ -424,18 +440,27 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     target = document.querySelector(selector);
   }
   if (!target && text) {
-    const candidates = Array.from(document.querySelectorAll<HTMLElement>('button, a, input[type="submit"], input[type="button"], [role="button"]'));
+    const candidates = Array.from(document.querySelectorAll<HTMLElement>(
+      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], ytd-button-renderer, yt-button-shape, ytd-thumbnail, ytd-rich-item-renderer, [contenteditable="true"], [role="textbox"], [id*="placeholder"], [id*="comment"]'
+    ));
     const tLower = text.toLowerCase().trim();
-    target = candidates.find((c) => (c.textContent || (c as HTMLInputElement).value || '').toLowerCase().trim().includes(tLower)) || null;
+    target = candidates.find((c) => {
+      const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').toLowerCase().trim();
+      return val.includes(tLower);
+    }) || null;
   }
 
   if (!target) {
     return { success: false, message: `Button or element not found: ${refId || selector || text}` };
   }
 
-  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  target.click();
-  return { success: true, message: `Clicked button "${target.textContent?.trim().slice(0, 30)}"` };
+  const innerClickable = target.querySelector<HTMLElement>('a[href], button, [role="button"], [contenteditable="true"]') || target;
+  innerClickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  innerClickable.focus();
+  innerClickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+  innerClickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+  innerClickable.click();
+  return { success: true, message: `Clicked element "${(innerClickable.textContent || innerClickable.getAttribute('aria-label') || '').trim().slice(0, 30)}"` };
 }
 
 // Inspect Form on Active Tab
@@ -702,9 +727,49 @@ export async function navigateActiveTab(url: string): Promise<boolean> {
   if (!activeTab || !activeTab.id || typeof chrome === 'undefined' || !chrome.tabs) {
     return true;
   }
+
+  const tabId = activeTab.id;
+  let targetUrl = url.trim();
+  if (!/^https?:\/\//i.test(targetUrl)) {
+    targetUrl = `https://${targetUrl}`;
+  }
+
   return new Promise((resolve) => {
-    chrome.tabs.update(activeTab.id!, { url }, () => {
-      resolve(!chrome.runtime.lastError);
+    let finished = false;
+
+    const cleanup = () => {
+      if (!finished) {
+        finished = true;
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+      }
+    };
+
+    // 8-second safety timeout so it never hangs indefinitely on slow or streaming pages
+    const timer = setTimeout(async () => {
+      cleanup();
+      // Ensure content script is injected even if status didn't reach complete
+      await ensureContentScriptInjected(tabId).catch(() => {});
+      resolve(true);
+    }, 8000);
+
+    const onUpdatedListener = async (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        cleanup();
+        // Give client-side SPA frameworks (YouTube, React, Vue, Next.js) time to hydrate DOM
+        await new Promise((r) => setTimeout(r, 1200));
+        await ensureContentScriptInjected(tabId).catch(() => {});
+        resolve(true);
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdatedListener);
+
+    chrome.tabs.update(tabId, { url: targetUrl }, (updatedTab) => {
+      if (chrome.runtime.lastError || !updatedTab) {
+        cleanup();
+        resolve(false);
+      }
     });
   });
 }

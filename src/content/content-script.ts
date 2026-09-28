@@ -567,18 +567,21 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
     target = document.querySelector(selector);
   } else if (text) {
     const candidates = Array.from(document.querySelectorAll<HTMLElement>(
-      'button, a, input[type="submit"], input[type="button"], [role="button"], ytd-button-renderer, yt-button-shape'
+      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], ytd-button-renderer, yt-button-shape, ytd-thumbnail, ytd-rich-item-renderer, [contenteditable="true"], [role="textbox"], [id*="placeholder"], [id*="comment"]'
     ));
     const tLower = text.toLowerCase().trim();
-    target = candidates.find(c => (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || '').toLowerCase().trim().includes(tLower)) || null;
+    target = candidates.find(c => {
+      const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').toLowerCase().trim();
+      return val.includes(tLower);
+    }) || null;
   }
 
   if (!target) {
     return { success: false, message: `Element to click not found (refId: ${refId}, selector: ${selector}, text: ${text})` };
   }
 
-  // If the target is a custom wrapper like ytd-button-renderer, find the inner clickable button/anchor
-  const innerClickable = target.querySelector<HTMLElement>('button, a, [role="button"]') || target;
+  // If the target is a custom wrapper like ytd-button-renderer or ytd-video-renderer, find inner clickable button or anchor
+  const innerClickable = target.querySelector<HTMLElement>('a[href], button, [role="button"], [contenteditable="true"]') || target;
 
   innerClickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
   flashHighlight(innerClickable);
@@ -588,7 +591,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   innerClickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
   innerClickable.click();
 
-  return { success: true, message: `Clicked element successfully (${innerClickable.tagName.toLowerCase()}: "${(innerClickable.textContent || innerClickable.getAttribute('aria-label') || '').trim().slice(0, 30)}")` };
+  return { success: true, message: `Clicked element successfully (${innerClickable.tagName.toLowerCase()}: "${(innerClickable.textContent || innerClickable.getAttribute('aria-label') || '').trim().slice(0, 40)}")` };
 }
 
 function scrollPage(direction: 'up' | 'down' | 'top' | 'bottom' | 'element', selector?: string): { success: boolean } {
@@ -642,8 +645,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
 
       case 'GET_PAGE_TEXT': {
-        const text = document.body.innerText.slice(0, 15000);
-        sendResponse({ success: true, text, title: document.title, url: window.location.href });
+        // 1. Gather interactive / item links (especially video links, search results, nav links)
+        const links: string[] = [];
+        const seenLinks = new Set<string>();
+        document.querySelectorAll<HTMLAnchorElement>('a[href], a#video-title, [role="link"]').forEach((a) => {
+          const text = (a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+          const href = a.getAttribute('href') || '';
+          if (text && text.length > 2 && text.length < 100 && !seenLinks.has(text.toLowerCase())) {
+            seenLinks.add(text.toLowerCase());
+            if (links.length < 20) {
+              const fullUrl = href.startsWith('http') ? href : window.location.origin + href;
+              links.push(`- Link/Video: "${text}" (${fullUrl})`);
+            }
+          }
+        });
+
+        // 2. Gather key buttons & inputs
+        const buttons: string[] = [];
+        const seenButtons = new Set<string>();
+        document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], input[type="button"], ytd-button-renderer').forEach((b) => {
+          const text = (b.textContent || b.getAttribute('aria-label') || (b as HTMLInputElement).value || '').replace(/\s+/g, ' ').trim();
+          if (text && text.length > 1 && text.length < 40 && !seenButtons.has(text.toLowerCase())) {
+            seenButtons.add(text.toLowerCase());
+            if (buttons.length < 12) {
+              buttons.push(`- Button: "${text}"`);
+            }
+          }
+        });
+
+        // 3. Clean excerpt of page content (limited to 3,500 chars to avoid hitting token limits)
+        let mainText = '';
+        const mainEl = document.querySelector('main, article, #content, [role="main"]') || document.body;
+        if (mainEl) {
+          mainText = (mainEl as HTMLElement).innerText || '';
+        } else if (document.body) {
+          mainText = document.body.innerText || '';
+        }
+        mainText = mainText.replace(/\n\s*\n\s*\n/g, '\n\n').slice(0, 3500);
+
+        let formatted = `Title: ${document.title}\nURL: ${window.location.href}\n\n`;
+        if (links.length > 0) {
+          formatted += `### Key Links / Videos on Page:\n${links.join('\n')}\n\n`;
+        }
+        if (buttons.length > 0) {
+          formatted += `### Interactive Buttons:\n${buttons.join('\n')}\n\n`;
+        }
+        formatted += `### Page Text Excerpt:\n${mainText}`;
+
+        sendResponse({ success: true, text: formatted, title: document.title, url: window.location.href });
         break;
       }
 
