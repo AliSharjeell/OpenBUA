@@ -34,6 +34,7 @@ export function App() {
   const [documents, setDocuments] = useState<UserDocument[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isBusy, setIsBusy] = useState(false);
+  const [activeTool, setActiveTool] = useState<ToolCallState | null>(null);
   const [initialized, setInitialized] = useState(false);
 
   const harnessRef = useRef<FormAgentHarness | null>(null);
@@ -51,7 +52,10 @@ export function App() {
 
       // Create Agent Harness
       const harness = new FormAgentHarness(loadedSettings, loadedDocs, {
-        onStatusChange: (busy) => setIsBusy(busy),
+        onStatusChange: (busy) => {
+          setIsBusy(busy);
+          if (!busy) setActiveTool(null);
+        },
         onMessageDelta: (deltaText) => {
           setMessages((prev) => {
             const last = prev[prev.length - 1];
@@ -78,6 +82,7 @@ export function App() {
           });
         },
         onToolCallStart: (toolCall) => {
+          setActiveTool(toolCall);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === 'assistant') {
@@ -111,6 +116,7 @@ export function App() {
           });
         },
         onToolCallEnd: (toolCall) => {
+          setActiveTool((curr) => (curr?.id === toolCall.id ? null : curr));
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === 'assistant') {
@@ -133,6 +139,7 @@ export function App() {
           });
         },
         onTurnComplete: (assistantText, toolCalls) => {
+          setActiveTool(null);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === 'assistant') {
@@ -162,6 +169,7 @@ export function App() {
           });
         },
         onError: (err) => {
+          setActiveTool(null);
           setMessages((prev) => {
             const errorMsg: ChatMessage = {
               id: `err-${Date.now()}`,
@@ -320,6 +328,7 @@ export function App() {
             onMessagesChange={handleMessagesChange}
             harness={harnessRef.current}
             isBusy={isBusy}
+            activeTool={activeTool}
             settings={settings}
             documents={documents}
             onNavigateToSettings={() => setActiveTab('settings')}
