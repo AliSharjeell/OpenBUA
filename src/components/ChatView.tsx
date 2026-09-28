@@ -16,6 +16,7 @@ import {
   Trash2,
   FileText,
   Terminal,
+  Upload,
 } from 'lucide-react';
 
 interface ChatViewProps {
@@ -29,6 +30,7 @@ interface ChatViewProps {
   onNavigateToSettings: () => void;
   onNavigateToMemory: () => void;
   onNavigateToVault?: () => void;
+  onUploadDocument?: (file: File) => Promise<UserDocument>;
 }
 
 function getToolMeta(toolName: string) {
@@ -89,11 +91,14 @@ export function ChatView({
   onNavigateToSettings,
   onNavigateToMemory,
   onNavigateToVault,
+  onUploadDocument,
 }: ChatViewProps) {
   const [input, setInput] = useState('');
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
 
   const activeDocsCount = documents.filter((d) => d.isActiveForContext).length;
   const currentKey =
@@ -109,6 +114,34 @@ export function ChatView({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isBusy, activeTool]);
+
+  const handleChatFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onUploadDocument) return;
+    setIsUploadingDoc(true);
+    try {
+      await onUploadDocument(file);
+      const confirmMsg: ChatMessage = {
+        id: `doc-${Date.now()}`,
+        role: 'assistant',
+        content: `📄 Added document **${file.name}** to your active memory for this tab. You can now ask me to use these details to fill forms.`,
+        timestamp: Date.now(),
+      };
+      onMessagesChange([...messages, confirmMsg]);
+    } catch (err: any) {
+      console.error('Failed to upload file from chat:', err);
+      const errMsg: ChatMessage = {
+        id: `doc-err-${Date.now()}`,
+        role: 'assistant',
+        content: `⚠️ Failed to upload file: ${err?.message || err}`,
+        timestamp: Date.now(),
+      };
+      onMessagesChange([...messages, errMsg]);
+    } finally {
+      setIsUploadingDoc(false);
+      e.target.value = '';
+    }
+  };
 
   const handleSend = async (textToSend?: string) => {
     const promptText = (textToSend || input).trim();
@@ -173,9 +206,6 @@ export function ChatView({
       <div className="flex-1 overflow-y-auto p-3 space-y-3.5">
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
-            <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-200">
-              <Sparkles className="w-5 h-5 text-zinc-200" />
-            </div>
             <div>
               <h3 className="font-semibold text-zinc-200 text-xs">AutoForm AI Ready</h3>
               <p className="text-[11px] text-zinc-400 mt-1 max-w-[260px]">
@@ -210,14 +240,14 @@ export function ChatView({
                   handleSend('Scan this webpage form, match with my profile, and fill all inputs.')
                 }
               >
-                <span>⚡ Fill active form automatically</span>
+                <span>Fill active form automatically</span>
                 <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
               </button>
               <button
                 className="p-2 text-left rounded-xl bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800/80 text-[11px] text-zinc-300 hover:text-zinc-100 transition-colors flex items-center justify-between"
                 onClick={() => handleSend('What form fields are present on this page?')}
               >
-                <span>📋 List all form fields and types</span>
+                <span>List all form fields and types</span>
                 <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
               </button>
             </div>
@@ -436,11 +466,7 @@ export function ChatView({
           <Textarea
             ref={textareaRef}
             rows={1}
-            placeholder={
-              hasKey
-                ? 'Ask AutoForm AI to inspect, fill, or advance form...'
-                : 'Configure API Key in Settings to chat...'
-            }
+            placeholder="Ask AutoForm"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -449,6 +475,28 @@ export function ChatView({
           />
 
           <div className="p-1 flex items-center gap-1 shrink-0">
+            <input
+              ref={chatFileInputRef}
+              type="file"
+              accept=".pdf,.md,.markdown,.txt,.json"
+              className="hidden"
+              onChange={handleChatFileUpload}
+              disabled={isBusy || isUploadingDoc}
+            />
+            <button
+              type="button"
+              onClick={() => chatFileInputRef.current?.click()}
+              title="Upload MD or PDF to memory"
+              disabled={isBusy || isUploadingDoc}
+              className="p-1.5 text-zinc-400 hover:text-zinc-200 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0"
+            >
+              {isUploadingDoc ? (
+                <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+            </button>
+
             {isBusy ? (
               <Button
                 variant="destructive"
