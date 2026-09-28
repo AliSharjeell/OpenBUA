@@ -1,0 +1,530 @@
+// Client-side BYOK Stream Adapter for pi-agent-core and pi-ai
+// Supports OpenAI-compatible and Anthropic-compatible endpoints with custom baseUrl, apiKey, and model name.
+
+import {
+  AssistantMessage,
+  AssistantMessageEventStream,
+  createAssistantMessageEventStream,
+  Model,
+  TextContent,
+  ToolCall,
+  TranscriptContext,
+} from '@earendil-works/pi-ai';
+import { ProviderConfig } from '../types';
+
+export function createCustomModel(config: ProviderConfig): Model<any> {
+  return {
+    id: config.model,
+    name: config.model,
+    provider: config.provider,
+    api: config.provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+    capabilities: ['tools', 'streaming', 'image'],
+  } as unknown as Model<any>;
+}
+
+export async function createStreamFn(
+  config: ProviderConfig,
+  model: Model<any>,
+  context: TranscriptContext,
+  signal?: AbortSignal
+): Promise<AssistantMessageEventStream> {
+  const stream = createAssistantMessageEventStream();
+
+  // Run the stream generation asynchronously
+  (async () => {
+    try {
+      if (config.provider === 'anthropic') {
+        await streamAnthropic(config, model, context, stream, signal);
+      } else {
+        await streamOpenAI(config, model, context, stream, signal);
+      }
+    } catch (err: any) {
+      if (signal?.aborted) {
+        const abortedMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [],
+          stopReason: 'aborted',
+          errorMessage: 'Request was cancelled',
+        };
+        stream.push({ type: 'error', reason: 'aborted', error: abortedMsg });
+        stream.end(abortedMsg);
+      } else {
+        const errorMsg: AssistantMessage = {
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+          errorMessage: err?.message || String(err),
+        };
+        stream.push({ type: 'error', reason: 'error', error: errorMsg });
+        stream.end(errorMsg);
+      }
+    }
+  })();
+
+  return stream;
+}
+
+// ---------------------------------------------------------
+// OpenAI-Compatible Streaming (OpenAI, Minimax, Groq, etc.)
+// ---------------------------------------------------------
+async function streamOpenAI(
+  config: ProviderConfig,
+  model: Model<any>,
+  context: TranscriptContext,
+  stream: AssistantMessageEventStream,
+  signal?: AbortSignal
+): Promise<void> {
+  let endpoint = config.baseUrl.trim().replace(/\/+$/, '');
+  if (!endpoint.endsWith('/chat/completions')) {
+    endpoint = `${endpoint}/chat/completions`;
+  }
+
+  // Convert context messages to OpenAI format
+  const messages: any[] = [];
+
+  // System prompt
+  if (context.systemPrompt) {
+    messages.push({ role: 'system', content: context.systemPrompt });
+  }
+
+  for (const m of context.messages) {
+    if (m.role === 'user') {
+      const text = typeof m.content === 'string' ? m.content : m.content.map((c: any) => c.text || '').join('\n');
+      messages.push({ role: 'user', content: text });
+    } else if (m.role === 'assistant') {
+      const textParts = m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
+      const toolCalls = m.content
+        .filter((c: any) => c.type === 'toolCall')
+        .map((c: any) => ({
+          id: c.id,
+          type: 'function',
+          function: {
+            name: c.name,
+            arguments: typeof c.args === 'string' ? c.args : JSON.stringify(c.args),
+          },
+        }));
+
+      const msg: any = { role: 'assistant' };
+      if (textParts) msg.content = textParts;
+      if (toolCalls.length > 0) msg.tool_calls = toolCalls;
+      messages.push(msg);
+    } else if (m.role === 'toolResult') {
+      const text = m.content.map((c: any) => c.text || '').join('\n');
+      messages.push({
+        role: 'tool',
+        tool_call_id: m.toolCallId,
+        content: text,
+      });
+    }
+  }
+
+  // Convert tools
+  const tools = (context.tools || []).map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    },
+  }));
+
+  const payload: any = {
+    model: config.model || model.id || 'gpt-4o',
+    messages,
+    stream: true,
+  };
+
+  if (tools.length > 0) {
+    payload.tools = tools;
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey.trim()}`,
+    },
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`OpenAI Provider error (${response.status}): ${errorBody || response.statusText}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Response body is null');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+
+  let assistantMessage: AssistantMessage = {
+    role: 'assistant',
+    content: [],
+    stopReason: 'stop',
+  };
+
+  stream.push({ type: 'start', partial: assistantMessage });
+
+  let textContentBlock: TextContent | null = null;
+  const toolCallAccumulators = new Map<number, { id: string; name: string; argsStr: string }>();
+
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line.startsWith('data:')) continue;
+      const dataStr = line.slice(5).trim();
+      if (dataStr === '[DONE]') continue;
+
+      try {
+        const json = JSON.parse(dataStr);
+        const choice = json.choices?.[0];
+        if (!choice) continue;
+
+        const delta = choice.delta;
+        if (!delta) continue;
+
+        // Text delta
+        if (delta.content) {
+          if (!textContentBlock) {
+            textContentBlock = { type: 'text', text: '' };
+            assistantMessage.content.push(textContentBlock);
+            const contentIndex = assistantMessage.content.length - 1;
+            stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
+          }
+          textContentBlock.text += delta.content;
+          const contentIndex = assistantMessage.content.indexOf(textContentBlock);
+          stream.push({
+            type: 'text_delta',
+            contentIndex,
+            delta: delta.content,
+            partial: assistantMessage,
+          });
+        }
+
+        // Tool calls delta
+        if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            if (!toolCallAccumulators.has(idx)) {
+              toolCallAccumulators.set(idx, {
+                id: tc.id || `call_${idx}_${Date.now()}`,
+                name: tc.function?.name || '',
+                argsStr: tc.function?.arguments || '',
+              });
+            } else {
+              const acc = toolCallAccumulators.get(idx)!;
+              if (tc.id) acc.id = tc.id;
+              if (tc.function?.name) acc.name += tc.function.name;
+              if (tc.function?.arguments) acc.argsStr += tc.function.arguments;
+            }
+          }
+        }
+
+        if (choice.finish_reason) {
+          if (choice.finish_reason === 'tool_calls') {
+            assistantMessage.stopReason = 'toolUse';
+          }
+        }
+      } catch (err) {
+        // Skip malformed SSE lines
+      }
+    }
+  }
+
+  // Finalize any accumulated text block
+  if (textContentBlock) {
+    const contentIndex = assistantMessage.content.indexOf(textContentBlock);
+    stream.push({
+      type: 'text_end',
+      contentIndex,
+      content: textContentBlock.text,
+      partial: assistantMessage,
+    });
+  }
+
+  // Finalize tool calls
+  if (toolCallAccumulators.size > 0) {
+    assistantMessage.stopReason = 'toolUse';
+    for (const [_, acc] of toolCallAccumulators.entries()) {
+      let parsedArgs: Record<string, any> = {};
+      try {
+        parsedArgs = JSON.parse(acc.argsStr || '{}');
+      } catch {
+        parsedArgs = { raw: acc.argsStr };
+      }
+
+      const toolCall: ToolCall = {
+        type: 'toolCall',
+        id: acc.id,
+        name: acc.name,
+        args: parsedArgs,
+      };
+
+      assistantMessage.content.push(toolCall);
+      const contentIndex = assistantMessage.content.length - 1;
+
+      stream.push({ type: 'toolcall_start', contentIndex, partial: assistantMessage });
+      stream.push({
+        type: 'toolcall_end',
+        contentIndex,
+        toolCall,
+        partial: assistantMessage,
+      });
+    }
+  }
+
+  stream.push({
+    type: 'done',
+    reason: assistantMessage.stopReason as any,
+    message: assistantMessage,
+  });
+  stream.end(assistantMessage);
+}
+
+// ---------------------------------------------------------
+// Anthropic-Compatible Streaming (Claude, Minimax-Anthropic, Mimo)
+// ---------------------------------------------------------
+async function streamAnthropic(
+  config: ProviderConfig,
+  model: Model<any>,
+  context: TranscriptContext,
+  stream: AssistantMessageEventStream,
+  signal?: AbortSignal
+): Promise<void> {
+  let endpoint = config.baseUrl.trim().replace(/\/+$/, '');
+  if (!endpoint.endsWith('/messages')) {
+    endpoint = `${endpoint}/v1/messages`;
+  }
+
+  const messages: any[] = [];
+  let systemText = context.systemPrompt || '';
+
+  for (const m of context.messages) {
+    if (m.role === 'user') {
+      const text = typeof m.content === 'string' ? m.content : m.content.map((c: any) => c.text || '').join('\n');
+      messages.push({ role: 'user', content: text });
+    } else if (m.role === 'assistant') {
+      const contentBlocks: any[] = [];
+      for (const block of m.content) {
+        if (block.type === 'text') {
+          contentBlocks.push({ type: 'text', text: block.text });
+        } else if (block.type === 'toolCall') {
+          contentBlocks.push({
+            type: 'tool_use',
+            id: block.id,
+            name: block.name,
+            input: block.args,
+          });
+        }
+      }
+      messages.push({ role: 'assistant', content: contentBlocks });
+    } else if (m.role === 'toolResult') {
+      const text = m.content.map((c: any) => c.text || '').join('\n');
+      messages.push({
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: m.toolCallId,
+            content: text,
+          },
+        ],
+      });
+    }
+  }
+
+  // Convert tools
+  const tools = (context.tools || []).map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.parameters,
+  }));
+
+  const payload: any = {
+    model: config.model || model.id || 'claude-3-7-sonnet-20250219',
+    max_tokens: 4096,
+    messages,
+    stream: true,
+  };
+
+  if (systemText) {
+    payload.system = systemText;
+  }
+  if (tools.length > 0) {
+    payload.tools = tools;
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': config.apiKey.trim(),
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true', // Required for browser calls
+    },
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Anthropic Provider error (${response.status}): ${errorBody || response.statusText}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Response body is null');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+
+  let assistantMessage: AssistantMessage = {
+    role: 'assistant',
+    content: [],
+    stopReason: 'stop',
+  };
+
+  stream.push({ type: 'start', partial: assistantMessage });
+
+  let currentBlockType: 'text' | 'tool_use' | null = null;
+  let currentBlockIndex = 0;
+  let currentToolUse: { id: string; name: string; jsonAccumulator: string } | null = null;
+
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line.startsWith('data:')) continue;
+      const dataStr = line.slice(5).trim();
+
+      try {
+        const event = JSON.parse(dataStr);
+
+        switch (event.type) {
+          case 'content_block_start': {
+            currentBlockIndex = event.index ?? assistantMessage.content.length;
+            if (event.content_block?.type === 'text') {
+              currentBlockType = 'text';
+              const textBlock: TextContent = { type: 'text', text: '' };
+              assistantMessage.content.push(textBlock);
+              stream.push({
+                type: 'text_start',
+                contentIndex: currentBlockIndex,
+                partial: assistantMessage,
+              });
+            } else if (event.content_block?.type === 'tool_use') {
+              currentBlockType = 'tool_use';
+              currentToolUse = {
+                id: event.content_block.id,
+                name: event.content_block.name,
+                jsonAccumulator: '',
+              };
+              stream.push({
+                type: 'toolcall_start',
+                contentIndex: currentBlockIndex,
+                partial: assistantMessage,
+              });
+            }
+            break;
+          }
+
+          case 'content_block_delta': {
+            if (currentBlockType === 'text' && event.delta?.type === 'text_delta') {
+              const delta = event.delta.text || '';
+              const block = assistantMessage.content[currentBlockIndex] as TextContent;
+              if (block) block.text += delta;
+              stream.push({
+                type: 'text_delta',
+                contentIndex: currentBlockIndex,
+                delta,
+                partial: assistantMessage,
+              });
+            } else if (currentBlockType === 'tool_use' && event.delta?.type === 'input_json_delta') {
+              if (currentToolUse) {
+                currentToolUse.jsonAccumulator += event.delta.partial_json || '';
+              }
+            }
+            break;
+          }
+
+          case 'content_block_stop': {
+            if (currentBlockType === 'text') {
+              const block = assistantMessage.content[currentBlockIndex] as TextContent;
+              stream.push({
+                type: 'text_end',
+                contentIndex: currentBlockIndex,
+                content: block ? block.text : '',
+                partial: assistantMessage,
+              });
+            } else if (currentBlockType === 'tool_use' && currentToolUse) {
+              let parsedInput: Record<string, any> = {};
+              try {
+                parsedInput = JSON.parse(currentToolUse.jsonAccumulator || '{}');
+              } catch {
+                parsedInput = { raw: currentToolUse.jsonAccumulator };
+              }
+
+              const toolCall: ToolCall = {
+                type: 'toolCall',
+                id: currentToolUse.id,
+                name: currentToolUse.name,
+                args: parsedInput,
+              };
+
+              assistantMessage.content.push(toolCall);
+              stream.push({
+                type: 'toolcall_end',
+                contentIndex: currentBlockIndex,
+                toolCall,
+                partial: assistantMessage,
+              });
+              currentToolUse = null;
+            }
+            currentBlockType = null;
+            break;
+          }
+
+          case 'message_delta': {
+            if (event.delta?.stop_reason) {
+              if (event.delta.stop_reason === 'tool_use') {
+                assistantMessage.stopReason = 'toolUse';
+              } else {
+                assistantMessage.stopReason = 'stop';
+              }
+            }
+            break;
+          }
+        }
+      } catch {
+        // Skip malformed SSE lines
+      }
+    }
+  }
+
+  stream.push({
+    type: 'done',
+    reason: assistantMessage.stopReason as any,
+    message: assistantMessage,
+  });
+  stream.end(assistantMessage);
+}
