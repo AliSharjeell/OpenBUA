@@ -2,9 +2,16 @@ import React, { useMemo } from 'react';
 import { marked } from 'marked';
 
 // Configure marked for clean GFM rendering
+const renderer = new marked.Renderer();
+renderer.link = function ({ href, title, text }) {
+  const titleAttr = title ? ` title="${title}"` : '';
+  return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+};
+
 marked.setOptions({
   gfm: true,
   breaks: true,
+  renderer,
 });
 
 interface MarkdownRendererProps {
@@ -71,10 +78,26 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
     }
   }, [content]);
 
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = (e.target as HTMLElement).closest('a');
+    if (!target) return;
+    const href = target.getAttribute('href');
+    if (!href || href.startsWith('#')) return;
+
+    e.preventDefault();
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
+      chrome.tabs.create({ url: href });
+    } else {
+      window.open(href, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   return (
     <div
       className={`markdown-body text-xs text-zinc-200 select-text leading-relaxed ${className}`}
       dangerouslySetInnerHTML={{ __html: html }}
+      onClick={handleClick}
     />
   );
 }
+
