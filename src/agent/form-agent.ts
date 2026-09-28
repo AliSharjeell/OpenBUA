@@ -80,6 +80,12 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - Step 3: Call 'fill_form_fields' with the assignments.
    - Step 4: For multi-step forms or submission, click the relevant button using 'click_element'.
    - Step 5: Inform the user honestly of the outcome based on tool results.
+6. TABLE & DATA EXTRACTION FORMATTING:
+   - When presenting structured lists of data, profiles, leads, or search results across pages, ALWAYS format them as standard GitHub Flavored Markdown (GFM) tables with header and delimiter rows:
+     | # | Name | Headline / Affiliation | Location |
+     |---|------|------------------------|----------|
+     | 1 | Jane Doe | PhD Researcher | Stanford, USA |
+   - Separate every page or section table with a blank line before and after the table to ensure clean rendering.
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
