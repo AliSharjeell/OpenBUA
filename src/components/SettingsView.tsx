@@ -246,17 +246,48 @@ export function SettingsView({ settings, onSettingsSaved }: SettingsViewProps) {
                 >
                   Minimax
                 </button>
+                <button
+                  type="button"
+                  className="text-[9px] text-emerald-400 hover:text-emerald-300 font-medium underline"
+                  onClick={() => {
+                    setOpenaiUrl('https://api.groq.com/openai/v1/chat/completions');
+                    setOpenaiModel('qwen/qwen3.8-27b');
+                  }}
+                  title="Free fast inference on Groq Cloud"
+                >
+                  Groq (Free)
+                </button>
               </div>
             </div>
 
             <div>
-              <label className="text-[11px] text-zinc-400 block mb-1">API Key</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] text-zinc-400">API Key</label>
+                {openaiKey.trim().startsWith('gsk_') && (
+                  <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/60">
+                    <Sparkles className="w-3 h-3 text-emerald-400" />
+                    Groq Key Detected
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <Input
                   type={showKey ? 'text' : 'password'}
-                  placeholder="sk-..."
+                  placeholder="sk-... or gsk_..."
                   value={openaiKey}
-                  onChange={(e) => setOpenaiKey(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setOpenaiKey(val);
+                    if (val.trim().startsWith('gsk_')) {
+                      // If user pastes a Groq key and hasn't set Groq URL yet, automatically configure it
+                      if (!openaiUrl.includes('groq.com')) {
+                        setOpenaiUrl('https://api.groq.com/openai/v1/chat/completions');
+                      }
+                      if (openaiModel === 'gpt-4o' || openaiModel === '') {
+                        setOpenaiModel('qwen/qwen3.8-27b');
+                      }
+                    }
+                  }}
                   className="pr-8"
                 />
                 <button
@@ -267,6 +298,11 @@ export function SettingsView({ settings, onSettingsSaved }: SettingsViewProps) {
                   {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
               </div>
+              {openaiKey.trim().startsWith('gsk_') && (
+                <p className="text-[10px] text-zinc-400 mt-1 leading-normal">
+                  Rate-limit retry auto-handling enabled for Groq free tier.
+                </p>
+              )}
             </div>
 
             <div>
@@ -278,7 +314,7 @@ export function SettingsView({ settings, onSettingsSaved }: SettingsViewProps) {
               />
               <div className="flex gap-1.5 mt-1.5 flex-wrap">
                 <span className="text-[9px] text-zinc-500">Presets:</span>
-                {['gpt-4o', 'gpt-4o-mini', 'minimax-text-01', 'deepseek-chat'].map((m) => (
+                {['qwen/qwen3.8-27b', 'gpt-4o', 'gpt-4o-mini', 'deepseek-chat', 'minimax-text-01'].map((m) => (
                   <button
                     key={m}
                     type="button"

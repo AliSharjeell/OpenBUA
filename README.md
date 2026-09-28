@@ -70,14 +70,34 @@ No technical knowledge or coding required. Follow these steps to install OpenBUA
 4. Click **Select Folder**.
 5. OpenBUA is now installed! Click the puzzle icon (Extensions) in your Chrome toolbar and click the pin icon next to **OpenBUA** so it stays visible on your toolbar.
 
-### Step 4: Configure Your AI Key
+### Step 4: Configure Your AI Key (Or Get a Free Key)
 1. Click the **OpenBUA** icon on your Chrome toolbar to open the Side Panel.
 2. Click the **Settings** tab.
 3. Choose your provider:
-   - **OpenAI Compatible**: for OpenAI (ChatGPT), OpenRouter, Groq, DeepSeek, or local Ollama.
+   - **OpenAI Compatible**: for OpenAI (ChatGPT), Groq, OpenRouter, DeepSeek, or local Ollama.
    - **Anthropic Compatible**: for Claude or MiniMax.
-4. Paste your API Key and enter your Model ID (e.g. `claude-3-7-sonnet-20250219`, `gpt-4o`, `minimax-text-01`).
+4. Paste your API Key and enter your Model ID (e.g. `qwen/qwen3.8-27b`, `gpt-4o`, `claude-3-7-sonnet-20250219`).
 5. Click **Test Connection** to make sure it works, then click **Save Settings**.
+
+---
+
+## How to Use OpenBUA 100% Free with Groq
+
+You do not need a paid subscription or credit card to use OpenBUA. Groq provides ultra-fast free cloud API access:
+
+1. **Create a Free Groq Account**:
+   - Go to [console.groq.com](https://console.groq.com) and sign up for a free account.
+2. **Generate an API Key**:
+   - Navigate to the **API Keys** tab on the left menu (or visit [console.groq.com/keys](https://console.groq.com/keys)).
+   - Click **Create API Key**, give it a name (e.g., `OpenBUA`), and copy the key (starts with `gsk_...`).
+3. **Configure in OpenBUA**:
+   - Open OpenBUA in your Chrome side panel and go to **Settings**.
+   - Under **OpenAI Compatible**, paste your `gsk_...` key. OpenBUA will automatically detect your Groq key!
+   - Base URL: `https://api.groq.com/openai/v1/chat/completions` (or click the **Groq (Free)** preset button).
+   - Model ID: `qwen/qwen3.8-27b` (recommended, high rate limit and excellent tool performance) or `llama-3.3-70b-versatile`.
+   - Click **Save Settings**.
+4. **Built-in Rate Limit Handling**:
+   - Groq free tier has an input tokens-per-minute rate limit. OpenBUA has built-in smart rate-limit retry: if you reach a free tier limit, OpenBUA automatically pauses, displays a countdown timer, and resumes your task seamlessly without crashing!
 
 ---
 

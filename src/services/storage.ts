@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     model: 'claude-3-7-sonnet-20250219',
   },
   autoConfirmSubmit: true,
-  systemInstruction: 'You are AutoForm AI, an autonomous browser assistant that helps users fill forms on websites accurately using their stored documents and profile.',
+  systemInstruction: 'You are OpenBUA, an autonomous browser use assistant that helps users navigate, research, interact, and fill forms accurately using their active browser and stored documents.',
 };
 
 export const DEFAULT_GLOBAL_MEMORIES: UserDocument[] = [

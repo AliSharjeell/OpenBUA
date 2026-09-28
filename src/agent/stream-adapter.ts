@@ -189,19 +189,64 @@ async function streamOpenAI(
     payload.tool_choice = 'auto';
   }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey.trim()}`,
-    },
-    body: JSON.stringify(payload),
-    signal,
-  });
+  const isGroq = config.apiKey.trim().startsWith('gsk_') || endpoint.includes('groq.com');
 
-  if (!response.ok) {
+  let response: Response | null = null;
+  const maxRetries = isGroq ? 4 : 1;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey.trim()}`,
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+
+    if (response.ok) {
+      break;
+    }
+
     const errorBody = await response.text();
+
+    // Check for 429 Rate Limit (especially on Groq free tier)
+    if (response.status === 429 && isGroq && attempt < maxRetries) {
+      let waitSeconds = 6;
+      try {
+        // Parse "Please try again in 6.334285714s" from Groq error message
+        const match = errorBody.match(/try again in ([\d\.]+)s/i);
+        if (match && match[1]) {
+          waitSeconds = Math.ceil(parseFloat(match[1])) + 1;
+        }
+      } catch (e) {
+        waitSeconds = 6;
+      }
+
+      // Stream user-facing countdown notification so they know OpenBUA is automatically waiting
+      for (let s = waitSeconds; s > 0; s--) {
+        if (signal?.aborted) break;
+        stream.push({
+          type: 'text_delta',
+          delta: attempt === 0 && s === waitSeconds
+            ? `⏳ Groq Free Tier rate limit reached. Auto-resuming in ${s}s...\n`
+            : ``,
+        });
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      if (signal?.aborted) {
+        throw new Error('Request cancelled during rate limit wait');
+      }
+      continue;
+    }
+
     throw new Error(`OpenAI Provider error (${response.status}): ${errorBody || response.statusText}`);
+  }
+
+  if (!response || !response.ok) {
+    throw new Error(`Request failed after retries`);
   }
 
   if (!response.body) {
