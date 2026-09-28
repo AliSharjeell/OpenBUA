@@ -4,5 +4,6 @@ dist
 .env
 .env.local
 *.log
+*.zip
 .DS_Store
 Thumbs.db

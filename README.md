@@ -91,33 +91,51 @@ OpenBUA/
 
 ---
 
-## Installation & Setup
+## Quick Installation Guide (For New Users)
 
-### 1. Build the Extension
+No technical knowledge or coding required. Follow these steps to install OpenBUA in your browser in under 2 minutes:
+
+### Step 1: Download the Pre-Built Extension
+1. Go to the [Releases](https://github.com/AliSharjeell/OpenBUA/releases) page.
+2. Under the latest release, click on **`OpenBUA-v1.0.0.zip`** to download it.
+3. Unzip / extract the downloaded file to a folder on your computer (e.g. your Downloads or Documents folder). You will see a folder containing `manifest.json`, `sidepanel.html`, etc.
+
+### Step 2: Open Chrome Extensions & Enable Developer Mode
+1. Open Google Chrome.
+2. In the address bar at the top, type `chrome://extensions` and press **Enter** (or click the three dots menu at top-right -> **Extensions** -> **Manage Extensions**).
+3. In the top-right corner of the Extensions page, switch the **Developer mode** toggle to **ON**.
+   - Note: You do NOT need a paid Chrome Web Store developer account. "Developer mode" is a free built-in switch available in every copy of Chrome that lets you load unpacked extensions.
+
+### Step 3: Load the Extension
+1. After turning Developer mode on, three buttons will appear in the top-left corner: **Load unpacked**, **Pack extension**, and **Update**.
+2. Click **Load unpacked**.
+3. In the file picker window, select the unzipped folder containing `manifest.json` (the folder you extracted in Step 1).
+4. Click **Select Folder**.
+5. OpenBUA is now installed! Click the puzzle icon (Extensions) in your Chrome toolbar and click the pin icon next to **OpenBUA** so it stays visible on your toolbar.
+
+### Step 4: Configure Your AI Key
+1. Click the **OpenBUA** icon on your Chrome toolbar to open the Side Panel.
+2. Click the **Settings** tab.
+3. Choose your provider:
+   - **OpenAI Compatible**: for OpenAI (ChatGPT), OpenRouter, Groq, DeepSeek, or local Ollama.
+   - **Anthropic Compatible**: for Claude or MiniMax.
+4. Paste your API Key and enter your Model ID (e.g. `claude-3-7-sonnet-20250219`, `gpt-4o`, `minimax-text-01`).
+5. Click **Test Connection** to make sure it works, then click **Save Settings**.
+
+---
+
+## Alternative: Build from Source (For Developers)
+
+If you prefer to build the extension yourself:
+
 ```bash
+git clone https://github.com/AliSharjeell/OpenBUA.git
+cd OpenBUA
 npm install
 npm run build
 ```
 
-This compiles:
-- Side panel application to `dist/sidepanel.html` and `dist/assets/`
-- Background service worker to `dist/background.js`
-- Content script to `dist/content.js`
-- Manifest, test forms, and icons to `dist/`
-
-### 2. Load into Google Chrome
-1. Open Chrome and go to `chrome://extensions/`.
-2. Enable the **Developer mode** toggle in the top-right corner.
-3. Click **Load unpacked** in the top-left.
-4. Select the `dist` folder inside this project directory.
-5. Pin **OpenBUA** to your Chrome toolbar.
-
-### 3. Configure Your Model (BYOK)
-1. Click the **OpenBUA** icon to open the Side Panel.
-2. Navigate to the **Settings** tab.
-3. Select your provider (**OpenAI Compatible** or **Anthropic Compatible**).
-4. Enter your API Key, Base URL (optional), and Model ID (e.g. `claude-3-7-sonnet-20250219`, `gpt-4o`, `minimax-text-01`).
-5. Click **Test Connection** to verify your endpoint, then click **Save Settings**.
+Then in `chrome://extensions` with Developer mode enabled, click **Load unpacked** and select the `dist` folder.
 
 ---
 

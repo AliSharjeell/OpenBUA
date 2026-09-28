@@ -39,12 +39,12 @@ async function buildExtension() {
 
   console.log('✨ [4/4] Extension build completed successfully!');
   console.log('---------------------------------------------------------');
-  console.log('🎉 Dist directory is ready at: form-filling-ai/dist');
+  console.log('🎉 Dist directory is ready at: dist');
   console.log('📌 To test in Chrome:');
   console.log('   1. Open chrome://extensions/');
   console.log('   2. Enable "Developer mode" toggle (top-right)');
   console.log('   3. Click "Load unpacked" and select the "dist" folder');
-  console.log('   4. Click the AutoForm AI icon to open the Side Panel!');
+  console.log('   4. Click the OpenBUA icon to open the Side Panel!');
   console.log('---------------------------------------------------------');
 }
 
