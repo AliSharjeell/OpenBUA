@@ -829,10 +829,114 @@ function scrollPage(direction: 'up' | 'down' | 'top' | 'bottom' | 'element', sel
   return { success: true };
 }
 
+export interface CaptchaDetectionResult {
+  detected: boolean;
+  type?: 'cloudflare' | 'recaptcha' | 'hcaptcha' | 'arkose' | 'bing_bot' | 'generic';
+  title?: string;
+  selector?: string;
+}
+
+export function detectCaptchaChallenge(): CaptchaDetectionResult {
+  const title = (document.title || '').trim().toLowerCase();
+  const bodyText = (document.body ? document.body.innerText || '' : '').toLowerCase().slice(0, 3000);
+
+  // 1. Cloudflare Turnstile & Cloudflare Interactive Challenge
+  if (
+    document.querySelector('iframe[src*="challenges.cloudflare.com"]') ||
+    document.querySelector('#cf-turnstile, .cf-turnstile, #challenge-running, #challenge-form, #challenge-stage, .ray-id') ||
+    title.includes('just a moment...') ||
+    title.includes('attention required! | cloudflare') ||
+    (bodyText.includes('checking your browser') && bodyText.includes('cloudflare'))
+  ) {
+    return {
+      detected: true,
+      type: 'cloudflare',
+      title: document.title,
+      selector: '#challenge-form, #cf-turnstile, iframe[src*="challenges.cloudflare.com"]',
+    };
+  }
+
+  // 2. Google reCAPTCHA v2 / v3 / Enterprise
+  if (
+    document.querySelector('iframe[src*="recaptcha"], iframe[title*="recaptcha" i]') ||
+    document.querySelector('.g-recaptcha, #recaptcha, .recaptcha-checkbox')
+  ) {
+    return {
+      detected: true,
+      type: 'recaptcha',
+      title: document.title,
+      selector: 'iframe[src*="recaptcha"], .g-recaptcha',
+    };
+  }
+
+  // 3. hCaptcha
+  if (
+    document.querySelector('iframe[src*="hcaptcha.com"]') ||
+    document.querySelector('.h-captcha, div[data-sitekey]')
+  ) {
+    return {
+      detected: true,
+      type: 'hcaptcha',
+      title: document.title,
+      selector: 'iframe[src*="hcaptcha.com"], .h-captcha',
+    };
+  }
+
+  // 4. Arkose Labs / FunCaptcha
+  if (
+    document.querySelector('#fc-iframe-wrap, iframe[src*="arkoselabs"], #arkose')
+  ) {
+    return {
+      detected: true,
+      type: 'arkose',
+      title: document.title,
+      selector: '#fc-iframe-wrap, iframe[src*="arkoselabs"]',
+    };
+  }
+
+  // 5. Bing Bot Challenge / Rate Limit
+  if (
+    document.querySelector('#b_captcha, form[action*="challenge"]') ||
+    (bodyText.includes('please solve this puzzle') && bodyText.includes('person')) ||
+    (bodyText.includes('verify that you are human') && (bodyText.includes('bing') || title.includes('bing')))
+  ) {
+    return {
+      detected: true,
+      type: 'bing_bot',
+      title: document.title,
+      selector: '#b_captcha, form[action*="challenge"]',
+    };
+  }
+
+  // 6. Generic Human Verification / Anti-Bot Pages
+  if (
+    title.includes('robot check') ||
+    title.includes('security check') ||
+    title.includes('human verification') ||
+    title.includes('bot verification') ||
+    (bodyText.includes('verify you are human') && bodyText.length < 500) ||
+    (bodyText.includes('confirm you are not a robot') && bodyText.length < 500)
+  ) {
+    return {
+      detected: true,
+      type: 'generic',
+      title: document.title,
+      selector: 'body',
+    };
+  }
+
+  return { detected: false };
+}
+
 // Listen for messages from the Side Panel / Extension
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   try {
     switch (request.action) {
+      case 'CHECK_CAPTCHA': {
+        const captchaResult = detectCaptchaChallenge();
+        sendResponse({ success: true, data: captchaResult });
+        break;
+      }
       case 'INSPECT_PAGE_FORM': {
         const summary = inspectAllFormElements(request.selector);
         sendResponse({ success: true, data: summary });
