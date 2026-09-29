@@ -18,6 +18,9 @@ Because OpenBUA runs directly in your existing browser, it can perform complex a
   - Dispatches native synthetic event chains (`input`, `change`, `blur`) ensuring 100% compatibility with React, Vue, Angular, Svelte, and vanilla forms.
 - **Social Media & Community Interaction**:
   - Interacts with YouTube, Twitter/X, Reddit, GitHub, and forums using your already logged-in session.
+- **Autonomous Email & Webmail Outreach (Gmail, Outlook, Webmail)**:
+  - Drafts, reviews, and sends genuine emails right from your existing, logged-in browser session (Gmail, Outlook, Yahoo, webmail). No SMTP credentials, IMAP passwords, or third-party email API integrations required.
+  - Automatically navigates to your email web app, clicks Compose, inputs recipient addresses, confirms recipient chip badges, formats subject lines and body text, and clicks Send on your command.
 - **Multi-Step Web Tasks & Data Extraction**:
   - Paginated data scraping, clicking pagination buttons, navigating between tabs, scrolling dynamically to trigger lazy-loaded items, and compiling results into clean GitHub Flavored Markdown tables.
 
@@ -54,7 +57,7 @@ No technical knowledge or coding required. Follow these steps to install OpenBUA
 
 ### Step 1: Download the Pre-Built Extension
 1. Go to the [Releases](https://github.com/AliSharjeell/OpenBUA/releases) page.
-2. Under the latest release, click on **`OpenBUA-v1.0.0.zip`** to download it.
+2. Under the latest release, click on **`OpenBUA-v1.0.1.zip`** to download it.
 3. Unzip / extract the downloaded file to a folder on your computer (e.g. your Downloads or Documents folder). You will see a folder containing `manifest.json`, `sidepanel.html`, etc.
 
 ### Step 2: Open Chrome Extensions & Enable Developer Mode
@@ -160,6 +163,20 @@ Search for 'world models PhD' researchers, go through the results pages, and ext
 ```
 Scroll down to the comments section of this video and draft a thoughtful response based on the video topic.
 ```
+
+### 4. Real Email Outreach from Your Signed-in Email Client (Gmail, Outlook, Webmail)
+Because OpenBUA operates right inside your existing browser, it can send genuine emails through your active, signed-in Gmail or Outlook account without asking for third-party OAuth permissions, SMTP passwords, or API configurations.
+
+Simply open or let OpenBUA navigate to Gmail and instruct it:
+```
+Email Yann LeCun (yann.lecun@nyu.edu) to supervise our final year project. We are three FAST NUCES computer science students from Karachi, Pakistan building small world models with multi-token prediction. Draft a respectful email introducing our project and send it from my active Gmail account.
+```
+OpenBUA will:
+- Switch to or open your active Gmail tab.
+- Click Compose to trigger the Gmail draft window.
+- Enter the recipient address and dispatch confirmed chip creation.
+- Populate a clear subject line and draft a well-structured email body.
+- Click Send to dispatch the email directly from your personal or professional mailbox.
 
 ---
 
