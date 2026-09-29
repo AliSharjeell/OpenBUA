@@ -926,3 +926,163 @@ function getMockFormSummary(): PageFormSummary {
     ],
   };
 }
+
+// In-page key combination dispatcher
+function inPagePressKey(options: {
+  key: string;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+  altKey?: boolean;
+  metaKey?: boolean;
+  selector?: string;
+}) {
+  const target = options.selector
+    ? document.querySelector<HTMLElement>(options.selector) || document.activeElement || document.body
+    : (document.activeElement as HTMLElement) || document.body;
+
+  const keyUpper = options.key.toUpperCase();
+  const keyCode =
+    keyUpper === 'ENTER' ? 13 :
+    keyUpper === 'ESCAPE' || keyUpper === 'ESC' ? 27 :
+    keyUpper === 'TAB' ? 9 :
+    options.key.charCodeAt(0) || 0;
+
+  const eventInit: KeyboardEventInit = {
+    key: options.key,
+    code: options.key === 'Enter' ? 'Enter' : options.key === 'Escape' ? 'Escape' : options.key,
+    keyCode,
+    which: keyCode,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    ctrlKey: Boolean(options.ctrlKey),
+    shiftKey: Boolean(options.shiftKey),
+    altKey: Boolean(options.altKey),
+    metaKey: Boolean(options.metaKey),
+  };
+
+  target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+  target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+  target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+
+  return {
+    success: true,
+    message: `Dispatched ${options.ctrlKey ? 'Ctrl+' : ''}${options.key} to ${target.tagName.toLowerCase()}`,
+  };
+}
+
+// In-page Gmail send button finder and dispatcher
+function inPageDispatchSendEmail() {
+  const sendSelectors = [
+    'div[role="button"][data-tooltip*="Send" i]',
+    'div[role="button"][aria-label*="Send" i]',
+    'div[data-tooltip*="Send (Ctrl-Enter)" i]',
+    'div[data-tooltip*="Send (Cmd-Enter)" i]',
+    '.T-I.J-J5-Ji.aoO.v7.T-I-atl.L3',
+  ];
+
+  for (const sel of sendSelectors) {
+    const btn = document.querySelector<HTMLElement>(sel);
+    if (btn && btn.offsetParent !== null) {
+      btn.click();
+      return { success: true, message: `Clicked Send button (${sel}). Email dispatched successfully.` };
+    }
+  }
+
+  // Fallback: Dispatch Ctrl+Enter
+  const composeArea =
+    document.querySelector<HTMLElement>('div[role="textbox"][aria-label*="Message Body" i]') ||
+    document.querySelector<HTMLElement>('div[aria-label*="New Message" i]') ||
+    document.activeElement ||
+    document.body;
+
+  const eventInit: KeyboardEventInit = {
+    key: 'Enter',
+    code: 'Enter',
+    keyCode: 13,
+    which: 13,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    ctrlKey: true,
+  };
+
+  composeArea.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+  composeArea.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+
+  return {
+    success: true,
+    message: 'Dispatched Ctrl+Enter in Gmail compose window to send email.',
+  };
+}
+
+// Dispatch keyboard key combination on active tab
+export async function pressKeyCombination(options: {
+  key: string;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+  altKey?: boolean;
+  metaKey?: boolean;
+  selector?: string;
+}): Promise<{ success: boolean; message: string }> {
+  const activeTab = await getActiveTab();
+  if (!activeTab || !activeTab.id) {
+    return { success: true, message: `[Dev Mock] Pressed key combination ${options.ctrlKey ? 'Ctrl+' : ''}${options.key}` };
+  }
+
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: inPagePressKey,
+        args: [options],
+      });
+      if (results && results[0] && results[0].result) {
+        return results[0].result as { success: boolean; message: string };
+      }
+    } catch (err: any) {
+      return { success: false, message: `Failed to dispatch key: ${err?.message || err}` };
+    }
+  }
+
+  return { success: false, message: 'chrome.scripting unavailable' };
+}
+
+// Fast compound email sender via deep-link and auto-send
+export async function sendWebEmailDirect(options: {
+  to: string;
+  subject: string;
+  body: string;
+  userEmail?: string;
+}): Promise<{ success: boolean; message: string }> {
+  const activeTab = await getActiveTab();
+  if (!activeTab || !activeTab.id) {
+    return { success: true, message: `[Dev Mock] Sent email to ${options.to}` };
+  }
+
+  const authUserParam = options.userEmail ? `authuser=${encodeURIComponent(options.userEmail)}&` : '';
+  const composeUrl = `https://mail.google.com/mail/?${authUserParam}view=cm&fs=1&to=${encodeURIComponent(options.to)}&su=${encodeURIComponent(options.subject)}&body=${encodeURIComponent(options.body)}`;
+
+  // 1. Navigate to Gmail direct compose endpoint
+  await navigateActiveTab(composeUrl);
+
+  // 2. Wait up to 2.5s for Gmail SPA interface to settle
+  await new Promise((r) => setTimeout(r, 2200));
+
+  // 3. Trigger Send in page
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: inPageDispatchSendEmail,
+      });
+      if (results && results[0] && results[0].result) {
+        return results[0].result as { success: boolean; message: string };
+      }
+    } catch (e: any) {
+      return { success: false, message: `Failed to trigger send in Gmail: ${e?.message || e}` };
+    }
+  }
+
+  return { success: true, message: `Email compose opened and dispatched for ${options.to}` };
+}

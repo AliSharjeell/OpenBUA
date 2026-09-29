@@ -11,6 +11,8 @@ import {
   switchTab,
   navigateActiveTab,
   captureTabScreenshot,
+  pressKeyCombination,
+  sendWebEmailDirect,
 } from './browser-bridge';
 import {
   loadDocuments,
@@ -430,6 +432,76 @@ export const scratchpadTool: AgentTool<typeof ScratchpadSchema> = {
   },
 };
 
+// 12. Keyboard Shortcut / Key Press Dispatcher
+const PressKeySchema = Type.Object({
+  key: Type.String({ description: 'Key to dispatch, e.g. "Enter", "Escape", "Tab", "ArrowDown"' }),
+  ctrlKey: Type.Optional(Type.Boolean({ description: 'Whether Control key is held down (e.g. Ctrl+Enter to send in Gmail)' })),
+  shiftKey: Type.Optional(Type.Boolean({ description: 'Whether Shift key is held down' })),
+  altKey: Type.Optional(Type.Boolean({ description: 'Whether Alt key is held down' })),
+  selector: Type.Optional(Type.String({ description: 'Optional CSS selector of target element' })),
+});
+
+export const pressKeyCombinationTool: AgentTool<typeof PressKeySchema> = {
+  name: 'press_key_combination',
+  label: 'Keyboard Shortcut / Key Press',
+  description: 'Dispatches keyboard shortcuts (e.g. Ctrl+Enter to immediately send in Gmail, Escape to dismiss dialogs, Enter to submit forms) without needing to search for dynamic button IDs.',
+  parameters: PressKeySchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      const res = await pressKeyCombination({
+        key: params.key,
+        ctrlKey: params.ctrlKey,
+        shiftKey: params.shiftKey,
+        altKey: params.altKey,
+        selector: params.selector,
+      });
+      return {
+        content: [{ type: 'text', text: res.message }],
+        details: res,
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Failed to dispatch key: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
+// 13. Fast Direct Webmail Email Sender (Compound Action)
+const SendWebEmailSchema = Type.Object({
+  to: Type.String({ description: 'Recipient email address (e.g. user@example.com)' }),
+  subject: Type.String({ description: 'Email subject line' }),
+  body: Type.String({ description: 'Email body text' }),
+  userEmail: Type.Optional(Type.String({ description: 'Optional user Gmail address (e.g. alisharjeelofficial@gmail.com) for direct authuser routing' })),
+});
+
+export const sendWebEmailTool: AgentTool<typeof SendWebEmailSchema> = {
+  name: 'send_web_email',
+  label: 'Direct Email Sender',
+  description: 'Fast compound action to compose and send an email via Gmail in a single turn. Navigates directly to the pre-filled compose window and dispatches Send without requiring multi-turn micro-actions.',
+  parameters: SendWebEmailSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      const res = await sendWebEmailDirect({
+        to: params.to,
+        subject: params.subject,
+        body: params.body,
+        userEmail: params.userEmail,
+      });
+      return {
+        content: [{ type: 'text', text: res.message }],
+        details: res,
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Failed to send email: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
 // All available tools for the OpenBUA Agent
 export const ALL_AGENT_TOOLS: AgentTool<any>[] = [
   getActiveTabFormTool,
@@ -443,4 +515,6 @@ export const ALL_AGENT_TOOLS: AgentTool<any>[] = [
   navigateBrowserTabTool,
   getPageContentTool,
   scratchpadTool,
+  pressKeyCombinationTool,
+  sendWebEmailTool,
 ];

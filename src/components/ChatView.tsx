@@ -21,6 +21,8 @@ import {
   Copy,
   Check,
   X,
+  Mail,
+  Keyboard,
 } from 'lucide-react';
 import { getScratchpad } from '../services/storage';
 
@@ -82,6 +84,18 @@ function getToolMeta(toolName: string) {
         label: 'Updating Scratchpad',
         desc: 'Recording research data and notes in active session notepad...',
         icon: BookOpen,
+      };
+    case 'send_web_email':
+      return {
+        label: 'Sending Direct Email',
+        desc: 'Deep-linking to prefilled compose window and dispatching email...',
+        icon: Mail,
+      };
+    case 'press_key_combination':
+      return {
+        label: 'Pressing Keyboard Shortcut',
+        desc: 'Dispatching keyboard combination to browser...',
+        icon: Keyboard,
       };
     default:
       return {
