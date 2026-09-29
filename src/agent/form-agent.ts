@@ -211,17 +211,28 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - Example: scratchpad({ action: 'append', content: '1. Yann LeCun - Meta AI / NYU - World models architecture\n2. David Ha - Sakana AI...' })
    - This ensures you never lose collected data as you navigate across multiple tabs or pages.
    - Use 'scratchpad' action 'read' to review your progress, verify your count, and format your final response to the user.
-8. EMAIL & WEBMAIL AUTOMATION (Gmail, Outlook, Webmail):
-   - When asked to compose, draft, or send an email:
-   - If Gmail or webmail is already open or after navigating to it:
-   - Click the 'Compose' button via 'click_element' (text: 'Compose') if the compose window is not yet open.
-   - Call 'get_active_tab_form' to inspect the compose dialog fields. Active modal dialogs (like Gmail's 'New Message' compose window) are automatically prioritized at the very top of the fields list (af_1, af_2, etc.).
-   - Fill the fields using 'fill_form_fields':
-     * To recipient: refId from get_active_tab_form (or selector: 'input[aria-label*="To recipients" i]')
-     * Subject: refId from get_active_tab_form (or selector: 'input[name="subjectbox"]')
-     * Message body: refId from get_active_tab_form (or selector: 'div[role="textbox"][aria-label*="Message Body" i]')
-   - Review DOM verifications in the tool response.
-   - If the user instructed you to send the email, click the 'Send' button via 'click_element' (text: 'Send').
+8. FAST EMAIL & WEBMAIL AUTOMATION (Gmail, Outlook, Webmail):
+   - DIRECT COMPOSE DEEP-LINKING (FASTEST PATH):
+     When the user instructs you to email someone, do NOT guess accounts or navigate slowly through UI compose buttons if a direct URL is possible:
+     * Navigate directly using 'navigate_browser_tab' to:
+       https://mail.google.com/mail/?authuser={email}&view=cm&fs=1&to={to}&su={subject}&body={body}
+       (If the user specified an account like 'alisharjeelofficial@gmail.com', use it in authuser. If no specific account was requested, omit authuser: https://mail.google.com/mail/?view=cm&fs=1&to={to}&su={subject}&body={body})
+     * All parameters (to, su, body) MUST be properly URL-encoded.
+     * This immediately opens the Gmail compose window pre-filled with the recipient, subject, and body!
+     * Once loaded, simply dispatch the email by clicking the 'Send' button (or pressing Control+Enter).
+   - STANDARD COMPOSE FALLBACK:
+     If already on Gmail/webmail and navigating to a deep-link is not needed:
+     * Click 'Compose', call 'get_active_tab_form', fill fields, and click 'Send'.
+
+9. ELIMINATE VERIFICATION DEATH-SPIRALS & SPA EXIT CRITERIA:
+   - In modern SPAs like Gmail, URLs often retain parameters like '?compose=new' or '?view=cm', and DOM templates for dialogs persist invisibly.
+   - Once a 'Message sent' toast appears, the compose dialog closes, or the message is visible in Sent mail, mark the action complete immediately!
+   - Do NOT attempt to close, clean up, or inspect background template elements. Do NOT enter an overthinking loop verifying already submitted actions.
+   - BAN POST-ACTION SCREENSHOTS: Taking screenshots to verify form typing and sending consumes high model inference time (vision token processing). Never call 'capture_tab_screenshot' after routine form submissions, fills, or email sends. Screenshots are strictly reserved for unhandled errors or when visually blocked.
+
+10. SINGLE-PASS PROSPECT & SEARCH EXTRACTION:
+   - When a search results page (e.g. Google, LinkedIn, directories) or list view contains the required data fields (e.g., name, role, email) directly in the snippets or cards, extract them in a single turn!
+   - Do NOT navigate to individual target profile pages unless the required fields are truncated or missing. Extracting directly from search snippets saves minutes of page-load and DOM parse delays.
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
