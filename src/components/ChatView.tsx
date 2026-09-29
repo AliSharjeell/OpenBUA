@@ -22,9 +22,10 @@ import {
   Check,
   X,
 } from 'lucide-react';
-import { getScratchpad, saveScratchpad, clearScratchpad } from '../services/storage';
+import { getScratchpad } from '../services/storage';
 
 interface ChatViewProps {
+  activeSessionId?: string;
   messages: ChatMessage[];
   onMessagesChange: (msgs: ChatMessage[]) => void;
   harness: FormAgentHarness | null;
@@ -137,6 +138,7 @@ function formatEntireChatAsText(messages: ChatMessage[]): string {
 }
 
 export function ChatView({
+  activeSessionId = 'session_default',
   messages,
   onMessagesChange,
   harness,
@@ -161,16 +163,18 @@ export function ChatView({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load scratchpad content and listen for live agent updates
+  // Load scratchpad content and listen for live agent updates for this chat session
   useEffect(() => {
-    getScratchpad().then((text) => setScratchpadText(text || ''));
+    const sid = activeSessionId || 'session_default';
+    getScratchpad(sid).then((text) => setScratchpadText(text || ''));
 
     const onScratchpadUpdate = (e: any) => {
+      if (e.detail?.sessionId && e.detail.sessionId !== sid) return;
       setScratchpadText(e.detail?.content || '');
     };
     window.addEventListener('openbua_scratchpad_updated', onScratchpadUpdate);
     return () => window.removeEventListener('openbua_scratchpad_updated', onScratchpadUpdate);
-  }, []);
+  }, [activeSessionId]);
 
   const activeDocsCount = documents.filter((d) => d.isActiveForContext).length;
   const currentKey =
@@ -577,38 +581,28 @@ export function ChatView({
               <div className="flex items-center gap-1.5 min-w-0">
                 <BookOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span className="text-xs font-semibold text-zinc-200">Research Scratchpad</span>
-                <span className="text-[10px] text-zinc-500 font-mono">
+                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700/80 font-mono shrink-0">
+                  Read-only
+                </span>
+                <span className="text-[10px] text-zinc-500 font-mono truncate">
                   ({scratchpadText.split('\n').filter(Boolean).length} items, {scratchpadText.length} chars)
                 </span>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {scratchpadText.trim() && (
-                  <>
-                    <button
-                      type="button"
-                      className="px-2 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-750 text-zinc-200 border border-zinc-700/60 flex items-center gap-1 transition-colors active:scale-95"
-                      onClick={() => {
-                        navigator.clipboard.writeText(scratchpadText);
-                        setCopiedScratchpad(true);
-                        setTimeout(() => setCopiedScratchpad(false), 2000);
-                      }}
-                      title="Copy all scratchpad text"
-                    >
-                      {copiedScratchpad ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
-                      <span>{copiedScratchpad ? 'Copied' : 'Copy All'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-red-950/70 hover:text-red-300 text-zinc-400 border border-zinc-700/60 transition-colors active:scale-95"
-                      onClick={async () => {
-                        await clearScratchpad();
-                        setScratchpadText('');
-                      }}
-                      title="Clear scratchpad"
-                    >
-                      Clear
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    className="px-2 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-750 text-zinc-200 border border-zinc-700/60 flex items-center gap-1 transition-colors active:scale-95"
+                    onClick={() => {
+                      navigator.clipboard.writeText(scratchpadText);
+                      setCopiedScratchpad(true);
+                      setTimeout(() => setCopiedScratchpad(false), 2000);
+                    }}
+                    title="Copy all scratchpad text"
+                  >
+                    {copiedScratchpad ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                    <span>{copiedScratchpad ? 'Copied' : 'Copy All'}</span>
+                  </button>
                 )}
                 <button
                   type="button"
@@ -624,13 +618,9 @@ export function ChatView({
             <Textarea
               rows={4}
               value={scratchpadText}
-              onChange={(e) => {
-                const val = e.target.value;
-                setScratchpadText(val);
-                saveScratchpad(val);
-              }}
-              placeholder="Scratchpad is empty. When OpenBUA collects researchers, leads, or multi-step notes, they will appear here in real time. You can also type or paste notes directly here."
-              className="w-full text-xs font-mono bg-zinc-950/80 border-zinc-800 text-zinc-200 rounded-lg p-2 resize-y min-h-[90px] max-h-[220px] focus-visible:ring-1 focus-visible:ring-amber-500/50"
+              readOnly={true}
+              placeholder="Scratchpad is empty for this chat tab. When OpenBUA collects research findings, leads, or multi-step notes, they will appear here in real time. (Read-only for user; managed autonomously by OpenBUA agent)"
+              className="w-full text-xs font-mono bg-zinc-950/80 border-zinc-800 text-zinc-200 rounded-lg p-2 resize-y min-h-[90px] max-h-[220px] focus-visible:ring-0 select-text cursor-text"
             />
           </div>
         )}

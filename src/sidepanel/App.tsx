@@ -504,6 +504,7 @@ export function App() {
       <main className="flex-1 flex flex-col overflow-hidden relative select-text">
         {activeNavTab === 'chat' && (
           <ChatView
+            activeSessionId={activeSessionId}
             messages={messages}
             onMessagesChange={handleMessagesChange}
             harness={harnessRef.current}
