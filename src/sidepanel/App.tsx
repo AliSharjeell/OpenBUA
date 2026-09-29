@@ -81,8 +81,11 @@ export function App() {
         ...loadedTabMems.filter((m) => m.isActiveForContext),
       ];
 
-      // Create Agent Harness
-      const harness = new FormAgentHarness(loadedSettings, activeDocs, {
+      // Create Agent Harness with loaded chat history
+      const harness = new FormAgentHarness(
+        loadedSettings,
+        activeDocs,
+        {
         onStatusChange: (busy) => {
           setIsBusy(busy);
           if (!busy) setActiveTool(null);
@@ -239,10 +242,14 @@ export function App() {
             };
             const updated = [...prev, errorMsg];
             saveChatHistoryForTab(currentTabKeyRef.current, updated);
+            if (harnessRef.current) {
+              harnessRef.current.setConversationHistory(updated);
+            }
             return updated;
           });
         },
-      });
+      },
+      loadedChat);
 
       harnessRef.current = harness;
       setInitialized(true);
@@ -262,6 +269,9 @@ export function App() {
     ]);
     setTabMemories(tMems);
     setMessages(msgs);
+    if (harnessRef.current) {
+      harnessRef.current.setConversationHistory(msgs);
+    }
   };
 
   const handleCreateSession = async () => {
@@ -332,6 +342,9 @@ export function App() {
   const handleMessagesChange = (updatedMsgs: ChatMessage[]) => {
     setMessages(updatedMsgs);
     saveChatHistoryForTab(currentTabKeyRef.current, updatedMsgs);
+    if (harnessRef.current) {
+      harnessRef.current.setConversationHistory(updatedMsgs);
+    }
   };
 
   const handleInspectorFillRequested = (promptText?: string) => {

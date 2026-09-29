@@ -1,8 +1,9 @@
 // Form Filling Agent Harness powered by @earendil-works/pi-agent-core
-import { Agent, AgentEvent } from '@earendil-works/pi-agent-core';
+import { Agent, AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
+import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS } from './tools';
 import { createCustomModel, createStreamFn } from './stream-adapter';
-import { AppSettings, UserDocument, ToolCallState, ChatMessage } from '../types';
+import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
 
 export interface AgentUpdateListeners {
   onMessageDelta?: (text: string) => void;
@@ -14,6 +15,103 @@ export interface AgentUpdateListeners {
   onStatusChange?: (isBusy: boolean) => void;
 }
 
+export function convertChatMessagesToAgentMessages(
+  chatMessages: ChatMessage[],
+  config: ProviderConfig
+): AgentMessage[] {
+  const result: AgentMessage[] = [];
+
+  for (const msg of chatMessages) {
+    if (msg.role === 'user') {
+      const text = msg.content?.trim();
+      if (text) {
+        result.push({
+          role: 'user',
+          content: text,
+          timestamp: msg.timestamp || Date.now(),
+        });
+      }
+    } else if (msg.role === 'assistant') {
+      // Filter out pure error alert notifications
+      if (msg.content?.startsWith('⚠️') && (!msg.toolCalls || msg.toolCalls.length === 0)) {
+        continue;
+      }
+
+      const contentBlocks: any[] = [];
+
+      if (msg.thinking && msg.thinking.trim()) {
+        contentBlocks.push({
+          type: 'thinking',
+          thinking: msg.thinking,
+        });
+      }
+
+      const cleanContent = msg.content?.replace(/^⚠️\s*/, '').trim();
+      if (cleanContent) {
+        contentBlocks.push({
+          type: 'text',
+          text: cleanContent,
+        });
+      }
+
+      const validToolCalls = (msg.toolCalls || []).filter((tc) => tc.id && tc.toolName);
+      for (const tc of validToolCalls) {
+        contentBlocks.push({
+          type: 'toolCall',
+          id: tc.id,
+          name: tc.toolName,
+          arguments: tc.args || {},
+        });
+      }
+
+      if (contentBlocks.length === 0) {
+        contentBlocks.push({
+          type: 'text',
+          text: 'Understood.',
+        });
+      }
+
+      result.push({
+        role: 'assistant',
+        content: contentBlocks,
+        api: config.provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+        provider: config.provider,
+        model: config.model,
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        stopReason: validToolCalls.length > 0 ? 'toolUse' : 'stop',
+        timestamp: msg.timestamp || Date.now(),
+      } as AssistantMessage);
+
+      // Immediately append corresponding ToolResultMessages for each toolCall
+      for (const tc of validToolCalls) {
+        let resultText = '';
+        if (typeof tc.result === 'string') {
+          resultText = tc.result;
+        } else if (tc.result?.message) {
+          resultText = tc.result.message;
+        } else if (tc.result) {
+          resultText = JSON.stringify(tc.result);
+        } else if (tc.errorMessage) {
+          resultText = `Error: ${tc.errorMessage}`;
+        } else {
+          resultText = tc.status === 'error' ? 'Tool execution failed' : 'Completed';
+        }
+
+        result.push({
+          role: 'toolResult',
+          toolCallId: tc.id,
+          toolName: tc.toolName,
+          content: [{ type: 'text', text: resultText }],
+          isError: tc.status === 'error',
+          timestamp: tc.timestamp || msg.timestamp || Date.now(),
+        } as ToolResultMessage);
+      }
+    }
+  }
+
+  return result;
+}
+
 export class FormAgentHarness {
   private agent: Agent | null = null;
   private settings: AppSettings;
@@ -22,11 +120,18 @@ export class FormAgentHarness {
   private activeToolCalls = new Map<string, ToolCallState>();
   private currentStreamingText = '';
   private currentThinkingText = '';
+  private chatHistory: ChatMessage[] = [];
 
-  constructor(settings: AppSettings, documents: UserDocument[], listeners?: AgentUpdateListeners) {
+  constructor(
+    settings: AppSettings,
+    documents: UserDocument[],
+    listeners?: AgentUpdateListeners,
+    initialChatHistory: ChatMessage[] = []
+  ) {
     this.settings = settings;
     this.documents = documents;
     if (listeners) this.listeners = listeners;
+    this.chatHistory = initialChatHistory;
     this.setupAgent();
   }
 
@@ -108,7 +213,32 @@ ${docsSummary}
 ${this.settings.systemInstruction || ''}`.trim();
   }
 
-  public setupAgent() {
+  public setConversationHistory(history: ChatMessage[]) {
+    this.chatHistory = history;
+    const providerConfig =
+      this.settings.activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
+    const config = {
+      provider: this.settings.activeProvider,
+      baseUrl: providerConfig.baseUrl,
+      apiKey: providerConfig.apiKey,
+      model: providerConfig.model,
+    };
+    const agentMessages = convertChatMessagesToAgentMessages(this.chatHistory, config);
+    if (this.agent) {
+      try {
+        this.agent.state.messages = agentMessages;
+      } catch {
+        this.setupAgent();
+      }
+    } else {
+      this.setupAgent();
+    }
+  }
+
+  public setupAgent(initialHistory?: ChatMessage[]) {
+    if (initialHistory) {
+      this.chatHistory = initialHistory;
+    }
     const activeProvider = this.settings.activeProvider;
     const providerConfig = activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
     const config = {
@@ -120,12 +250,14 @@ ${this.settings.systemInstruction || ''}`.trim();
 
     const model = createCustomModel(config);
     const systemPrompt = this.buildSystemPrompt();
+    const agentMessages = convertChatMessagesToAgentMessages(this.chatHistory, config);
 
     this.agent = new Agent({
       initialState: {
         model,
         systemPrompt,
         tools: ALL_AGENT_TOOLS,
+        messages: agentMessages.length > 0 ? agentMessages : undefined,
       },
       streamFn: (m, ctx, opts) => createStreamFn(config, m, ctx, opts?.signal),
       toolExecution: 'sequential',
@@ -259,11 +391,29 @@ ${this.settings.systemInstruction || ''}`.trim();
 
     try {
       this.listeners.onStatusChange?.(true);
-      await this.agent.prompt(input);
+
+      const currentMsgs = this.agent.state.messages;
+      const lastMsg = currentMsgs[currentMsgs.length - 1];
+      const isAlreadyLastUserMsg =
+        lastMsg &&
+        lastMsg.role === 'user' &&
+        (typeof lastMsg.content === 'string'
+          ? lastMsg.content.trim() === input.trim()
+          : Array.isArray(lastMsg.content) && (lastMsg.content[0] as any)?.text?.trim() === input.trim());
+
+      if (isAlreadyLastUserMsg) {
+        try {
+          await this.agent.continue();
+        } catch {
+          await this.agent.prompt(input);
+        }
+      } else {
+        await this.agent.prompt(input);
+      }
     } catch (err: any) {
       console.error('[FormAgentHarness] prompt execution error:', err);
       this.listeners.onError?.(err?.message || String(err));
-      // Re-setup agent on error so state is not locked
+      // Re-setup agent on error so state is not locked, preserving history
       this.setupAgent();
       throw err;
     } finally {
@@ -280,8 +430,10 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public reset() {
+    this.chatHistory = [];
     this.activeToolCalls.clear();
     this.currentStreamingText = '';
+    this.currentThinkingText = '';
     this.listeners.onStatusChange?.(false);
     this.setupAgent();
   }
