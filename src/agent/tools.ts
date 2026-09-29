@@ -100,11 +100,11 @@ export const fillFormFieldsTool: AgentTool<typeof FillFormFieldsSchema> = {
       const verificationLines = (result.verifications || []).map((v) => {
         const id = v.refId || v.selector || 'field';
         if (v.verified) {
-          return `  - [${id}]: ✅ VERIFIED (DOM value: "${v.actualValue.slice(0, 50)}")`;
+          return `  - [${id}]: [VERIFIED] (DOM value: "${v.actualValue.slice(0, 50)}")`;
         } else if (!v.elementFound) {
-          return `  - [${id}]: ❌ ELEMENT NOT FOUND`;
+          return `  - [${id}]: [NOT FOUND]`;
         } else {
-          return `  - [${id}]: ⚠️ UNVERIFIED / EMPTY in DOM (Requested: "${v.requestedValue.slice(0, 30)}", Actual on page: "${v.actualValue.slice(0, 30)}")`;
+          return `  - [${id}]: [UNVERIFIED] in DOM (Requested: "${v.requestedValue.slice(0, 30)}", Actual on page: "${v.actualValue.slice(0, 30)}")`;
         }
       });
 

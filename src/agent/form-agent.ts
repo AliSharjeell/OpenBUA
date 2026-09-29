@@ -207,7 +207,7 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - The user's complete profile, resume, and application data are loaded below in "USER'S STORED KNOWLEDGE & DOCUMENTS" and accessible via 'get_user_documents'. Match them directly!
 4. ANTI-HALLUCINATION & STRICT DOM VERIFICATION PROTOCOL:
    - NEVER fabricate or hallucinate that a comment was posted, a form was submitted, or a field was filled if the tool response does not confirm it.
-   - When calling 'fill_form_fields', inspect the 'DOM Verifications' in the tool response. If a field shows '⚠️ UNVERIFIED / EMPTY in DOM' or '❌ ELEMENT NOT FOUND', DO NOT claim it was filled.
+   - When calling 'fill_form_fields', inspect the 'DOM Verifications' in the tool response. If a field shows '[UNVERIFIED] in DOM' or '[NOT FOUND]', DO NOT claim it was filled.
    - To post a comment (e.g. YouTube):
      a. Locate the comment box (often contenteditable or #simplebox-placeholder).
      b. Call 'fill_form_fields' with the text.

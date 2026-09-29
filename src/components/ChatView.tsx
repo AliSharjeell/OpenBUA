@@ -7,7 +7,7 @@ import { Textarea } from './ui/input';
 import {
   Send,
   Square,
-  Sparkles,
+  FormInput,
   ChevronRight,
   ChevronDown,
   CheckCircle2,
@@ -53,7 +53,7 @@ function getToolMeta(toolName: string) {
       return {
         label: 'Auto-Filling Form Inputs',
         desc: 'Setting input values matched from your stored memories...',
-        icon: Sparkles,
+        icon: FormInput,
       };
     case 'click_element':
       return {
