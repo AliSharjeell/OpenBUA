@@ -91,6 +91,51 @@ function getToolMeta(toolName: string) {
   }
 }
 
+function formatTimestampWithSeconds(timestamp: number): string {
+  const d = new Date(timestamp);
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const seconds = String(d.getSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+function formatSingleMessageAsText(msg: ChatMessage): string {
+  const time = formatTimestampWithSeconds(msg.timestamp);
+  const roleLabel = msg.role === 'user' ? 'User' : 'OpenBUA';
+  const lines: string[] = [`[${time}] ${roleLabel}:`];
+
+  if (msg.thinking && msg.thinking.trim()) {
+    lines.push(`Thinking:\n${msg.thinking.trim()}`);
+  }
+
+  if (msg.toolCalls && msg.toolCalls.length > 0) {
+    msg.toolCalls.forEach((tc) => {
+      const status = tc.status === 'completed' ? 'Completed' : tc.status === 'error' ? 'Failed' : 'Running';
+      lines.push(`Tool Call: ${tc.toolName} [${status}]`);
+      if (tc.args && Object.keys(tc.args).length > 0) {
+        lines.push(`Arguments:\n${JSON.stringify(tc.args, null, 2)}`);
+      }
+      if (tc.result) {
+        const res = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2);
+        lines.push(`Result:\n${res}`);
+      }
+      if (tc.errorMessage) {
+        lines.push(`Error:\n${tc.errorMessage}`);
+      }
+    });
+  }
+
+  if (msg.content && msg.content.trim()) {
+    lines.push(msg.content.trim());
+  }
+
+  return lines.join('\n\n');
+}
+
+function formatEntireChatAsText(messages: ChatMessage[]): string {
+  return messages.map((m) => formatSingleMessageAsText(m)).join('\n\n---\n\n');
+}
+
 export function ChatView({
   messages,
   onMessagesChange,
@@ -110,6 +155,8 @@ export function ChatView({
   const [showScratchpad, setShowScratchpad] = useState(false);
   const [scratchpadText, setScratchpadText] = useState('');
   const [copiedScratchpad, setCopiedScratchpad] = useState(false);
+  const [copiedEntireChat, setCopiedEntireChat] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
@@ -228,10 +275,25 @@ export function ChatView({
     setExpandedTools((prev) => ({ ...prev, [toolId]: !prev[toolId] }));
   };
 
+  const handleCopyEntireChat = () => {
+    if (messages.length === 0) return;
+    const text = formatEntireChatAsText(messages);
+    navigator.clipboard.writeText(text);
+    setCopiedEntireChat(true);
+    setTimeout(() => setCopiedEntireChat(false), 2000);
+  };
+
+  const handleCopyMessage = (msg: ChatMessage) => {
+    const text = formatSingleMessageAsText(msg);
+    navigator.clipboard.writeText(text);
+    setCopiedMessageId(msg.id);
+    setTimeout(() => setCopiedMessageId(null), 2000);
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3.5">
+      <div className="flex-1 overflow-y-auto p-3 space-y-3.5 select-text">
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
             <div>
@@ -278,11 +340,11 @@ export function ChatView({
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1.5`}
+            className={`group flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1.5 select-text`}
           >
             {/* Thinking / Reasoning Section (Outside Message Bubble, lighter text color) */}
             {msg.role === 'assistant' && msg.thinking && msg.thinking.trim().length > 0 && (
-              <div className="max-w-[92%] px-1 text-[11px] text-zinc-400 font-sans leading-relaxed flex items-start gap-1.5 py-0.5">
+              <div className="max-w-[92%] px-1 text-[11px] text-zinc-400 font-sans leading-relaxed flex items-start gap-1.5 py-0.5 select-text">
                 <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500 shrink-0 font-medium select-none mt-0.5">
                   Thinking:
                 </span>
@@ -295,7 +357,7 @@ export function ChatView({
             {/* Message Bubble (rendered if content or tool calls exist, or if still streaming) */}
             {(msg.content || (msg.toolCalls && msg.toolCalls.length > 0) || (msg.isStreaming && !msg.thinking)) && (
               <div
-                className={`max-w-[88%] rounded-2xl p-3 text-xs ${
+                className={`max-w-[88%] rounded-2xl p-3 text-xs select-text ${
                   msg.role === 'user'
                     ? 'bg-zinc-800 text-zinc-100 rounded-br-sm shadow-sm'
                     : 'bg-zinc-900/90 border border-zinc-800 text-zinc-200 rounded-bl-sm shadow-sm'
@@ -303,7 +365,7 @@ export function ChatView({
               >
                 {/* Tool Calls inside assistant message */}
                 {msg.toolCalls && msg.toolCalls.length > 0 && (
-                  <div className="space-y-1.5 mb-2.5">
+                  <div className="space-y-1.5 mb-2.5 select-text">
                     {msg.toolCalls.map((tc) => {
                       const isExpanded = expandedTools[tc.id];
                       const meta = getToolMeta(tc.toolName);
@@ -311,7 +373,7 @@ export function ChatView({
                       return (
                         <div
                           key={tc.id}
-                          className={`rounded-xl border overflow-hidden text-[11px] transition-all ${
+                          className={`rounded-xl border overflow-hidden text-[11px] transition-all select-text ${
                             tc.status === 'running'
                               ? 'border-zinc-700 bg-zinc-900/90 shadow-sm'
                               : tc.status === 'error'
@@ -319,61 +381,76 @@ export function ChatView({
                               : 'border-zinc-800/90 bg-zinc-950/80'
                           }`}
                         >
-                          <button
-                            type="button"
-                            className="w-full p-2 px-2.5 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            className="w-full p-2 px-2.5 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left cursor-pointer select-text"
                             onClick={() => toggleToolExpand(tc.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                toggleToolExpand(tc.id);
+                              }
+                            }}
                           >
-                            <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-300 min-w-0 pr-2">
-                              <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                              <span className="font-semibold text-zinc-200">{tc.toolName}</span>
-                              <span className="font-sans text-[10px] text-zinc-400 truncate">
+                            <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-300 min-w-0 pr-2 select-text">
+                              <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
+                              <span
+                                className="font-semibold text-zinc-200 select-text cursor-text"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {tc.toolName}
+                              </span>
+                              <span
+                                className="font-sans text-[10px] text-zinc-400 truncate select-text cursor-text"
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 • {meta.label}
                               </span>
                             </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="flex items-center gap-1.5 shrink-0 select-text">
                               {tc.status === 'running' ? (
-                                <span className="flex items-center gap-1 text-[10px] text-amber-300 font-medium">
+                                <span className="flex items-center gap-1 text-[10px] text-amber-300 font-medium select-text">
                                   <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
                                   <span>Running</span>
                                 </span>
                               ) : tc.status === 'error' ? (
-                                <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium">
+                                <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text">
                                   <AlertCircle className="w-3 h-3 text-red-400" />
                                   <span>Failed</span>
                                 </span>
                               ) : (
-                                <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium">
+                                <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium select-text">
                                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                                   <span>Completed</span>
                                 </span>
                               )}
                               {isExpanded ? (
-                                <ChevronDown className="w-3 h-3 text-zinc-500 ml-0.5" />
+                                <ChevronDown className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
                               ) : (
-                                <ChevronRight className="w-3 h-3 text-zinc-500 ml-0.5" />
+                                <ChevronRight className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
                               )}
                             </div>
-                          </button>
+                          </div>
 
                           {isExpanded && (
-                            <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 font-mono text-[10px] text-zinc-400 space-y-2 overflow-x-auto max-h-56 overflow-y-auto">
+                            <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 font-mono text-[10px] text-zinc-400 space-y-2 overflow-x-auto max-h-56 overflow-y-auto select-text cursor-text">
                               {tc.args && Object.keys(tc.args).length > 0 && (
-                                <div>
-                                  <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
+                                <div className="select-text">
+                                  <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
                                     Arguments:
                                   </span>
-                                  <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap">
+                                  <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700">
                                     {JSON.stringify(tc.args, null, 2)}
                                   </pre>
                                 </div>
                               )}
                               {tc.result && (
-                                <div>
-                                  <span className="text-zinc-500 block font-medium mb-0.5 font-sans">
+                                <div className="select-text">
+                                  <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
                                     Output / Result:
                                   </span>
-                                  <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap">
+                                  <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700">
                                     {typeof tc.result === 'string'
                                       ? tc.result
                                       : JSON.stringify(tc.result, null, 2)}
@@ -381,11 +458,11 @@ export function ChatView({
                                 </div>
                               )}
                               {tc.errorMessage && (
-                                <div>
-                                  <span className="text-red-400 block font-medium mb-0.5 font-sans">
+                                <div className="select-text">
+                                  <span className="text-red-400 block font-medium mb-0.5 font-sans select-text">
                                     Error:
                                   </span>
-                                  <pre className="text-red-300 bg-red-950/40 p-1.5 rounded-lg border border-red-900/40 whitespace-pre-wrap">
+                                  <pre className="text-red-300 bg-red-950/40 p-1.5 rounded-lg border border-red-900/40 whitespace-pre-wrap select-text selection:bg-zinc-700">
                                     {tc.errorMessage}
                                   </pre>
                                 </div>
@@ -418,9 +495,23 @@ export function ChatView({
               </div>
             )}
 
-            <span className="text-[9px] text-zinc-600 px-1">
-              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
+            <div className="flex items-center gap-1.5 px-1 select-text">
+              <span className="text-[9px] text-zinc-500 font-mono select-text">
+                {formatTimestampWithSeconds(msg.timestamp)}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleCopyMessage(msg)}
+                title="Copy message transcript"
+                className="opacity-0 group-hover:opacity-100 hover:text-zinc-300 text-zinc-600 transition-opacity p-0.5 rounded cursor-pointer"
+              >
+                {copiedMessageId === msg.id ? (
+                  <Check className="w-2.5 h-2.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-2.5 h-2.5" />
+                )}
+              </button>
+            </div>
           </div>
         ))}
 
@@ -665,14 +756,36 @@ export function ChatView({
           </div>
 
           {messages.length > 0 && (
-            <button
-              className="hover:text-zinc-300 flex items-center gap-1 transition-colors"
-              onClick={handleClear}
-              title="Clear chat transcript"
-            >
-              <Trash2 className="w-2.5 h-2.5" />
-              Clear
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="hover:text-zinc-300 flex items-center gap-1 transition-colors text-zinc-450 cursor-pointer"
+                onClick={handleCopyEntireChat}
+                title="Copy entire chat transcript with timestamps and tool calls"
+              >
+                {copiedEntireChat ? (
+                  <>
+                    <Check className="w-2.5 h-2.5 text-emerald-400" />
+                    <span className="text-emerald-400 font-medium">Copied Chat</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-2.5 h-2.5" />
+                    <span>Copy Chat</span>
+                  </>
+                )}
+              </button>
+              <span className="text-zinc-700">|</span>
+              <button
+                type="button"
+                className="hover:text-zinc-300 flex items-center gap-1 transition-colors cursor-pointer"
+                onClick={handleClear}
+                title="Clear chat transcript"
+              >
+                <Trash2 className="w-2.5 h-2.5" />
+                Clear
+              </button>
+            </div>
           )}
         </div>
       </div>

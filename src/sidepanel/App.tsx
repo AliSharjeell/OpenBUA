@@ -496,7 +496,7 @@ export function App() {
       </nav>
 
       {/* Main View Area */}
-      <main className="flex-1 flex flex-col overflow-hidden relative">
+      <main className="flex-1 flex flex-col overflow-hidden relative select-text">
         {activeNavTab === 'chat' && (
           <ChatView
             messages={messages}
