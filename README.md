@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <a href="https://youtu.be/XrGiMSM7XJo" target="_blank">
-    <img src="https://img.youtube.com/vi/XrGiMSM7XJo/hqdefault.jpg" alt="Watch OpenBUA Demo Video" width="100%" />
+  <a href="https://www.youtube.com/watch?v=XrGiMSM7XJo&autoplay=1" target="_blank">
+    <img src="https://img.youtube.com/vi/XrGiMSM7XJo/hqdefault.jpg" alt="Watch OpenBUA Demo Video (Autoplay)" width="100%" />
   </a>
   <br />
-  <a href="https://youtu.be/XrGiMSM7XJo" target="_blank">▶️ <b>Watch the OpenBUA Demo Video on YouTube</b></a>
+  <a href="https://www.youtube.com/watch?v=XrGiMSM7XJo&autoplay=1" target="_blank">▶️ <b>Watch the OpenBUA Demo Video on YouTube (Autoplay)</b></a>
 </p>
 
 ---
