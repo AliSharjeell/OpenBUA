@@ -66,6 +66,57 @@ export async function createStreamFn(
   return stream;
 }
 
+/**
+ * Sliding-window context compaction helper:
+ * Analyzes the transcript to identify older tool calls (> 2 assistant turns ago)
+ * and maps toolCallId -> toolName.
+ *
+ * Rules:
+ * - The most recent 2 assistant turns that invoked tools retain 100% full fidelity
+ *   (full DOM text, forms, elements, and vision screenshots).
+ * - Assistant turns older than 2 turns have:
+ *   1. Vision screenshots pruned (base64 stripped, replaced with concise marker).
+ *   2. Bulky DOM text (>350 chars) truncated to ~300 chars.
+ *   3. 'scratchpad' results are strictly preserved (never truncated).
+ */
+function analyzeAssistantTurns(messages: any[]): {
+  olderToolCallIds: Set<string>;
+  toolCallIdToName: Map<string, string>;
+} {
+  const assistantTurnsWithTools: Array<{ toolCallIds: string[] }> = [];
+  const toolCallIdToName = new Map<string, string>();
+
+  for (const m of messages) {
+    if (m.role === 'assistant') {
+      const toolCallIds: string[] = [];
+      if (Array.isArray(m.content)) {
+        for (const block of m.content) {
+          if ((block.type === 'toolCall' || block.type === 'tool_use') && block.id) {
+            toolCallIds.push(block.id);
+            const name = block.name || block.function?.name || '';
+            if (name) toolCallIdToName.set(block.id, name);
+          }
+        }
+      }
+      if (toolCallIds.length > 0) {
+        assistantTurnsWithTools.push({ toolCallIds });
+      }
+    }
+  }
+
+  const olderToolCallIds = new Set<string>();
+  if (assistantTurnsWithTools.length > 2) {
+    const olderTurns = assistantTurnsWithTools.slice(0, assistantTurnsWithTools.length - 2);
+    for (const turn of olderTurns) {
+      for (const id of turn.toolCallIds) {
+        olderToolCallIds.add(id);
+      }
+    }
+  }
+
+  return { olderToolCallIds, toolCallIdToName };
+}
+
 // ---------------------------------------------------------
 // OpenAI-Compatible Streaming (OpenAI, Minimax, Groq, DeepSeek, etc.)
 // ---------------------------------------------------------
@@ -131,6 +182,7 @@ async function streamOpenAI(
     }
   };
 
+  const { olderToolCallIds, toolCallIdToName } = analyzeAssistantTurns(context.messages);
   const pendingToolImages: Array<{ data: string; mimeType?: string }> = [];
 
   for (const m of context.messages) {
@@ -184,6 +236,10 @@ async function streamOpenAI(
       }
       messages.push(msg);
     } else if (m.role === 'toolResult') {
+      const isOlderTurn = olderToolCallIds.has(m.toolCallId);
+      const toolName = (m as any).toolName || toolCallIdToName.get(m.toolCallId) || '';
+      const isScratchpad = toolName === 'scratchpad';
+
       let text = Array.isArray(m.content)
         ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('\n')
         : typeof m.content === 'string'
@@ -194,8 +250,21 @@ async function streamOpenAI(
         ? m.content.filter((c: any) => c.type === 'image' && c.data)
         : [];
 
-      if (imageBlocks.length > 0) {
-        pendingToolImages.push(...imageBlocks);
+      if (isOlderTurn) {
+        // Prune older vision screenshots to preserve model inference speed and tokens
+        if (imageBlocks.length > 0) {
+          text = (text ? text + '\n' : '') + '[Prior screenshot inspected & verified - image pruned to preserve tokens]';
+        }
+        // Compact older turn bulky DOM/HTML dumps (never prune scratchpad notes)
+        if (!isScratchpad && text.length > 350) {
+          const pruned = text.length - 300;
+          text = text.slice(0, 300) + `\n... [Prior turn DOM content compacted - ${pruned} chars pruned]`;
+        }
+      } else {
+        // Recent turn: preserve vision screenshot blocks for visual inspection
+        if (imageBlocks.length > 0) {
+          pendingToolImages.push(...imageBlocks);
+        }
       }
 
       // ONLY cap tool output for Groq free-tier due to its severe 7000 ITPM limit. Standard models get full tool output!
@@ -214,13 +283,13 @@ async function streamOpenAI(
   // Flush any remaining tool images at end of conversation history
   flushPendingImages(messages);
 
-  // ONLY compact older tool results in history for Groq free tier. Standard models (Mimo, GPT-4o, Claude) keep full history!
+  // Extra compaction pass for Groq free tier if needed
   if (isGroq) {
     const totalMsgs = messages.length;
     for (let i = 0; i < totalMsgs - 4; i++) {
       const msg = messages[i];
-      if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.length > 350) {
-        msg.content = msg.content.slice(0, 350) + '\n... [Prior turn output compacted for Groq limit]';
+      if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.length > 250) {
+        msg.content = msg.content.slice(0, 250) + '\n... [Prior turn output compacted for Groq limit]';
       }
     }
   }
@@ -554,6 +623,7 @@ async function streamAnthropic(
   }
 
   // Convert context messages to Anthropic format
+  const { olderToolCallIds, toolCallIdToName } = analyzeAssistantTurns(context.messages);
   const rawMessages: any[] = [];
 
   for (const m of context.messages) {
@@ -612,7 +682,11 @@ async function streamAnthropic(
 
       rawMessages.push({ role: 'assistant', content: contentBlocks });
     } else if (m.role === 'toolResult') {
-      const textParts = Array.isArray(m.content)
+      const isOlderTurn = olderToolCallIds.has(m.toolCallId);
+      const toolName = (m as any).toolName || toolCallIdToName.get(m.toolCallId) || '';
+      const isScratchpad = toolName === 'scratchpad';
+
+      let textParts = Array.isArray(m.content)
         ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('\n')
         : typeof m.content === 'string'
         ? m.content
@@ -623,19 +697,37 @@ async function streamAnthropic(
         : [];
 
       const toolResultContent: any[] = [];
-      if (textParts.trim()) {
-        toolResultContent.push({ type: 'text', text: textParts });
+
+      if (isOlderTurn) {
+        // Prune older screenshots to prevent massive multi-megabyte vision token payloads
+        if (imageBlocks.length > 0) {
+          textParts = (textParts ? textParts + '\n' : '') + '[Prior screenshot inspected & verified - image pruned to preserve tokens]';
+        }
+        // Compact older turn bulky DOM/HTML dumps (never prune scratchpad notes)
+        if (!isScratchpad && textParts.length > 350) {
+          const pruned = textParts.length - 300;
+          textParts = textParts.slice(0, 300) + `\n... [Prior turn DOM content compacted - ${pruned} chars pruned]`;
+        }
+        if (textParts.trim()) {
+          toolResultContent.push({ type: 'text', text: textParts });
+        }
+      } else {
+        // Recent turn: preserve full text and vision screenshots
+        if (textParts.trim()) {
+          toolResultContent.push({ type: 'text', text: textParts });
+        }
+        for (const img of imageBlocks) {
+          toolResultContent.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: img.mimeType || 'image/jpeg',
+              data: img.data,
+            },
+          });
+        }
       }
-      for (const img of imageBlocks) {
-        toolResultContent.push({
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: img.mimeType || 'image/jpeg',
-            data: img.data,
-          },
-        });
-      }
+
       if (toolResultContent.length === 0) {
         toolResultContent.push({ type: 'text', text: 'Success' });
       }

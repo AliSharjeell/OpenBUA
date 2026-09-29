@@ -22,6 +22,18 @@ export function convertChatMessagesToAgentMessages(
 ): AgentMessage[] {
   const result: AgentMessage[] = [];
 
+  // Identify older assistant turns with tool calls to compact rehydrated history
+  const assistantMsgsWithTools = chatMessages.filter(
+    (m) => m.role === 'assistant' && (m.toolCalls || []).some((tc) => tc.id && tc.toolName)
+  );
+  const recentAssistantMsgIds = new Set<string>();
+  if (assistantMsgsWithTools.length > 0) {
+    const recent = assistantMsgsWithTools.slice(-2);
+    for (const m of recent) {
+      if (m.id) recentAssistantMsgIds.add(m.id);
+    }
+  }
+
   for (const msg of chatMessages) {
     if (msg.role === 'user') {
       const text = msg.content?.trim();
@@ -83,6 +95,9 @@ export function convertChatMessagesToAgentMessages(
         timestamp: msg.timestamp || Date.now(),
       } as AssistantMessage);
 
+      // Check if this assistant turn is recent or older
+      const isOlderTurn = msg.id ? !recentAssistantMsgIds.has(msg.id) : false;
+
       // Immediately append corresponding ToolResultMessages for each toolCall
       for (const tc of validToolCalls) {
         let resultText = '';
@@ -96,6 +111,12 @@ export function convertChatMessagesToAgentMessages(
           resultText = `Error: ${tc.errorMessage}`;
         } else {
           resultText = tc.status === 'error' ? 'Tool execution failed' : 'Completed';
+        }
+
+        // Compact older turn DOM dumps from rehydrated history (keep scratchpad intact)
+        if (isOlderTurn && tc.toolName !== 'scratchpad' && resultText.length > 350) {
+          const pruned = resultText.length - 300;
+          resultText = resultText.slice(0, 300) + `\n... [Prior turn DOM content compacted - ${pruned} chars pruned]`;
         }
 
         result.push({
