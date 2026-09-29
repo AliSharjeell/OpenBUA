@@ -513,6 +513,314 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
   return { success: true, message: `Clicked element "${(clickable.textContent || clickable.getAttribute('aria-label') || '').trim().slice(0, 30)}"` };
 }
 
+// --- Audio Alerts for Human-in-the-Loop Intercept Gate ---
+export function playCaptchaAlertSound() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    const now = ctx.currentTime;
+    osc.frequency.setValueAtTime(698.46, now); // F5
+    osc.frequency.setValueAtTime(880, now + 0.15); // A5
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.42);
+  } catch {}
+}
+
+export function playCaptchaSuccessSound() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const now = ctx.currentTime;
+    const notes = [523.25, 659.25, 783.99]; // C5 -> E5 -> G5
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+      gain.gain.setValueAtTime(0.2, now + idx * 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.1 + 0.18);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + idx * 0.1);
+      osc.stop(now + idx * 0.1 + 0.2);
+    });
+  } catch {}
+}
+
+// In-page fallback CAPTCHA detection for direct script execution
+function inPageCheckCaptcha(): { detected: boolean; type?: string; selector?: string } {
+  const title = (document.title || '').trim().toLowerCase();
+  const bodyText = (document.body ? document.body.innerText || '' : '').toLowerCase().slice(0, 3000);
+
+  // 1. Cloudflare Turnstile & Interactive Challenge
+  if (
+    document.querySelector('iframe[src*="challenges.cloudflare.com"]') ||
+    document.querySelector('#cf-turnstile, .cf-turnstile, #challenge-running, #challenge-form, #challenge-stage, .ray-id') ||
+    title.includes('just a moment...') ||
+    title.includes('attention required! | cloudflare') ||
+    (bodyText.includes('checking your browser') && bodyText.includes('cloudflare'))
+  ) {
+    return {
+      detected: true,
+      type: 'cloudflare',
+      selector: '#challenge-form, #cf-turnstile, iframe[src*="challenges.cloudflare.com"]',
+    };
+  }
+
+  // 2. Google reCAPTCHA
+  if (
+    document.querySelector('iframe[src*="recaptcha"], iframe[title*="recaptcha" i]') ||
+    document.querySelector('.g-recaptcha, #recaptcha, .recaptcha-checkbox')
+  ) {
+    return {
+      detected: true,
+      type: 'recaptcha',
+      selector: 'iframe[src*="recaptcha"], .g-recaptcha',
+    };
+  }
+
+  // 3. hCaptcha
+  if (
+    document.querySelector('iframe[src*="hcaptcha.com"]') ||
+    document.querySelector('.h-captcha, div[data-sitekey]')
+  ) {
+    return {
+      detected: true,
+      type: 'hcaptcha',
+      selector: 'iframe[src*="hcaptcha.com"], .h-captcha',
+    };
+  }
+
+  // 4. Arkose Labs
+  if (
+    document.querySelector('#fc-iframe-wrap, iframe[src*="arkoselabs"], #arkose')
+  ) {
+    return {
+      detected: true,
+      type: 'arkose',
+      selector: '#fc-iframe-wrap, iframe[src*="arkoselabs"]',
+    };
+  }
+
+  // 5. Bing Bot Challenge
+  if (
+    document.querySelector('#b_captcha, form[action*="challenge"]') ||
+    (bodyText.includes('please solve this puzzle') && bodyText.includes('person')) ||
+    (bodyText.includes('verify that you are human') && (bodyText.includes('bing') || title.includes('bing')))
+  ) {
+    return {
+      detected: true,
+      type: 'bing_bot',
+      selector: '#b_captcha, form[action*="challenge"]',
+    };
+  }
+
+  // 6. Generic Anti-Bot Challenge
+  if (
+    title.includes('robot check') ||
+    title.includes('security check') ||
+    title.includes('human verification') ||
+    title.includes('bot verification') ||
+    (bodyText.includes('verify you are human') && bodyText.length < 500) ||
+    (bodyText.includes('confirm you are not a robot') && bodyText.length < 500)
+  ) {
+    return {
+      detected: true,
+      type: 'generic',
+      selector: 'body',
+    };
+  }
+
+  return { detected: false };
+}
+
+export async function checkActiveTabCaptcha(tabId?: number): Promise<{ detected: boolean; type?: string; selector?: string }> {
+  let targetTabId = tabId;
+  if (!targetTabId) {
+    const activeTab = await getActiveTab();
+    targetTabId = activeTab?.id;
+  }
+  if (!targetTabId || typeof chrome === 'undefined' || !chrome.tabs) {
+    return { detected: false };
+  }
+
+  // 1. Try sendMessageToTab first
+  try {
+    const res = await sendMessageToTab<{ success: boolean; data: { detected: boolean; type?: string; selector?: string } }>(
+      targetTabId,
+      { action: 'CHECK_CAPTCHA' },
+      1000
+    );
+    if (res && res.success && res.data) {
+      return res.data;
+    }
+  } catch {
+    // Fall back to direct executeScript
+  }
+
+  // 2. Direct executeScript fallback
+  if (chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: targetTabId },
+        func: inPageCheckCaptcha,
+      });
+      if (results && results[0] && results[0].result) {
+        return results[0].result as { detected: boolean; type?: string; selector?: string };
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  return { detected: false };
+}
+
+// --- Human-in-the-Loop (HITL) 10-Second CAPTCHA Intercept Gate Manager ---
+export interface CaptchaState {
+  isActive: boolean;
+  type: string;
+  url: string;
+  remainingSeconds: number;
+}
+
+type CaptchaListener = (state: CaptchaState) => void;
+
+class CaptchaGateManager {
+  private activeState: CaptchaState = {
+    isActive: false,
+    type: '',
+    url: '',
+    remainingSeconds: 0,
+  };
+  private listeners = new Set<CaptchaListener>();
+  private activeResolver: ((value: { solved: boolean; message: string }) => void) | null = null;
+  private countdownTimer: any = null;
+  private pollInterval: any = null;
+
+  public getState(): CaptchaState {
+    return { ...this.activeState };
+  }
+
+  public subscribe(cb: CaptchaListener): () => void {
+    this.listeners.add(cb);
+    cb(this.getState());
+    return () => this.listeners.delete(cb);
+  }
+
+  private notify() {
+    const state = this.getState();
+    this.listeners.forEach((cb) => cb(state));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openbua_captcha_state', { detail: state }));
+    }
+  }
+
+  public resolveActiveGate(solved: boolean, customMessage?: string) {
+    if (!this.activeState.isActive || !this.activeResolver) return;
+
+    if (this.countdownTimer) clearInterval(this.countdownTimer);
+    if (this.pollInterval) clearInterval(this.pollInterval);
+    this.countdownTimer = null;
+    this.pollInterval = null;
+
+    if (solved) {
+      playCaptchaSuccessSound();
+    }
+
+    const resolver = this.activeResolver;
+    this.activeResolver = null;
+    this.activeState = {
+      isActive: false,
+      type: '',
+      url: '',
+      remainingSeconds: 0,
+    };
+    this.notify();
+
+    resolver({
+      solved,
+      message:
+        customMessage ||
+        (solved
+          ? 'CAPTCHA was resolved by user. Resuming automation.'
+          : 'CAPTCHA challenge skipped by user. ABORT this domain immediately and pivot to an alternate source/query.'),
+    });
+  }
+
+  public async runGate(tabId: number, type: string, url: string): Promise<{ solved: boolean; message: string }> {
+    if (this.activeState.isActive) {
+      return { solved: false, message: 'CAPTCHA gate already active.' };
+    }
+
+    playCaptchaAlertSound();
+
+    this.activeState = {
+      isActive: true,
+      type: type || 'bot_challenge',
+      url,
+      remainingSeconds: 10,
+    };
+    this.notify();
+
+    return new Promise<{ solved: boolean; message: string }>((resolve) => {
+      this.activeResolver = resolve;
+
+      // 1. Tick countdown every 1 second
+      this.countdownTimer = setInterval(() => {
+        if (!this.activeState.isActive) return;
+        const nextRemaining = this.activeState.remainingSeconds - 1;
+        if (nextRemaining <= 0) {
+          // Timer expired: do a final check to see if human solved it right before expiry
+          checkActiveTabCaptcha(tabId).then((check) => {
+            if (!check.detected) {
+              this.resolveActiveGate(true, 'CAPTCHA challenge solved before 10s timeout expired. Resuming automation.');
+            } else {
+              this.resolveActiveGate(
+                false,
+                'CAPTCHA challenge timed out after 10s. Human was unable to solve it or chose to pivot. Workaround activated: ABORT current domain/URL immediately and pivot to an alternate source (e.g. Google X-Ray search, web search snippet, or alternate URL). Do NOT attempt to reload this blocked URL.'
+              );
+            }
+          });
+        } else {
+          this.activeState.remainingSeconds = nextRemaining;
+          this.notify();
+        }
+      }, 1000);
+
+      // 2. Poll every 600ms for DOM detachment / human solving
+      this.pollInterval = setInterval(async () => {
+        if (!this.activeState.isActive) return;
+        try {
+          const check = await checkActiveTabCaptcha(tabId);
+          if (!check.detected) {
+            this.resolveActiveGate(true, 'CAPTCHA challenge solved by human in browser (DOM challenge cleared). Resuming automation.');
+          }
+        } catch {
+          // ignore transient poll errors
+        }
+      }, 600);
+    });
+  }
+}
+
+export const captchaManager = new CaptchaGateManager();
+
 // Inspect Form on Active Tab
 export async function inspectActiveTabForm(selector?: string): Promise<PageFormSummary> {
   const activeTab = await getActiveTab();
@@ -522,6 +830,15 @@ export async function inspectActiveTabForm(selector?: string): Promise<PageFormS
 
   if (activeTab.url && (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('chrome-extension://') || activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:'))) {
     throw new Error(`Chrome restricts extensions from accessing internal pages (${activeTab.url}). Please open a regular webpage or form (such as test-form.html) in your browser!`);
+  }
+
+  // Check for CAPTCHA challenge before inspecting form
+  const captcha = await checkActiveTabCaptcha(activeTab.id);
+  if (captcha.detected) {
+    const gate = await captchaManager.runGate(activeTab.id, captcha.type || 'bot_challenge', activeTab.url || '');
+    if (!gate.solved) {
+      throw new Error(`[BLOCKED BY CAPTCHA]: ${gate.message}`);
+    }
   }
 
   // 1. Try sendMessageToTab first with generous 4-second timeout for rich SPAs
@@ -693,6 +1010,19 @@ export async function getActiveTabPageContent(): Promise<{ text: string; title: 
     };
   }
 
+  // Check for CAPTCHA challenge before reading content
+  const captcha = await checkActiveTabCaptcha(activeTab.id);
+  if (captcha.detected) {
+    const gate = await captchaManager.runGate(activeTab.id, captcha.type || 'bot_challenge', activeTab.url || '');
+    if (!gate.solved) {
+      return {
+        text: `[BLOCKED BY CAPTCHA]: ${gate.message}`,
+        title: 'Bot Verification / CAPTCHA Challenge',
+        url: activeTab.url || '',
+      };
+    }
+  }
+
   // Hard 5-second timeout to prevent the tool from hanging forever
   const result = await Promise.race([
     (async () => {
@@ -773,10 +1103,17 @@ export async function closeBrowserTab(tabId: number): Promise<boolean> {
   });
 }
 
-export async function navigateActiveTab(url: string): Promise<boolean> {
+export interface NavigationResult {
+  success: boolean;
+  blockedByCaptcha?: boolean;
+  message?: string;
+  url?: string;
+}
+
+export async function navigateActiveTab(url: string): Promise<NavigationResult> {
   const activeTab = await getActiveTab();
   if (!activeTab || !activeTab.id || typeof chrome === 'undefined' || !chrome.tabs) {
-    return true;
+    return { success: true, url };
   }
 
   const tabId = activeTab.id;
@@ -796,21 +1133,41 @@ export async function navigateActiveTab(url: string): Promise<boolean> {
       }
     };
 
+    const handleLoadedAndCheckCaptcha = async () => {
+      cleanup();
+      // Give client-side SPA frameworks (YouTube, React, Vue, Next.js) time to hydrate DOM
+      await new Promise((r) => setTimeout(r, 1200));
+      await ensureContentScriptInjected(tabId).catch(() => {});
+
+      // Inspect for CAPTCHA / anti-bot challenge
+      const captcha = await checkActiveTabCaptcha(tabId);
+      if (captcha.detected) {
+        const gate = await captchaManager.runGate(tabId, captcha.type || 'bot_challenge', targetUrl);
+        if (!gate.solved) {
+          resolve({
+            success: false,
+            blockedByCaptcha: true,
+            message: gate.message,
+            url: targetUrl,
+          });
+          return;
+        }
+      }
+
+      resolve({
+        success: true,
+        url: targetUrl,
+      });
+    };
+
     // 8-second safety timeout so it never hangs indefinitely on slow or streaming pages
     const timer = setTimeout(async () => {
-      cleanup();
-      // Ensure content script is injected even if status didn't reach complete
-      await ensureContentScriptInjected(tabId).catch(() => {});
-      resolve(true);
+      await handleLoadedAndCheckCaptcha();
     }, 8000);
 
     const onUpdatedListener = async (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
       if (updatedTabId === tabId && changeInfo.status === 'complete') {
-        cleanup();
-        // Give client-side SPA frameworks (YouTube, React, Vue, Next.js) time to hydrate DOM
-        await new Promise((r) => setTimeout(r, 1200));
-        await ensureContentScriptInjected(tabId).catch(() => {});
-        resolve(true);
+        await handleLoadedAndCheckCaptcha();
       }
     };
 
@@ -819,7 +1176,11 @@ export async function navigateActiveTab(url: string): Promise<boolean> {
     chrome.tabs.update(tabId, { url: targetUrl }, (updatedTab) => {
       if (chrome.runtime.lastError || !updatedTab) {
         cleanup();
-        resolve(false);
+        resolve({
+          success: false,
+          message: chrome.runtime.lastError?.message || 'Failed to update tab URL',
+          url: targetUrl,
+        });
       }
     });
   });
