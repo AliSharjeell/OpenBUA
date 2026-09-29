@@ -4,6 +4,8 @@
 
 <p align="center">
   <img src="assets/openbua-demo.gif" alt="OpenBUA Autonomous Agent Demo Walkthrough" width="100%" />
+  <br />
+  <sub>OpenBUA was asked to "Find me 2 students from Australia using Linkedin and email them selling my app Petedoro"</sub>
 </p>
 
 ---
