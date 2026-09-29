@@ -3,11 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=XrGiMSM7XJo&autoplay=1" target="_blank">
-    <img src="https://img.youtube.com/vi/XrGiMSM7XJo/hqdefault.jpg" alt="Watch OpenBUA Demo Video (Autoplay)" width="100%" />
-  </a>
-  <br />
-  <a href="https://www.youtube.com/watch?v=XrGiMSM7XJo&autoplay=1" target="_blank">▶️ <b>Watch the OpenBUA Demo Video on YouTube (Autoplay)</b></a>
+  <img src="assets/openbua-demo.gif" alt="OpenBUA Autonomous Agent Demo Walkthrough" width="100%" />
 </p>
 
 ---
