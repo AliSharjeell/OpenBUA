@@ -13,6 +13,7 @@ import {
   captureTabScreenshot,
   pressKeyCombination,
   sendWebEmailDirect,
+  checkUrlReachable,
 } from './browser-bridge';
 import {
   loadDocuments,
@@ -502,6 +503,32 @@ export const sendWebEmailTool: AgentTool<typeof SendWebEmailSchema> = {
   },
 };
 
+// 14. Quick Lightweight URL Reachability Check
+const QuickUrlCheckSchema = Type.Object({
+  url: Type.String({ description: 'The website or portfolio URL to verify (e.g. https://person.github.io)' }),
+});
+
+export const quickUrlCheckTool: AgentTool<typeof QuickUrlCheckSchema> = {
+  name: 'quick_url_check',
+  label: 'Quick URL Reachability Check',
+  description: 'Performs a lightweight background HTTP check (under 3 seconds) to verify if a website or portfolio is live (HTTP 200 OK) without navigating the active browser tab or loading heavy scripts.',
+  parameters: QuickUrlCheckSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      const res = await checkUrlReachable(params.url);
+      return {
+        content: [{ type: 'text', text: res.message }],
+        details: res,
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Failed to check URL: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
 // All available tools for the OpenBUA Agent
 export const ALL_AGENT_TOOLS: AgentTool<any>[] = [
   getActiveTabFormTool,
@@ -517,4 +544,5 @@ export const ALL_AGENT_TOOLS: AgentTool<any>[] = [
   scratchpadTool,
   pressKeyCombinationTool,
   sendWebEmailTool,
+  quickUrlCheckTool,
 ];

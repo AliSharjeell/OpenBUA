@@ -1086,3 +1086,38 @@ export async function sendWebEmailDirect(options: {
 
   return { success: true, message: `Email compose opened and dispatched for ${options.to}` };
 }
+
+// Fast lightweight background HTTP check (replaces slow full-tab navigations to verify sites)
+export async function checkUrlReachable(url: string): Promise<{ reachable: boolean; status?: number; message: string }> {
+  let cleanUrl = url.trim();
+  if (!/^https?:\/\//i.test(cleanUrl)) {
+    cleanUrl = `https://${cleanUrl}`;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+
+    const res = await fetch(cleanUrl, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+    clearTimeout(timer);
+
+    return {
+      reachable: res.ok || res.status < 400,
+      status: res.status,
+      message: res.ok || res.status < 400
+        ? `URL ${cleanUrl} is live (HTTP ${res.status}).`
+        : `URL ${cleanUrl} returned error status (HTTP ${res.status}).`,
+    };
+  } catch (err: any) {
+    return {
+      reachable: false,
+      message: `URL ${cleanUrl} is unreachable or timed out: ${err?.message || err}`,
+    };
+  }
+}

@@ -22,6 +22,7 @@ import {
   X,
   Mail,
   Keyboard,
+  Globe,
 } from 'lucide-react';
 import { getScratchpad } from '../services/storage';
 
@@ -95,6 +96,12 @@ function getToolMeta(toolName: string) {
         label: 'Pressing Keyboard Shortcut',
         desc: 'Dispatching keyboard combination to browser...',
         icon: Keyboard,
+      };
+    case 'quick_url_check':
+      return {
+        label: 'Checking Website URL',
+        desc: 'Verifying portfolio / site reachability in background...',
+        icon: Globe,
       };
     default:
       return {
