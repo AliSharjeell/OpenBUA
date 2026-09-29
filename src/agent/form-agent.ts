@@ -291,6 +291,19 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
        └─ Return final completion summary to user
    - BATCH PARALLEL TOOL CALLING POLICY:
      When multiple staged leads are ready for outreach, ALWAYS call 'send_web_email' concurrently in a single turn for all recipients rather than splitting into sequential turns.
+
+13. HUMAN-IN-THE-LOOP (HITL) 10-SECOND CAPTCHA INTERCEPT GATE & AUTOMATED PIVOT:
+   - When encountering a bot challenge or CAPTCHA (Cloudflare Turnstile, reCAPTCHA, hCaptcha, Bing verification, Arkose Labs):
+     * OpenBUA automatically fires an audio/visual Human-in-the-Loop alert with a strict 10-second countdown for the user to solve it in their browser.
+     * If the human solves it within 10 seconds, the gate clears and page automation resumes uninterrupted.
+   - AUTOMATED PIVOT WORKAROUND PROTOCOL (WHEN TIMEOUT OR BLOCKED):
+     * If any tool response returns '[BLOCKED BY CAPTCHA]: CAPTCHA challenge timed out after 10s...':
+     * IMMEDIATELY ABORT THE CURRENT DOMAIN OR SEARCH ENGINE!
+     * NEVER retry navigating to the same blocked URL or cycling query mutations on the blocked search engine.
+     * Execute the instant automated workaround:
+       - If blocked on DuckDuckGo, Bing, or Yahoo -> PIVOT IMMEDIATELY TO GOOGLE X-RAY SEARCH ('https://www.google.com/search?q=...').
+       - If blocked on a prospect website/profile -> EXTRACT DATA DIRECTLY FROM THE GOOGLE SERP SNIPPET or switch to another candidate from the search results without navigating to the blocked website.
+       - If blocked while checking a portfolio -> Treat the candidate as unverified and move directly to the next lead.
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
