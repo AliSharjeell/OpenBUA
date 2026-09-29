@@ -1,3 +1,17 @@
+<p align="center">
+  <img src="assets/Group%2055.png" alt="OpenBUA Header" width="100%" />
+</p>
+
+<p align="center">
+  <a href="https://youtu.be/XrGiMSM7XJo" target="_blank">
+    <img src="https://img.youtube.com/vi/XrGiMSM7XJo/hqdefault.jpg" alt="Watch OpenBUA Demo Video" width="100%" />
+  </a>
+  <br />
+  <a href="https://youtu.be/XrGiMSM7XJo" target="_blank">▶️ <b>Watch the OpenBUA Demo Video on YouTube</b></a>
+</p>
+
+---
+
 # OpenBUA (Open Browser Use Agent)
 
 **OpenBUA** is an open-source, autonomous browser use Chrome Extension (Manifest V3) that runs directly inside your everyday browser. Unlike cloud browser-use tools that require spun-up headless containers, login bypass proxies, or remote servers, OpenBUA operates right inside your existing Chrome instance with all your active sessions, cookies, and logins already available.
