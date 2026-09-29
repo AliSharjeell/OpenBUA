@@ -17,6 +17,7 @@ import {
   saveChatSessions,
   createNewChatSession,
   deleteChatSession,
+  setActiveSessionIdState,
   DEFAULT_SETTINGS,
 } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
@@ -63,6 +64,7 @@ export function App() {
       
       const firstSessionId = loadedSessions[0]?.id || 'session_default';
       currentTabKeyRef.current = firstSessionId;
+      setActiveSessionIdState(firstSessionId);
 
       const [loadedTabMems, loadedChat] = await Promise.all([
         loadTabMemories(firstSessionId),
@@ -249,7 +251,8 @@ export function App() {
           });
         },
       },
-      loadedChat);
+      loadedChat,
+      firstSessionId);
 
       harnessRef.current = harness;
       setInitialized(true);
@@ -263,6 +266,7 @@ export function App() {
     if (sessionId === activeSessionId) return;
     setActiveSessionId(sessionId);
     currentTabKeyRef.current = sessionId;
+    setActiveSessionIdState(sessionId);
     const [tMems, msgs] = await Promise.all([
       loadTabMemories(sessionId),
       loadChatHistoryForTab(sessionId),
@@ -270,6 +274,7 @@ export function App() {
     setTabMemories(tMems);
     setMessages(msgs);
     if (harnessRef.current) {
+      harnessRef.current.setSessionId(sessionId);
       harnessRef.current.setConversationHistory(msgs);
     }
   };

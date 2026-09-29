@@ -4,6 +4,7 @@ import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS } from './tools';
 import { createCustomModel, createStreamFn } from './stream-adapter';
 import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
+import { setActiveSessionIdState } from '../services/storage';
 
 export interface AgentUpdateListeners {
   onMessageDelta?: (text: string) => void;
@@ -121,18 +122,31 @@ export class FormAgentHarness {
   private currentStreamingText = '';
   private currentThinkingText = '';
   private chatHistory: ChatMessage[] = [];
+  private sessionId: string = 'session_default';
 
   constructor(
     settings: AppSettings,
     documents: UserDocument[],
     listeners?: AgentUpdateListeners,
-    initialChatHistory: ChatMessage[] = []
+    initialChatHistory: ChatMessage[] = [],
+    sessionId: string = 'session_default'
   ) {
     this.settings = settings;
     this.documents = documents;
     if (listeners) this.listeners = listeners;
     this.chatHistory = initialChatHistory;
+    this.sessionId = sessionId;
+    setActiveSessionIdState(sessionId);
     this.setupAgent();
+  }
+
+  public setSessionId(sessionId: string) {
+    this.sessionId = sessionId;
+    setActiveSessionIdState(sessionId);
+  }
+
+  public getSessionId(): string {
+    return this.sessionId;
   }
 
   public updateConfig(settings: AppSettings, documents: UserDocument[]) {

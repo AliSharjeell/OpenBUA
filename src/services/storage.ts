@@ -294,8 +294,9 @@ export async function deleteChatSession(sessionId: string): Promise<ChatSession[
     },
   ];
   await saveChatSessions(finalSessions);
-  // Also clear messages and tab memories associated with deleted session
+  // Also clear messages, tab memories, and scratchpad associated with deleted session
   await clearChatHistoryForTab(sessionId);
+  await clearScratchpad(sessionId);
   return finalSessions;
 }
 
@@ -337,32 +338,56 @@ export async function clearChatHistory(): Promise<void> {
 // ========================================================
 const SCRATCHPAD_PREFIX = 'openbua_scratchpad_';
 
-export async function getScratchpad(sessionId = 'default'): Promise<string> {
-  const key = `${SCRATCHPAD_PREFIX}${encodeURIComponent(sessionId)}`;
-  return await getStorageItem<string>(key, '');
-}
+let currentActiveSessionId = 'session_default';
 
-export async function saveScratchpad(content: string, sessionId = 'default'): Promise<void> {
-  const key = `${SCRATCHPAD_PREFIX}${encodeURIComponent(sessionId)}`;
-  await setStorageItem(key, content);
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('openbua_scratchpad_updated', { detail: { content, sessionId } }));
+export function setActiveSessionIdState(sessionId: string): void {
+  if (sessionId) {
+    currentActiveSessionId = sessionId;
   }
 }
 
-export async function appendToScratchpad(entry: string, sessionId = 'default'): Promise<string> {
-  const current = await getScratchpad(sessionId);
+export function getActiveSessionIdState(): string {
+  return currentActiveSessionId || 'session_default';
+}
+
+export async function getScratchpad(sessionId?: string): Promise<string> {
+  const sid = sessionId || currentActiveSessionId || 'session_default';
+  const key = `${SCRATCHPAD_PREFIX}${encodeURIComponent(sid)}`;
+  return await getStorageItem<string>(key, '');
+}
+
+export async function saveScratchpad(content: string, sessionId?: string): Promise<void> {
+  const sid = sessionId || currentActiveSessionId || 'session_default';
+  const key = `${SCRATCHPAD_PREFIX}${encodeURIComponent(sid)}`;
+  await setStorageItem(key, content);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('openbua_scratchpad_updated', {
+        detail: { content, sessionId: sid },
+      })
+    );
+  }
+}
+
+export async function appendToScratchpad(entry: string, sessionId?: string): Promise<string> {
+  const sid = sessionId || currentActiveSessionId || 'session_default';
+  const current = await getScratchpad(sid);
   const trimmed = entry.trim();
   const updated = current ? `${current}\n\n${trimmed}` : trimmed;
-  await saveScratchpad(updated, sessionId);
+  await saveScratchpad(updated, sid);
   return updated;
 }
 
-export async function clearScratchpad(sessionId = 'default'): Promise<void> {
-  const key = `${SCRATCHPAD_PREFIX}${encodeURIComponent(sessionId)}`;
+export async function clearScratchpad(sessionId?: string): Promise<void> {
+  const sid = sessionId || currentActiveSessionId || 'session_default';
+  const key = `${SCRATCHPAD_PREFIX}${encodeURIComponent(sid)}`;
   await setStorageItem(key, '');
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('openbua_scratchpad_updated', { detail: { content: '', sessionId } }));
+    window.dispatchEvent(
+      new CustomEvent('openbua_scratchpad_updated', {
+        detail: { content: '', sessionId: sid },
+      })
+    );
   }
 }
 
