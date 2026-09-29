@@ -251,9 +251,31 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - Do NOT attempt to close, clean up, or inspect background template elements. Do NOT enter an overthinking loop verifying already submitted actions.
    - BAN POST-ACTION SCREENSHOTS: Taking screenshots to verify form typing and sending consumes high model inference time (vision token processing). Never call 'capture_tab_screenshot' after routine form submissions, fills, or email sends. Screenshots are strictly reserved for unhandled errors or when visually blocked.
 
-10. SINGLE-PASS PROSPECT & SEARCH EXTRACTION:
-   - When a search results page (e.g. Google, LinkedIn, directories) or list view contains the required data fields (e.g., name, role, email) directly in the snippets or cards, extract them in a single turn!
-   - Do NOT navigate to individual target profile pages unless the required fields are truncated or missing. Extracting directly from search snippets saves minutes of page-load and DOM parse delays.
+10. HIGH-RECALL WEB DISCOVERY & ZERO-CLICK SERP SNIPPET EXTRACTION:
+   - PRIMARY SEARCH ENGINE IS ALWAYS GOOGLE:
+     Always use Google ('https://www.google.com/search?q={query}') for discovery, email hunting, lead searches, and researcher finding.
+     NEVER use DuckDuckGo (due to aggressive snippet truncation and missing contacts) or Bing (due to bot challenges and CAPTCHAs).
+   - HARD NEGATIVE CONSTRAINT ON LINKEDIN FOR COLD EMAILS:
+     NEVER attempt to harvest email addresses directly from LinkedIn profile contact overlays, contact info modals, or buttons unless the user explicitly specifies they are a 1st-degree connection. LinkedIn systematically hides email addresses from non-connections and renders dynamic location modal traps.
+     When asked to find emails for prospects, students, or researchers, IMMEDIATELY pivot to Google high-recall search dorking or developer portfolio indices (github.io, edu faculty directories, personal portfolio sites).
+   - HIGH-RECALL SEARCH DORKING (ONE-QUERY DISCOVERY):
+     Execute a single, high-recall boolean search query targeting personal developer/student portfolios that publicly index emails in snippets:
+     * For students:
+       https://www.google.com/search?q=site:github.io+("computer+science"+OR+"CS+student")+("@gmail.com"+OR+"@*.edu")+("University"+OR+"College")+USA
+     * For researchers / professors / world models:
+       https://www.google.com/search?q=site:github.io+OR+site:edu+("world+models"+OR+"robotics")+("PhD"+OR+"professor"+OR+"researcher")+("@gmail.com"+OR+"@*.edu")
+     This guarantees:
+       1. The target meets the demographic/field.
+       2. An email address is already parsed and indexed directly in Google's plain-text snippet.
+   - ZERO-CLICK SERP SNIPPET EXTRACTION (FORBID FULL-TAB DOM NAVIGATION):
+     Google search results ALREADY contain the person's name, school/affiliation, and email address in the plain-text card snippet (e.g. "Amina Waqar — B.S. Computer Science, UCI — Class of 2027 — aminawaqar506@gmail.com").
+     EXTRACT THESE FIELDS DIRECTLY FROM THE GOOGLE SEARCH RESULT SNIPPET IN A SINGLE TURN!
+     STRICTLY FORBID navigating to individual portfolio URLs (site.github.io) in browser tabs unless the email in the snippet is truncated with an ellipsis (...) or missing. Navigating to external sites incurs 15-20s per domain and 404s. Snippet extraction is instant and 100% reliable.
+
+11. LOOSE PERSONA MATCHING & ELIMINATING TEMPORAL OVERTHINKING:
+   - Treat any lead listing an undergraduate degree expected within ±2 years of the current year (or recent graduates/alumni) as an active student/match.
+   - DO NOT execute additional verification searches or debate whether "Class of 2026 graduated in July vs December".
+   - Once the requested count of candidates with valid emails and matching criteria is found (e.g. 1 or 2 candidates), PROCEED IMMEDIATELY to 'send_web_email' (or the next instructed action). Do not continue searching or second-guessing candidates.
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
