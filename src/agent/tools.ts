@@ -327,10 +327,16 @@ export const navigateBrowserTabTool: AgentTool<typeof NavigateBrowserTabSchema> 
   parameters: NavigateBrowserTabSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
-      const success = await navigateActiveTab(params.url);
+      const res = await navigateActiveTab(params.url);
+      if (!res.success && res.blockedByCaptcha) {
+        return {
+          content: [{ type: 'text', text: `[BLOCKED BY CAPTCHA]: ${res.message}` }],
+          details: res,
+        };
+      }
       return {
-        content: [{ type: 'text', text: success ? `Navigated active tab to ${params.url}` : `Failed to navigate tab` }],
-        details: { success, url: params.url },
+        content: [{ type: 'text', text: res.success ? `Navigated active tab to ${params.url}` : `Failed to navigate tab: ${res.message || ''}` }],
+        details: res,
       };
     } catch (err: any) {
       return {
