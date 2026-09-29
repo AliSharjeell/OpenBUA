@@ -10,7 +10,6 @@ import {
   FormInput,
   ChevronRight,
   ChevronDown,
-  CheckCircle2,
   AlertCircle,
   Loader2,
   Trash2,
@@ -363,136 +362,131 @@ export function ChatView({
             {/* Thinking / Reasoning Section (Outside Message Bubble, lighter text color) */}
             {msg.role === 'assistant' && msg.thinking && msg.thinking.trim().length > 0 && (
               <div className="max-w-[92%] px-1 text-[11px] text-zinc-400 font-sans leading-relaxed flex items-start gap-1.5 py-0.5 select-text">
-                <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500 shrink-0 font-medium select-none mt-0.5">
+                <span className="text-[11px] font-sans text-zinc-500 shrink-0 font-medium select-none mt-0.5">
                   Thinking:
                 </span>
-                <div className="text-zinc-400 italic font-normal select-text whitespace-pre-wrap">
+                <div className="text-zinc-400 italic font-normal select-text whitespace-pre-wrap font-sans">
                   {msg.thinking}
                 </div>
               </div>
             )}
 
-            {/* Message Bubble (rendered if content or tool calls exist, or if still streaming) */}
-            {(msg.content || (msg.toolCalls && msg.toolCalls.length > 0) || (msg.isStreaming && !msg.thinking)) && (
+            {/* Tool Calls (rendered outside the message bubble directly in stream background) */}
+            {msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0 && (
+              <div className="w-full max-w-[92%] space-y-1.5 py-0.5 select-text font-sans">
+                {msg.toolCalls.map((tc) => {
+                  const isExpanded = expandedTools[tc.id];
+                  const meta = getToolMeta(tc.toolName);
+                  const Icon = meta.icon;
+                  return (
+                    <div
+                      key={tc.id}
+                      className={`rounded-xl border overflow-hidden text-[11px] transition-all select-text font-sans ${
+                        tc.status === 'running'
+                          ? 'border-zinc-700 bg-zinc-900/90 shadow-sm'
+                          : tc.status === 'error'
+                          ? 'border-red-900/60 bg-red-950/20'
+                          : 'border-zinc-800/80 bg-zinc-900/40'
+                      }`}
+                    >
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        className="w-full p-2 px-2.5 flex items-center justify-between hover:bg-zinc-850/60 transition-colors text-left cursor-pointer select-text"
+                        onClick={() => toggleToolExpand(tc.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleToolExpand(tc.id);
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-2 font-sans text-[11px] text-zinc-300 min-w-0 pr-2 select-text">
+                          <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
+                          <span
+                            className="font-medium text-zinc-200 select-text cursor-text"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {tc.toolName}
+                          </span>
+                          <span
+                            className="text-[10.5px] text-zinc-400 truncate select-text cursor-text font-sans"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            • {meta.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 select-text font-sans">
+                          {tc.status === 'running' ? (
+                            <span className="flex items-center gap-1 text-[10px] text-amber-300 font-medium select-text font-sans">
+                              <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                              <span>Running</span>
+                            </span>
+                          ) : tc.status === 'error' ? (
+                            <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans">
+                              <AlertCircle className="w-3 h-3 text-red-400" />
+                              <span>Failed</span>
+                            </span>
+                          ) : null}
+                          {isExpanded ? (
+                            <ChevronDown className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
+                          ) : (
+                            <ChevronRight className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
+                          )}
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 font-sans text-[11px] text-zinc-400 space-y-2 overflow-x-auto max-h-56 overflow-y-auto select-text cursor-text">
+                          {tc.args && Object.keys(tc.args).length > 0 && (
+                            <div className="select-text">
+                              <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
+                                Arguments:
+                              </span>
+                              <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700 font-sans text-[10.5px]">
+                                {JSON.stringify(tc.args, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {tc.result && (
+                            <div className="select-text">
+                              <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
+                                Output / Result:
+                              </span>
+                              <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700 font-sans text-[10.5px]">
+                                {typeof tc.result === 'string'
+                                  ? tc.result
+                                  : JSON.stringify(tc.result, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {tc.errorMessage && (
+                            <div className="select-text">
+                              <span className="text-red-400 block font-medium mb-0.5 font-sans select-text">
+                                Error:
+                              </span>
+                              <pre className="text-red-300 bg-red-950/40 p-1.5 rounded-lg border border-red-900/40 whitespace-pre-wrap select-text selection:bg-zinc-700 font-sans text-[10.5px]">
+                                {tc.errorMessage}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Message Bubble (rendered if content exists, or if user message, or if still streaming) */}
+            {(msg.content || (msg.isStreaming && !msg.thinking && (!msg.toolCalls || msg.toolCalls.length === 0)) || msg.role === 'user') && (
               <div
-                className={`max-w-[88%] rounded-2xl p-3 text-xs select-text ${
+                className={`max-w-[88%] rounded-2xl p-3 text-xs select-text font-sans ${
                   msg.role === 'user'
                     ? 'bg-zinc-800 text-zinc-100 rounded-br-sm shadow-sm'
                     : 'bg-zinc-900/90 border border-zinc-800 text-zinc-200 rounded-bl-sm shadow-sm'
                 }`}
               >
-                {/* Tool Calls inside assistant message */}
-                {msg.toolCalls && msg.toolCalls.length > 0 && (
-                  <div className="space-y-1.5 mb-2.5 select-text">
-                    {msg.toolCalls.map((tc) => {
-                      const isExpanded = expandedTools[tc.id];
-                      const meta = getToolMeta(tc.toolName);
-                      const Icon = meta.icon;
-                      return (
-                        <div
-                          key={tc.id}
-                          className={`rounded-xl border overflow-hidden text-[11px] transition-all select-text ${
-                            tc.status === 'running'
-                              ? 'border-zinc-700 bg-zinc-900/90 shadow-sm'
-                              : tc.status === 'error'
-                              ? 'border-red-900/60 bg-red-950/20'
-                              : 'border-zinc-800/90 bg-zinc-950/80'
-                          }`}
-                        >
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            className="w-full p-2 px-2.5 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left cursor-pointer select-text"
-                            onClick={() => toggleToolExpand(tc.id)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                toggleToolExpand(tc.id);
-                              }
-                            }}
-                          >
-                            <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-300 min-w-0 pr-2 select-text">
-                              <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
-                              <span
-                                className="font-semibold text-zinc-200 select-text cursor-text"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {tc.toolName}
-                              </span>
-                              <span
-                                className="font-sans text-[10px] text-zinc-400 truncate select-text cursor-text"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                • {meta.label}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0 select-text">
-                              {tc.status === 'running' ? (
-                                <span className="flex items-center gap-1 text-[10px] text-amber-300 font-medium select-text">
-                                  <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-                                  <span>Running</span>
-                                </span>
-                              ) : tc.status === 'error' ? (
-                                <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text">
-                                  <AlertCircle className="w-3 h-3 text-red-400" />
-                                  <span>Failed</span>
-                                </span>
-                              ) : (
-                                <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium select-text">
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                  <span>Completed</span>
-                                </span>
-                              )}
-                              {isExpanded ? (
-                                <ChevronDown className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
-                              ) : (
-                                <ChevronRight className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
-                              )}
-                            </div>
-                          </div>
-
-                          {isExpanded && (
-                            <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 font-mono text-[10px] text-zinc-400 space-y-2 overflow-x-auto max-h-56 overflow-y-auto select-text cursor-text">
-                              {tc.args && Object.keys(tc.args).length > 0 && (
-                                <div className="select-text">
-                                  <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
-                                    Arguments:
-                                  </span>
-                                  <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700">
-                                    {JSON.stringify(tc.args, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {tc.result && (
-                                <div className="select-text">
-                                  <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
-                                    Output / Result:
-                                  </span>
-                                  <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700">
-                                    {typeof tc.result === 'string'
-                                      ? tc.result
-                                      : JSON.stringify(tc.result, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {tc.errorMessage && (
-                                <div className="select-text">
-                                  <span className="text-red-400 block font-medium mb-0.5 font-sans select-text">
-                                    Error:
-                                  </span>
-                                  <pre className="text-red-300 bg-red-950/40 p-1.5 rounded-lg border border-red-900/40 whitespace-pre-wrap select-text selection:bg-zinc-700">
-                                    {tc.errorMessage}
-                                  </pre>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
                 {/* Message Content: Formatted Markdown for Assistant, text for User */}
                 {msg.content && (
                   <div>
@@ -514,7 +508,7 @@ export function ChatView({
             )}
 
             <div className="flex items-center gap-1.5 px-1 select-text">
-              <span className="text-[9px] text-zinc-500 font-mono select-text">
+              <span className="text-[9px] text-zinc-500 font-sans select-text">
                 {formatTimestampWithSeconds(msg.timestamp)}
               </span>
               <button
@@ -555,7 +549,7 @@ export function ChatView({
                         <span className="text-[11px] font-semibold text-zinc-100 truncate">
                           {meta.label}
                         </span>
-                        <span className="font-mono text-[9px] px-1 py-0.2 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-400">
+                        <span className="font-sans text-[10px] px-1.5 py-0.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-400">
                           {activeTool.toolName}
                         </span>
                       </div>
@@ -595,10 +589,10 @@ export function ChatView({
               <div className="flex items-center gap-1.5 min-w-0">
                 <BookOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span className="text-xs font-semibold text-zinc-200">Research Scratchpad</span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700/80 font-mono shrink-0">
+                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700/80 font-sans shrink-0">
                   Read-only
                 </span>
-                <span className="text-[10px] text-zinc-500 font-mono truncate">
+                <span className="text-[10px] text-zinc-500 font-sans truncate">
                   ({scratchpadText.split('\n').filter(Boolean).length} items, {scratchpadText.length} chars)
                 </span>
               </div>
@@ -634,7 +628,7 @@ export function ChatView({
               value={scratchpadText}
               readOnly={true}
               placeholder="Scratchpad is empty for this chat tab. When OpenBUA collects research findings, leads, or multi-step notes, they will appear here in real time. (Read-only for user; managed autonomously by OpenBUA agent)"
-              className="w-full text-xs font-mono bg-zinc-950/80 border-zinc-800 text-zinc-200 rounded-lg p-2 resize-y min-h-[90px] max-h-[220px] focus-visible:ring-0 select-text cursor-text"
+              className="w-full text-xs font-sans bg-zinc-950/80 border-zinc-800 text-zinc-200 rounded-lg p-2 resize-y min-h-[90px] max-h-[220px] focus-visible:ring-0 select-text cursor-text"
             />
           </div>
         )}
