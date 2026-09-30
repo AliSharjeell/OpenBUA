@@ -8,11 +8,21 @@
     "tabs",
     "sidePanel",
     "storage",
-    "scripting"
+    "scripting",
+    "contextMenus"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+U",
+        "mac": "Command+Shift+U"
+      },
+      "description": "Open OpenBUA Assistant"
+    }
+  },
   "action": {
     "default_title": "Open OpenBUA",
     "default_icon": {

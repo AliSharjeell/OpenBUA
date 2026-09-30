@@ -8,22 +8,49 @@ export interface TabInfo {
   favIconUrl?: string;
 }
 
+const myExtensionId = typeof chrome !== 'undefined' ? chrome.runtime?.id || '' : '';
+
+export function isExtensionPage(tab?: chrome.tabs.Tab | null): boolean {
+  if (!tab) return true;
+  const url = tab.url || tab.pendingUrl || '';
+  if (!url) return false;
+  return (
+    url.startsWith('chrome-extension://') &&
+    (url.includes(myExtensionId) || url.includes('sidepanel.html'))
+  );
+}
+
 export async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
   if (typeof chrome === 'undefined' || !chrome.tabs) {
     return null;
   }
   return new Promise((resolve) => {
-    // In Side Panel, lastFocusedWindow targets the main browser window tab
+    // 1. In Side Panel (Chrome), lastFocusedWindow targets the main browser window tab
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-      if (tabs && tabs.length > 0) {
-        return resolve(tabs[0]);
+      const validLast = (tabs || []).find((t) => !isExtensionPage(t));
+      if (validLast) {
+        return resolve(validLast);
       }
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs2) => {
-        if (tabs2 && tabs2.length > 0) {
-          return resolve(tabs2[0]);
+
+      // 2. In Arc Browser or floating window mode, query normal browser windows
+      chrome.tabs.query({ active: true, windowType: 'normal' }, (normalTabs) => {
+        const validNormal = (normalTabs || []).find((t) => !isExtensionPage(t));
+        if (validNormal) {
+          return resolve(validNormal);
         }
+
+        // 3. Fallback: query any active non-extension tab
         chrome.tabs.query({ active: true }, (tabs3) => {
-          resolve(tabs3 && tabs3.length > 0 ? tabs3[0] : null);
+          const validAnyActive = (tabs3 || []).find((t) => !isExtensionPage(t));
+          if (validAnyActive) {
+            return resolve(validAnyActive);
+          }
+
+          // 4. Last resort: any non-extension tab in the browser
+          chrome.tabs.query({}, (allTabs) => {
+            const anyValid = (allTabs || []).find((t) => !isExtensionPage(t));
+            resolve(anyValid || null);
+          });
         });
       });
     });
@@ -1057,15 +1084,34 @@ export async function listAllTabs(): Promise<TabInfo[]> {
   }
 
   return new Promise((resolve) => {
-    chrome.tabs.query({ currentWindow: true }, (tabs) => {
-      const list = (tabs || []).map((t) => ({
-        id: t.id || 0,
-        title: t.title || 'Untitled Tab',
-        url: t.url || '',
-        active: Boolean(t.active),
-        favIconUrl: t.favIconUrl,
-      }));
-      resolve(list);
+    // In Arc Browser or floating window mode, query normal browser windows first
+    chrome.tabs.query({ windowType: 'normal' }, (normalTabs) => {
+      let list = (normalTabs || []).filter((t) => !isExtensionPage(t));
+      if (list.length > 0) {
+        return resolve(
+          list.map((t) => ({
+            id: t.id || 0,
+            title: t.title || 'Untitled Tab',
+            url: t.url || '',
+            active: Boolean(t.active),
+            favIconUrl: t.favIconUrl,
+          }))
+        );
+      }
+
+      // Fallback: query all tabs in the browser excluding our extension
+      chrome.tabs.query({}, (allTabs) => {
+        list = (allTabs || []).filter((t) => !isExtensionPage(t));
+        resolve(
+          list.map((t) => ({
+            id: t.id || 0,
+            title: t.title || 'Untitled Tab',
+            url: t.url || '',
+            active: Boolean(t.active),
+            favIconUrl: t.favIconUrl,
+          }))
+        );
+      });
     });
   });
 }
@@ -1075,7 +1121,10 @@ export async function switchTab(tabId: number): Promise<boolean> {
     return true;
   }
   return new Promise((resolve) => {
-    chrome.tabs.update(tabId, { active: true }, () => {
+    chrome.tabs.update(tabId, { active: true }, (tab) => {
+      if (tab?.windowId) {
+        chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      }
       resolve(!chrome.runtime.lastError);
     });
   });
@@ -1085,8 +1134,13 @@ export async function createNewTab(url: string): Promise<number | null> {
   if (typeof chrome === 'undefined' || !chrome.tabs) {
     return null;
   }
+  const activeTab = await getActiveTab();
+  const createProps: chrome.tabs.CreateProperties = { url };
+  if (activeTab?.windowId) {
+    createProps.windowId = activeTab.windowId;
+  }
   return new Promise((resolve) => {
-    chrome.tabs.create({ url }, (tab) => {
+    chrome.tabs.create(createProps, (tab) => {
       resolve(tab?.id || null);
     });
   });
