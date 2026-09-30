@@ -300,6 +300,17 @@ export async function deleteChatSession(sessionId: string): Promise<ChatSession[
   return finalSessions;
 }
 
+export async function renameChatSession(sessionId: string, newTitle: string): Promise<ChatSession[]> {
+  const sessions = await loadChatSessions();
+  const trimmed = newTitle.trim();
+  if (!trimmed) return sessions;
+  const updated = sessions.map((s) =>
+    s.id === sessionId ? { ...s, title: trimmed, updatedAt: Date.now() } : s
+  );
+  await saveChatSessions(updated);
+  return updated;
+}
+
 // ========================================================
 // Tab-Scoped Chat History
 // ========================================================

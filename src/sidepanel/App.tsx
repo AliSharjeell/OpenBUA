@@ -17,6 +17,7 @@ import {
   saveChatSessions,
   createNewChatSession,
   deleteChatSession,
+  renameChatSession,
   setActiveSessionIdState,
   DEFAULT_SETTINGS,
 } from '../services/storage';
@@ -31,6 +32,10 @@ import {
   Settings,
   Plus,
   X,
+  Menu,
+  Pencil,
+  Trash2,
+  Check,
 } from 'lucide-react';
 
 export function App() {
@@ -42,6 +47,9 @@ export function App() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('session_default');
   const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState<string>('');
   const [isBusy, setIsBusy] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolCallState | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -296,12 +304,38 @@ export function App() {
     e.stopPropagation();
     const updated = await deleteChatSession(sessionId);
     setSessions(updated);
+    setInputDrafts((prev) => {
+      const copy = { ...prev };
+      delete copy[sessionId];
+      return copy;
+    });
     if (activeSessionId === sessionId) {
       const nextSession = updated[0];
       if (nextSession) {
         await handleSelectSession(nextSession.id);
       }
     }
+  };
+
+  const handleStartRename = (e: React.MouseEvent, sess: ChatSession) => {
+    e.stopPropagation();
+    setEditingSessionId(sess.id);
+    setEditingTitle(sess.title);
+  };
+
+  const handleSaveRename = async (sessionId: string) => {
+    const trimmed = editingTitle.trim();
+    if (!trimmed) {
+      setEditingSessionId(null);
+      return;
+    }
+    const updated = await renameChatSession(sessionId, trimmed);
+    setSessions(updated);
+    setEditingSessionId(null);
+  };
+
+  const handleCancelRename = () => {
+    setEditingSessionId(null);
   };
 
   // Keep harness synchronized with active memories and current settings
@@ -372,14 +406,56 @@ export function App() {
   return (
     <div className="flex flex-col h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
       {/* Top Application Header */}
-      <header className="h-11 px-3 border-b border-zinc-900 bg-zinc-950 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-xs tracking-tight text-zinc-100">
-            OpenBUA
-          </span>
+      <header className="h-11 px-3 border-b border-zinc-900 bg-zinc-950 flex items-center justify-between shrink-0 relative">
+        {/* Left: Circle Hamburger Button */}
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            title="Open Menu"
+            className="w-7 h-7 rounded-full bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-zinc-100 flex items-center justify-center transition-colors shadow-xs cursor-pointer"
+          >
+            <Menu className="w-3.5 h-3.5" />
+          </button>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        {/* Center: Chat / Memory Toggle */}
+        <div className="flex items-center p-0.5 bg-zinc-900/90 border border-zinc-800/90 rounded-full shadow-xs">
+          <button
+            type="button"
+            onClick={() => setActiveNavTab('chat')}
+            className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all ${
+              activeNavTab === 'chat'
+                ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveNavTab('memory')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all ${
+              activeNavTab === 'memory'
+                ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <span>Memory</span>
+            <span
+              className={`text-[9px] px-1.5 py-0.2 rounded-full font-sans ${
+                activeNavTab === 'memory'
+                  ? 'bg-zinc-300 text-zinc-950 font-semibold'
+                  : 'bg-zinc-800 text-zinc-400'
+              }`}
+            >
+              {activeDocuments.length}
+            </span>
+          </button>
+        </div>
+
+        {/* Right: Key setup or spacer */}
+        <div className="flex items-center justify-end min-w-[28px]">
           {!hasKey && (
             <button
               onClick={() => setActiveNavTab('settings')}
@@ -391,93 +467,168 @@ export function App() {
         </div>
       </header>
 
-      {/* Chat Tabs Switcher Bar */}
-      <div className="h-9 px-2 bg-zinc-950/90 border-b border-zinc-900 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-        <div className="flex items-center gap-1 text-[10px] text-zinc-500 shrink-0 mr-0.5 font-medium">
-          <MessageSquare className="w-3 h-3 text-zinc-500" />
-          <span>Chats:</span>
-        </div>
-        {sessions.map((sess) => {
-          const isActive = activeSessionId === sess.id;
-          return (
-            <div
-              key={sess.id}
-              onClick={() => handleSelectSession(sess.id)}
-              className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] max-w-[130px] shrink-0 transition-all border outline-none cursor-pointer ${
-                isActive
-                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-sm border-zinc-100'
-                  : 'bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/80 border-zinc-850/60'
-              }`}
-            >
-              <span className="truncate">{sess.title}</span>
-              {sessions.length > 1 && (
-                <button
-                  type="button"
-                  title="Close tab"
-                  onClick={(e) => handleDeleteSession(e, sess.id)}
-                  className={`p-0.5 rounded-full hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors ${
-                    isActive ? 'text-zinc-950 hover:bg-zinc-300' : 'text-zinc-500 hover:text-zinc-200'
-                  }`}
-                >
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              )}
+      {/* Sidebar Drawer (takes up 80% of screen) */}
+      {isSidebarOpen && (
+        <div className="fixed inset-0 z-50 flex">
+          {/* Backdrop Overlay */}
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => {
+              setIsSidebarOpen(false);
+              setEditingSessionId(null);
+            }}
+          />
+
+          {/* Drawer Container (80% width) */}
+          <div className="relative w-[80%] max-w-[320px] h-full bg-zinc-950 border-r border-zinc-900 flex flex-col z-50 shadow-2xl animate-in slide-in-from-left duration-200">
+            {/* Drawer Header */}
+            <div className="p-3.5 pb-2.5 flex items-center justify-between border-b border-zinc-900/80">
+              <span className="font-semibold text-sm tracking-tight text-zinc-100">
+                OpenBUA
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSidebarOpen(false);
+                  setEditingSessionId(null);
+                }}
+                className="w-6 h-6 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 transition-colors cursor-pointer"
+                title="Close Sidebar"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
-          );
-        })}
-        <button
-          type="button"
-          onClick={handleCreateSession}
-          title="New Chat Tab"
-          className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 border border-zinc-800 transition-colors shrink-0"
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
-      </div>
 
-      {/* Main Tab Bar */}
-      <nav className="h-9 px-2 border-b border-zinc-900 bg-zinc-950/60 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1.5 w-full">
-          <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
-              activeNavTab === 'chat'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
-            }`}
-            onClick={() => setActiveNavTab('chat')}
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span>Chat</span>
-          </button>
+            {/* New Tab Create Button */}
+            <div className="p-3 pb-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  await handleCreateSession();
+                  setActiveNavTab('chat');
+                  setIsSidebarOpen(false);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-xs font-medium text-zinc-200 hover:text-zinc-100 transition-colors shadow-xs active:scale-98 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-zinc-400" />
+                <span>New Tab</span>
+              </button>
+            </div>
 
-          <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
-              activeNavTab === 'memory'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
-            }`}
-            onClick={() => setActiveNavTab('memory')}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Memory</span>
-            <span className="ml-0.5 text-[9px] px-1.5 py-0.2 bg-zinc-800 rounded-full text-zinc-300">
-              {activeDocuments.length}
-            </span>
-          </button>
+            {/* Recent Tabs (Scrollable) */}
+            <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1">
+              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                Recent Tabs
+              </div>
 
-          <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
-              activeNavTab === 'settings'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
-            }`}
-            onClick={() => setActiveNavTab('settings')}
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Settings</span>
-          </button>
+              {sessions.map((sess) => {
+                const isActive = activeSessionId === sess.id;
+                const isEditing = editingSessionId === sess.id;
+
+                return (
+                  <div
+                    key={sess.id}
+                    onClick={() => {
+                      if (!isEditing) {
+                        handleSelectSession(sess.id);
+                        setActiveNavTab('chat');
+                        setIsSidebarOpen(false);
+                      }
+                    }}
+                    className={`group flex items-center justify-between px-2.5 py-2 rounded-xl text-xs transition-colors cursor-pointer border ${
+                      isActive
+                        ? 'bg-zinc-900 text-zinc-100 border-zinc-800 font-medium'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50 border-transparent'
+                    }`}
+                  >
+                    {isEditing ? (
+                      <div
+                        className="flex items-center gap-1.5 w-full"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="text"
+                          value={editingTitle}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveRename(sess.id);
+                            if (e.key === 'Escape') handleCancelRename();
+                          }}
+                          autoFocus
+                          className="flex-1 bg-zinc-950 border border-zinc-700 rounded-md px-2 py-0.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveRename(sess.id)}
+                          title="Save title"
+                          className="p-1 hover:text-emerald-400 text-zinc-400 cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelRename}
+                          title="Cancel"
+                          className="p-1 hover:text-zinc-200 text-zinc-500 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 truncate min-w-0 pr-1">
+                          <MessageSquare className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                          <span className="truncate">{sess.title}</span>
+                        </div>
+
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => handleStartRename(e, sess)}
+                            title="Rename tab"
+                            className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          {sessions.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteSession(e, sess.id)}
+                              title="Delete tab"
+                              className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Sticky Settings Button at the bottom */}
+            <div className="p-3 border-t border-zinc-900 bg-zinc-950/95 sticky bottom-0 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNavTab('settings');
+                  setIsSidebarOpen(false);
+                }}
+                className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-xl text-xs font-medium transition-colors border cursor-pointer ${
+                  activeNavTab === 'settings'
+                    ? 'bg-zinc-900 text-zinc-100 border-zinc-800'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 border-transparent'
+                }`}
+              >
+                <Settings className="w-4 h-4 text-zinc-400" />
+                <span>Settings</span>
+              </button>
+            </div>
+          </div>
         </div>
-      </nav>
+      )}
 
       {/* Main View Area */}
       <main className="flex-1 flex flex-col overflow-hidden relative select-text">
