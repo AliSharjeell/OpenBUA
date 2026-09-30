@@ -407,7 +407,7 @@ export function ChatView({
               <div
                 className={`max-w-[88%] rounded-2xl p-3 text-xs select-text font-sans ${
                   msg.role === 'user'
-                    ? 'bg-zinc-800 text-zinc-100 rounded-br-sm shadow-sm'
+                    ? 'bg-[#007AFF] text-white rounded-br-sm shadow-sm'
                     : 'bg-zinc-900/90 border border-zinc-800 text-zinc-200 rounded-bl-sm shadow-sm'
                 }`}
               >
@@ -568,12 +568,12 @@ export function ChatView({
             ) : (
               <Button
                 size="icon"
-                className="h-7 w-7 rounded-full bg-zinc-100 text-zinc-950 hover:bg-zinc-200 shadow-sm"
+                className="h-7 w-7 rounded-full bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF] shadow-sm transition-colors"
                 onClick={() => handleSend()}
                 disabled={!input.trim() || !hasKey}
                 title="Send (Enter)"
               >
-                <Send className="w-3 h-3" />
+                <Send className="w-3 h-3 text-white" />
               </Button>
             )}
           </div>
