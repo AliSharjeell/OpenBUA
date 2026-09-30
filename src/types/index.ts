@@ -1,6 +1,13 @@
 // Type definitions for AutoForm AI Chrome Extension
 
 export type ProviderType = 'openai' | 'anthropic';
+export type ModelMode = 'free' | 'byok';
+
+export interface FreeModelConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
 
 export interface ProviderConfig {
   provider: ProviderType;
@@ -11,6 +18,8 @@ export interface ProviderConfig {
 
 export interface AppSettings {
   activeProvider: ProviderType;
+  selectedMode: ModelMode;
+  free: FreeModelConfig;
   openai: {
     baseUrl: string;
     apiKey: string;

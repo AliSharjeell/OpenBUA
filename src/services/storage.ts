@@ -9,6 +9,12 @@ const TAB_MEMORY_PREFIX = 'autoform_tab_mem_';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   activeProvider: 'openai',
+  selectedMode: 'free',
+  free: {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    apiKey: '',
+    model: 'gemini-3.8-flash',
+  },
   openai: {
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
@@ -135,6 +141,8 @@ export async function loadSettings(): Promise<AppSettings> {
   return {
     ...DEFAULT_SETTINGS,
     ...settings,
+    selectedMode: settings?.selectedMode || 'free',
+    free: { ...DEFAULT_SETTINGS.free, ...(settings?.free || {}) },
     openai: { ...DEFAULT_SETTINGS.openai, ...(settings?.openai || {}) },
     anthropic: { ...DEFAULT_SETTINGS.anthropic, ...(settings?.anthropic || {}) },
   };

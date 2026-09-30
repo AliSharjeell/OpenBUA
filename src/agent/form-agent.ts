@@ -328,16 +328,28 @@ ${docsSummary}
 ${this.settings.systemInstruction || ''}`.trim();
   }
 
+  public getActiveConfig(): ProviderConfig {
+    if (this.settings.selectedMode === 'free') {
+      return {
+        provider: 'openai',
+        baseUrl: this.settings.free?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/',
+        apiKey: this.settings.free?.apiKey || '',
+        model: this.settings.free?.model || 'gemini-3.8-flash',
+      };
+    }
+    const isAnthropic = this.settings.activeProvider === 'anthropic';
+    const cfg = isAnthropic ? this.settings.anthropic : this.settings.openai;
+    return {
+      provider: this.settings.activeProvider,
+      baseUrl: cfg.baseUrl,
+      apiKey: cfg.apiKey,
+      model: cfg.model,
+    };
+  }
+
   public setConversationHistory(history: ChatMessage[]) {
     this.chatHistory = history;
-    const providerConfig =
-      this.settings.activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
-    const config = {
-      provider: this.settings.activeProvider,
-      baseUrl: providerConfig.baseUrl,
-      apiKey: providerConfig.apiKey,
-      model: providerConfig.model,
-    };
+    const config = this.getActiveConfig();
     const agentMessages = convertChatMessagesToAgentMessages(this.chatHistory, config);
     if (this.agent) {
       try {
@@ -354,14 +366,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     if (initialHistory) {
       this.chatHistory = initialHistory;
     }
-    const activeProvider = this.settings.activeProvider;
-    const providerConfig = activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
-    const config = {
-      provider: activeProvider,
-      baseUrl: providerConfig.baseUrl,
-      apiKey: providerConfig.apiKey,
-      model: providerConfig.model,
-    };
+    const config = this.getActiveConfig();
 
     const model = createCustomModel(config);
     const systemPrompt = this.buildSystemPrompt();
@@ -494,10 +499,11 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public async prompt(input: string): Promise<void> {
-    const providerConfig =
-      this.settings.activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
-    if (!providerConfig.apiKey || !providerConfig.apiKey.trim()) {
-      const err = `Please enter your ${this.settings.activeProvider.toUpperCase()} API Key in Settings to continue.`;
+    const config = this.getActiveConfig();
+    if (!config.apiKey || !config.apiKey.trim()) {
+      const modeLabel =
+        this.settings.selectedMode === 'free' ? 'Gemini Free' : this.settings.activeProvider.toUpperCase();
+      const err = `Please enter your ${modeLabel} API Key in Settings to continue.`;
       this.listeners.onError?.(err);
       this.listeners.onStatusChange?.(false);
       throw new Error(err);

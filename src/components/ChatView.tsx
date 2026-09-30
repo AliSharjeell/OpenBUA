@@ -292,7 +292,11 @@ export function ChatView({
   };
 
   const currentKey =
-    settings.activeProvider === 'anthropic' ? settings.anthropic.apiKey : settings.openai.apiKey;
+    settings.selectedMode === 'free'
+      ? settings.free?.apiKey
+      : settings.activeProvider === 'anthropic'
+      ? settings.anthropic.apiKey
+      : settings.openai.apiKey;
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
 
   const scrollToBottom = (smooth = true) => {

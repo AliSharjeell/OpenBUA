@@ -5,6 +5,7 @@ import {
   ChatMessage,
   ToolCallState,
   ChatSession,
+  ModelMode,
 } from '../types';
 import {
   loadSettings,
@@ -60,6 +61,7 @@ function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
 
 export function App() {
   const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings'>('chat');
+  const [settingsTab, setSettingsTab] = useState<ModelMode>(DEFAULT_SETTINGS.selectedMode || 'free');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [globalMemories, setGlobalMemories] = useState<UserDocument[]>([]);
   const [tabMemories, setTabMemories] = useState<UserDocument[]>([]);
@@ -125,6 +127,7 @@ export function App() {
       ]);
 
       setSettings(loadedSettings);
+      setSettingsTab(loadedSettings.selectedMode || 'free');
       setGlobalMemories(loadedGlobal);
       setSessions(loadedSessions);
       setActiveNavTab(lastActive.navTab || 'chat');
@@ -340,7 +343,9 @@ export function App() {
       // Non-blocking socket pre-warm on launch to eliminate cold-start TLS/DNS handshake delay & Failed to fetch
       try {
         const activeCfg =
-          loadedSettings.activeProvider === 'anthropic'
+          loadedSettings.selectedMode === 'free'
+            ? loadedSettings.free
+            : loadedSettings.activeProvider === 'anthropic'
             ? loadedSettings.anthropic
             : loadedSettings.openai;
         if (activeCfg?.baseUrl && activeCfg.apiKey?.trim()) {
@@ -438,6 +443,10 @@ export function App() {
 
   const handleSettingsSaved = (updated: AppSettings) => {
     setSettings(updated);
+    setSettingsTab(updated.selectedMode || 'free');
+    if (harnessRef.current) {
+      harnessRef.current.updateConfig(updated, activeDocuments);
+    }
   };
 
   const handleGlobalMemoriesChange = (updated: UserDocument[]) => {
@@ -479,7 +488,9 @@ export function App() {
   };
 
   const currentKey =
-    settings.activeProvider === 'anthropic'
+    settings.selectedMode === 'free'
+      ? settings.free?.apiKey
+      : settings.activeProvider === 'anthropic'
       ? settings.anthropic.apiKey
       : settings.openai.apiKey;
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
@@ -516,31 +527,58 @@ export function App() {
           </button>
         </div>
 
-        {/* Center: Chat / Memory Floating Toggle with Drop Shadow */}
-        <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
-          <button
-            type="button"
-            onClick={() => handleSelectNavTab('chat')}
-            className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
-              activeNavTab === 'chat'
-                ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            Chat
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSelectNavTab('memory')}
-            className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
-              activeNavTab === 'memory'
-                ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            Memory
-          </button>
-        </div>
+        {/* Center: Chat / Memory Floating Toggle OR Free / BYOK Toggle in Settings */}
+        {activeNavTab === 'settings' ? (
+          <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => setSettingsTab('free')}
+              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                settingsTab === 'free'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Free
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettingsTab('byok')}
+              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                settingsTab === 'byok'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              BYOK
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => handleSelectNavTab('chat')}
+              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                activeNavTab === 'chat'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectNavTab('memory')}
+              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                activeNavTab === 'memory'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Memory
+            </button>
+          </div>
+        )}
 
         {/* Right: Key setup or spacer */}
         <div className="flex items-center justify-end min-w-[36px] pointer-events-auto">
@@ -747,6 +785,8 @@ export function App() {
           <SettingsView
             settings={settings}
             onSettingsSaved={handleSettingsSaved}
+            activeTab={settingsTab}
+            onTabChange={setSettingsTab}
           />
         )}
       </main>
