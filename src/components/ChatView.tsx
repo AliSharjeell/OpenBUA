@@ -314,9 +314,9 @@ export function ChatView({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
-      {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3.5 select-text">
+    <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
+      {/* Messages Scroll Area - Full height canvas with top and bottom clearance for floating elements */}
+      <div className="flex-1 overflow-y-auto px-3.5 pt-16 pb-20 space-y-3.5 select-text">
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
             <div>
@@ -437,11 +437,11 @@ export function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Floating Input Box Footer */}
-      <div className="p-3 pt-1 bg-transparent space-y-2">
+      {/* Floating Input Box (Positioned absolute over viewport, zero solid strip) */}
+      <div className="absolute bottom-3 left-3 right-3 z-20 pointer-events-none space-y-2">
         {/* Human-in-the-Loop (HITL) CAPTCHA Intercept Gate Banner */}
         {captchaState.isActive && (
-          <div className="rounded-xl border border-amber-500/60 bg-amber-950/80 p-3 shadow-xl space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="pointer-events-auto rounded-xl border border-amber-500/60 bg-zinc-900/95 backdrop-blur-md p-3 shadow-2xl shadow-black/80 space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-6 h-6 rounded-lg bg-amber-900/80 border border-amber-600/70 flex items-center justify-center shrink-0 text-amber-200">
@@ -495,7 +495,7 @@ export function ChatView({
         )}
 
         {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
-        <div className="relative flex items-end bg-zinc-900/95 backdrop-blur-md rounded-[22px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-0.5 pl-2.5 shadow-xl shadow-black/50">
+        <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 backdrop-blur-md rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-0.5 pl-3 shadow-2xl shadow-black/70">
           <Textarea
             ref={textareaRef}
             rows={1}
