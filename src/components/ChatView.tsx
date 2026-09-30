@@ -8,7 +8,6 @@ import {
   Send,
   Square,
   FormInput,
-  ChevronRight,
   ChevronDown,
   AlertCircle,
   Loader2,
@@ -172,7 +171,6 @@ export function ChatView({
   onUploadDocument,
 }: ChatViewProps) {
   const [input, setInput] = useState('');
-  const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [copiedEntireChat, setCopiedEntireChat] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -301,10 +299,6 @@ export function ChatView({
     onMessagesChange([]);
   };
 
-  const toggleToolExpand = (toolId: string) => {
-    setExpandedTools((prev) => ({ ...prev, [toolId]: !prev[toolId] }));
-  };
-
   const handleCopyEntireChat = () => {
     if (messages.length === 0) return;
     const text = formatEntireChatAsText(messages);
@@ -364,104 +358,27 @@ export function ChatView({
 
             {/* Tool Calls (rendered outside the message bubble directly in stream background) */}
             {msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0 && (
-              <div className="w-full max-w-[92%] space-y-1.5 py-0.5 select-text font-sans">
+              <div className="w-full max-w-[92%] space-y-1 py-0.5 select-text font-sans">
                 {msg.toolCalls.map((tc) => {
-                  const isExpanded = expandedTools[tc.id];
                   const meta = getToolMeta(tc.toolName);
                   const Icon = meta.icon;
                   return (
                     <div
                       key={tc.id}
-                      className={`rounded-xl border overflow-hidden text-[11px] transition-all select-text font-sans ${
-                        tc.status === 'running'
-                          ? 'border-zinc-700 bg-zinc-900/90 shadow-sm'
-                          : tc.status === 'error'
-                          ? 'border-red-900/60 bg-red-950/20'
-                          : 'border-zinc-800/80 bg-zinc-900/40'
-                      }`}
+                      className="flex items-center gap-1.5 py-0.5 px-1 text-[11px] text-zinc-400 font-sans select-text leading-normal"
                     >
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        className="w-full p-2 px-2.5 flex items-center justify-between hover:bg-zinc-850/60 transition-colors text-left cursor-pointer select-text"
-                        onClick={() => toggleToolExpand(tc.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            toggleToolExpand(tc.id);
-                          }
-                        }}
-                      >
-                        <div className="flex items-center gap-2 font-sans text-[11px] text-zinc-300 min-w-0 pr-2 select-text">
-                          <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
-                          <span
-                            className="font-medium text-zinc-200 select-text cursor-text"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {tc.toolName}
-                          </span>
-                          <span
-                            className="text-[10.5px] text-zinc-400 truncate select-text cursor-text font-sans"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            • {meta.label}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 select-text font-sans">
-                          {tc.status === 'running' ? (
-                            <span className="flex items-center gap-1 text-[10px] text-amber-300 font-medium select-text font-sans">
-                              <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-                              <span>Running</span>
-                            </span>
-                          ) : tc.status === 'error' ? (
-                            <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans">
-                              <AlertCircle className="w-3 h-3 text-red-400" />
-                              <span>Failed</span>
-                            </span>
-                          ) : null}
-                          {isExpanded ? (
-                            <ChevronDown className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
-                          ) : (
-                            <ChevronRight className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
-                          )}
-                        </div>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 font-sans text-[11px] text-zinc-400 space-y-2 overflow-x-auto max-h-56 overflow-y-auto select-text cursor-text">
-                          {tc.args && Object.keys(tc.args).length > 0 && (
-                            <div className="select-text">
-                              <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
-                                Arguments:
-                              </span>
-                              <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700 font-sans text-[10.5px]">
-                                {JSON.stringify(tc.args, null, 2)}
-                              </pre>
-                            </div>
-                          )}
-                          {tc.result && (
-                            <div className="select-text">
-                              <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
-                                Output / Result:
-                              </span>
-                              <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700 font-sans text-[10.5px]">
-                                {typeof tc.result === 'string'
-                                  ? tc.result
-                                  : JSON.stringify(tc.result, null, 2)}
-                              </pre>
-                            </div>
-                          )}
-                          {tc.errorMessage && (
-                            <div className="select-text">
-                              <span className="text-red-400 block font-medium mb-0.5 font-sans select-text">
-                                Error:
-                              </span>
-                              <pre className="text-red-300 bg-red-950/40 p-1.5 rounded-lg border border-red-900/40 whitespace-pre-wrap select-text selection:bg-zinc-700 font-sans text-[10.5px]">
-                                {tc.errorMessage}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
+                      <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
+                      <span className="text-zinc-400 select-text cursor-text font-normal font-sans">
+                        {tc.toolName}
+                      </span>
+                      {tc.status === 'running' && (
+                        <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
+                      )}
+                      {tc.status === 'error' && (
+                        <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans ml-1">
+                          <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />
+                          <span>{tc.errorMessage ? tc.errorMessage : 'Failed'}</span>
+                        </span>
                       )}
                     </div>
                   );
