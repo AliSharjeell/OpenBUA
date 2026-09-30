@@ -9,6 +9,8 @@ import {
   getActiveTabPageContent,
   listAllTabs,
   switchTab,
+  createNewTab,
+  closeBrowserTab,
   navigateActiveTab,
   captureTabScreenshot,
   pressKeyCombination,
@@ -323,7 +325,7 @@ const NavigateBrowserTabSchema = Type.Object({
 export const navigateBrowserTabTool: AgentTool<typeof NavigateBrowserTabSchema> = {
   name: 'navigate_browser_tab',
   label: 'Navigate Tab URL',
-  description: 'Navigates the active browser tab to a specified URL.',
+  description: 'Navigates the active browser tab to a specified URL. WARNING: This replaces the current page — if you are mid-form, use open_new_tab instead to avoid losing form progress!',
   parameters: NavigateBrowserTabSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
@@ -535,6 +537,64 @@ export const quickUrlCheckTool: AgentTool<typeof QuickUrlCheckSchema> = {
   },
 };
 
+// 15. Open New Browser Tab
+const OpenNewTabSchema = Type.Object({
+  url: Type.String({ description: 'The URL to open in the new tab' }),
+});
+
+export const openNewTabTool: AgentTool<typeof OpenNewTabSchema> = {
+  name: 'open_new_tab',
+  label: 'Open New Tab',
+  description: 'Opens a new browser tab with the specified URL WITHOUT navigating away from the current active tab. Use this when you need to look up information (e.g. from another website) while filling a form so you do NOT lose form progress. After reading the new tab, close it with close_tab and switch back to the original tab.',
+  parameters: OpenNewTabSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      const tabId = await createNewTab(params.url);
+      if (tabId) {
+        return {
+          content: [{ type: 'text', text: `Opened new tab (ID: ${tabId}) with URL: ${params.url}. Use switch_browser_tab to switch to it, or close_tab to close it when done.` }],
+          details: { success: true, tabId, url: params.url },
+        };
+      }
+      return {
+        content: [{ type: 'text', text: `Failed to open new tab for ${params.url}` }],
+        details: { success: false },
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Failed to open new tab: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
+// 16. Close Browser Tab
+const CloseTabSchema = Type.Object({
+  tabId: Type.Number({ description: 'The ID of the tab to close (get tab IDs from list_browser_tabs or open_new_tab)' }),
+});
+
+export const closeTabTool: AgentTool<typeof CloseTabSchema> = {
+  name: 'close_tab',
+  label: 'Close Tab',
+  description: 'Closes a browser tab by its ID. Use this to clean up tabs you opened with open_new_tab after you are done reading information from them.',
+  parameters: CloseTabSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      const success = await closeBrowserTab(params.tabId);
+      return {
+        content: [{ type: 'text', text: success ? `Closed tab ${params.tabId} successfully.` : `Failed to close tab ${params.tabId}.` }],
+        details: { success, tabId: params.tabId },
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Failed to close tab: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
 // All available tools for the OpenBUA Agent
 export const ALL_AGENT_TOOLS: AgentTool<any>[] = [
   getActiveTabFormTool,
@@ -551,4 +611,6 @@ export const ALL_AGENT_TOOLS: AgentTool<any>[] = [
   pressKeyCombinationTool,
   sendWebEmailTool,
   quickUrlCheckTool,
+  openNewTabTool,
+  closeTabTool,
 ];
