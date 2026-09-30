@@ -326,20 +326,38 @@ async function streamOpenAI(
   }
 
   let response: Response | null = null;
-  const maxRetries = isGroq ? 4 : 1;
+  const maxRetries = isGroq ? 4 : 2;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey.trim()}`,
-      },
-      body: JSON.stringify(payload),
-      signal,
-    });
+    let fetchError: any = null;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.apiKey.trim()}`,
+        },
+        body: JSON.stringify(payload),
+        signal,
+      });
+    } catch (err: any) {
+      fetchError = err;
+      if (signal?.aborted) {
+        throw err;
+      }
+    }
 
-    if (response.ok) {
+    if (fetchError) {
+      if (attempt < maxRetries) {
+        console.warn(`[streamOpenAI] Network fetch error on attempt ${attempt + 1}/${maxRetries + 1} (${fetchError.message || fetchError}). Retrying...`);
+        const delayMs = Math.min(2500, 400 * Math.pow(2, attempt));
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      throw new Error(`Failed to reach API server (${fetchError.message || 'Failed to fetch'}). Please check your internet connection or API endpoint.`);
+    }
+
+    if (response && response.ok) {
       break;
     }
 
@@ -429,7 +447,15 @@ async function streamOpenAI(
       continue;
     }
 
-    throw new Error(`OpenAI Provider error (${response.status}): ${errorBody || response.statusText}`);
+    // For non-Groq providers, retry on transient 5xx server errors or transient 429 rate limits
+    if (!isGroq && response && (response.status >= 500 || response.status === 429) && attempt < maxRetries) {
+      console.warn(`[streamOpenAI] HTTP ${response.status} received on attempt ${attempt + 1}/${maxRetries + 1}. Retrying...`);
+      const delayMs = Math.min(3000, 800 * Math.pow(2, attempt));
+      await new Promise((r) => setTimeout(r, delayMs));
+      continue;
+    }
+
+    throw new Error(`OpenAI Provider error (${response?.status || 'Unknown'}): ${errorBody || response?.statusText || 'Request failed'}`);
   }
 
   if (!response || !response.ok) {
@@ -453,6 +479,7 @@ async function streamOpenAI(
 
   let textContentBlock: TextContent | null = null;
   const toolCallAccumulators = new Map<number, { id: string; name: string; argsStr: string }>();
+  let isInsideInlineThink = false;
 
   let buffer = '';
 
@@ -488,22 +515,96 @@ async function streamOpenAI(
           });
         }
 
-        // Text delta
+        // Text delta (with inline <think>...</think> tag interception)
         if (delta.content) {
-          if (!textContentBlock) {
-            textContentBlock = { type: 'text', text: '' };
-            assistantMessage.content.push(textContentBlock);
-            const contentIndex = assistantMessage.content.length - 1;
-            stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
+          let textToEmit = delta.content;
+
+          if (isInsideInlineThink) {
+            const endIdx = textToEmit.indexOf('</think>');
+            if (endIdx !== -1) {
+              const thinkPart = textToEmit.slice(0, endIdx);
+              if (thinkPart) {
+                stream.push({
+                  type: 'thinking_delta' as any,
+                  delta: thinkPart,
+                  partial: assistantMessage,
+                });
+              }
+              isInsideInlineThink = false;
+              textToEmit = textToEmit.slice(endIdx + 8);
+            } else {
+              stream.push({
+                type: 'thinking_delta' as any,
+                delta: textToEmit,
+                partial: assistantMessage,
+              });
+              textToEmit = '';
+            }
+          } else {
+            const startIdx = textToEmit.indexOf('<think>');
+            if (startIdx !== -1) {
+              const beforeThink = textToEmit.slice(0, startIdx);
+              const afterThink = textToEmit.slice(startIdx + 7);
+
+              if (beforeThink) {
+                if (!textContentBlock) {
+                  textContentBlock = { type: 'text', text: '' };
+                  assistantMessage.content.push(textContentBlock);
+                  const contentIndex = assistantMessage.content.length - 1;
+                  stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
+                }
+                textContentBlock.text += beforeThink;
+                const contentIndex = assistantMessage.content.indexOf(textContentBlock);
+                stream.push({
+                  type: 'text_delta',
+                  contentIndex,
+                  delta: beforeThink,
+                  partial: assistantMessage,
+                });
+              }
+
+              const endIdx = afterThink.indexOf('</think>');
+              if (endIdx !== -1) {
+                const thinkPart = afterThink.slice(0, endIdx);
+                if (thinkPart) {
+                  stream.push({
+                    type: 'thinking_delta' as any,
+                    delta: thinkPart,
+                    partial: assistantMessage,
+                  });
+                }
+                isInsideInlineThink = false;
+                textToEmit = afterThink.slice(endIdx + 8);
+              } else {
+                isInsideInlineThink = true;
+                if (afterThink) {
+                  stream.push({
+                    type: 'thinking_delta' as any,
+                    delta: afterThink,
+                    partial: assistantMessage,
+                  });
+                }
+                textToEmit = '';
+              }
+            }
           }
-          textContentBlock.text += delta.content;
-          const contentIndex = assistantMessage.content.indexOf(textContentBlock);
-          stream.push({
-            type: 'text_delta',
-            contentIndex,
-            delta: delta.content,
-            partial: assistantMessage,
-          });
+
+          if (textToEmit) {
+            if (!textContentBlock) {
+              textContentBlock = { type: 'text', text: '' };
+              assistantMessage.content.push(textContentBlock);
+              const contentIndex = assistantMessage.content.length - 1;
+              stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
+            }
+            textContentBlock.text += textToEmit;
+            const contentIndex = assistantMessage.content.indexOf(textContentBlock);
+            stream.push({
+              type: 'text_delta',
+              contentIndex,
+              delta: textToEmit,
+              partial: assistantMessage,
+            });
+          }
         }
 
         // Tool calls delta
@@ -815,21 +916,60 @@ async function streamAnthropic(
     payload.tools = tools;
   }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': config.apiKey.trim(),
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true', // Required for browser calls
-    },
-    body: JSON.stringify(payload),
-    signal,
-  });
+  let response: Response | null = null;
+  const maxRetries = 2;
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Anthropic Provider error (${response.status}): ${errorBody || response.statusText}`);
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let fetchError: any = null;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': config.apiKey.trim(),
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true', // Required for browser calls
+        },
+        body: JSON.stringify(payload),
+        signal,
+      });
+    } catch (err: any) {
+      fetchError = err;
+      if (signal?.aborted) {
+        throw err;
+      }
+    }
+
+    if (fetchError) {
+      if (attempt < maxRetries) {
+        console.warn(`[streamAnthropic] Network fetch error on attempt ${attempt + 1}/${maxRetries + 1} (${fetchError.message || fetchError}). Retrying...`);
+        const delayMs = Math.min(2500, 400 * Math.pow(2, attempt));
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      throw new Error(`Failed to reach Anthropic API server (${fetchError.message || 'Failed to fetch'}). Please check your internet connection or API endpoint.`);
+    }
+
+    if (response && response.ok) {
+      break;
+    }
+
+    // Handle transient 429 rate limit or 529 overload / 5xx server errors
+    if (response && (response.status === 429 || response.status === 529 || response.status >= 500) && attempt < maxRetries) {
+      console.warn(`[streamAnthropic] HTTP ${response.status} received on attempt ${attempt + 1}/${maxRetries + 1}. Retrying...`);
+      const delayMs = Math.min(3000, 800 * Math.pow(2, attempt));
+      await new Promise((r) => setTimeout(r, delayMs));
+      continue;
+    }
+
+    if (response) {
+      const errorBody = await response.text();
+      throw new Error(`Anthropic Provider error (${response.status}): ${errorBody || response.statusText}`);
+    }
+  }
+
+  if (!response || !response.ok) {
+    throw new Error('Anthropic request failed after retries');
   }
 
   if (!response.body) {
