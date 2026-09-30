@@ -38,6 +38,8 @@ interface ChatViewProps {
   onNavigateToMemory: () => void;
   onNavigateToVault?: () => void;
   onUploadDocument?: (file: File) => Promise<UserDocument>;
+  inputDraft?: string;
+  onInputDraftChange?: (draft: string) => void;
 }
 
 function getToolMeta(toolName: string) {
@@ -167,10 +169,24 @@ export function ChatView({
   documents,
   onNavigateToSettings,
   onNavigateToMemory,
-  onNavigateToVault,
   onUploadDocument,
+  inputDraft,
+  onInputDraftChange,
 }: ChatViewProps) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(inputDraft || '');
+
+  useEffect(() => {
+    setInput(inputDraft || '');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  }, [inputDraft, activeSessionId]);
+
+  const handleInputChange = (val: string) => {
+    setInput(val);
+    onInputDraftChange?.(val);
+  };
+
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [copiedEntireChat, setCopiedEntireChat] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -261,7 +277,7 @@ export function ChatView({
 
     const newMessages = [...messages, userMsg];
     onMessagesChange(newMessages);
-    setInput('');
+    handleInputChange('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -504,7 +520,7 @@ export function ChatView({
             placeholder="Ask OpenBUA"
             value={input}
             onChange={(e) => {
-              setInput(e.target.value);
+              handleInputChange(e.target.value);
               // Auto-expand textarea height as text lines increase (up to 140px)
               if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';

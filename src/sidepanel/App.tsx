@@ -41,9 +41,17 @@ export function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('session_default');
+  const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
   const [isBusy, setIsBusy] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolCallState | null>(null);
   const [initialized, setInitialized] = useState(false);
+
+  const handleInputDraftChange = (draft: string) => {
+    setInputDrafts((prev) => ({
+      ...prev,
+      [activeSessionId]: draft,
+    }));
+  };
 
   const harnessRef = useRef<FormAgentHarness | null>(null);
   const currentTabKeyRef = useRef<string>('session_default');
@@ -486,6 +494,8 @@ export function App() {
             onNavigateToSettings={() => setActiveNavTab('settings')}
             onNavigateToMemory={() => setActiveNavTab('memory')}
             onUploadDocument={handleChatDocumentUpload}
+            inputDraft={inputDrafts[activeSessionId] || ''}
+            onInputDraftChange={handleInputDraftChange}
           />
         )}
 
