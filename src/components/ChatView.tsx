@@ -15,6 +15,7 @@ import {
   FileText,
   Terminal,
   Upload,
+  BookOpen,
   Copy,
   Check,
   X,
@@ -36,7 +37,6 @@ interface ChatViewProps {
   documents: UserDocument[];
   onNavigateToSettings: () => void;
   onNavigateToMemory: () => void;
-  onNavigateToVault?: () => void;
   onUploadDocument?: (file: File) => Promise<UserDocument>;
   inputDraft?: string;
   onInputDraftChange?: (draft: string) => void;
@@ -132,7 +132,7 @@ function formatSingleMessageAsText(msg: ChatMessage): string {
 
   if (msg.toolCalls && msg.toolCalls.length > 0) {
     msg.toolCalls.forEach((tc) => {
-      const status = tc.status === 'completed' ? 'Completed' : tc.status === 'error' ? 'Failed' : 'Running';
+      const status = tc.status === 'success' || (tc.status as string) === 'completed' ? 'Completed' : tc.status === 'error' ? 'Failed' : 'Running';
       lines.push(`Tool Call: ${tc.toolName} [${status}]`);
       if (tc.args && Object.keys(tc.args).length > 0) {
         lines.push(`Arguments:\n${JSON.stringify(tc.args, null, 2)}`);
@@ -221,7 +221,7 @@ export function ChatView({
     settings.activeProvider === 'anthropic' ? settings.anthropic.apiKey : settings.openai.apiKey;
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
 
-  const handleOpenMemory = onNavigateToMemory || onNavigateToVault;
+  const handleOpenMemory = onNavigateToMemory;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
