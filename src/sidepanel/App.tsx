@@ -462,11 +462,11 @@ export function App() {
         </div>
 
         {/* Center: Chat / Memory Floating Toggle with Drop Shadow */}
-        <div className="flex items-center p-1 bg-zinc-900/90 backdrop-blur-md border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+        <div className="flex items-center p-0.5 bg-zinc-900/90 backdrop-blur-md border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
           <button
             type="button"
             onClick={() => setActiveNavTab('chat')}
-            className={`h-8 px-4 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+            className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
               activeNavTab === 'chat'
                 ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -477,7 +477,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setActiveNavTab('memory')}
-            className={`h-8 px-4 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+            className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
               activeNavTab === 'memory'
                 ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                 : 'text-zinc-400 hover:text-zinc-200'
