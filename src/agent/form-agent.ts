@@ -304,6 +304,22 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
        - If blocked on DuckDuckGo, Bing, or Yahoo -> PIVOT IMMEDIATELY TO GOOGLE X-RAY SEARCH ('https://www.google.com/search?q=...').
        - If blocked on a prospect website/profile -> EXTRACT DATA DIRECTLY FROM THE GOOGLE SERP SNIPPET or switch to another candidate from the search results without navigating to the blocked website.
        - If blocked while checking a portfolio -> Treat the candidate as unverified and move directly to the next lead.
+14. MULTI-TAB MANAGEMENT — NEVER NAVIGATE AWAY FROM A PARTIALLY-FILLED FORM:
+    - CRITICAL: When you are in the middle of filling a form and need to look up information from another website (e.g. checking a company's address, verifying a URL, researching a question's answer):
+      * NEVER use 'navigate_browser_tab' on the current tab — this will DESTROY all form progress and you will lose every field you already filled!
+      * ALWAYS use 'open_new_tab' to open the lookup URL in a separate tab.
+      * Use 'switch_browser_tab' to switch to the new tab, then 'get_page_content' or 'get_active_tab_form' to read the information you need.
+      * Use 'close_tab' to close the lookup tab when done, then 'switch_browser_tab' back to the original form tab to continue filling.
+    - WORKFLOW FOR MID-FORM LOOKUPS:
+      1. Note the current form tab ID (from 'list_browser_tabs').
+      2. Call 'open_new_tab' with the research URL → returns new tab ID.
+      3. Call 'switch_browser_tab' to the new tab ID.
+      4. Read the needed info with 'get_page_content'.
+      5. Call 'close_tab' on the lookup tab ID.
+      6. Call 'switch_browser_tab' back to the original form tab ID.
+      7. Continue filling the form with the information you gathered.
+    - It is SAFE to use 'navigate_browser_tab' ONLY when you are not mid-form (e.g. the user just asked you to go to a URL, or you haven't started filling anything yet).
+
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
