@@ -9,8 +9,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Geist', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-        mono: ['GeistMono', 'JetBrains Mono', 'monospace'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
       },
       colors: {
         background: '#09090b', // zinc-950

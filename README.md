@@ -60,7 +60,7 @@ Because OpenBUA runs directly in your existing browser, it can perform complex a
   - `get_page_content`: Full structured DOM text extraction.
   - `list_browser_tabs`, `switch_browser_tab`, `navigate_browser_tab`: Cross-tab browser navigation.
 - **Clean Dark Zinc Interface**:
-  - Designed with Tailwind CSS shades of zinc and Geist font.
+  - Designed with Tailwind CSS shades of zinc and Inter font.
   - Rounded pill tab selectors, markdown preview rendering with `marked`, and collapsible execution traces for tool calls.
 
 ## Quick Installation Guide (For New Users)
@@ -122,7 +122,7 @@ OpenBUA/
 ├── manifest.json              # Chrome Manifest V3 configuration
 ├── sidepanel.html             # Side Panel HTML entry
 ├── vite.config.ts             # Vite build configuration
-├── tailwind.config.js         # Dark-zinc palette & Geist font theme
+├── tailwind.config.js         # Dark-zinc palette & Inter font theme
 ├── scripts/
 │   ├── build-extension.js     # Production build & bundling pipeline
 │   └── generate-icons.js      # Extension icons generator
