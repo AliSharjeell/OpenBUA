@@ -436,14 +436,14 @@ export function App() {
 
   return (
     <div className="relative h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
-      {/* Top Blur Feather Overlay (Feathers out content scrolling behind hamburger and toggle) */}
+      {/* Top Blur Feather Overlay (Feathers out content scrolling behind hamburger and toggle, transparent without vignette) */}
       <div
-        className="pointer-events-none absolute top-0 left-0 right-0 h-16 z-20 bg-gradient-to-b from-zinc-950 via-zinc-950/80 to-transparent"
+        className="pointer-events-none absolute top-0 left-0 right-0 h-16 z-20 bg-transparent"
         style={{
           backdropFilter: 'blur(8px)',
           WebkitBackdropFilter: 'blur(8px)',
-          maskImage: 'linear-gradient(to bottom, black 30%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, black 30%, transparent 100%)',
+          maskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)',
         }}
       />
 

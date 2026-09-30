@@ -438,14 +438,14 @@ export function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Bottom Blur Feather Overlay (Feathers out messages scrolling behind floating input box) */}
+      {/* Bottom Blur Feather Overlay (Feathers out messages scrolling behind floating input box, transparent without vignette) */}
       <div
-        className="pointer-events-none absolute bottom-0 left-0 right-0 h-28 z-10 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-transparent"
+        className="pointer-events-none absolute bottom-0 left-0 right-0 h-28 z-10 bg-transparent"
         style={{
           backdropFilter: 'blur(8px)',
           WebkitBackdropFilter: 'blur(8px)',
-          maskImage: 'linear-gradient(to top, black 35%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to top, black 35%, transparent 100%)',
+          maskImage: 'linear-gradient(to top, black 0%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to top, black 0%, transparent 100%)',
         }}
       />
 
