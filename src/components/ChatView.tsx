@@ -534,17 +534,32 @@ export function ChatView({
           </div>
         )}
 
-        {/* Floating Thinking/Executing Pill above input box */}
-        {isBusy && (
-          <div className="flex justify-center pointer-events-auto">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/95 backdrop-blur-md border border-zinc-800/90 shadow-xl shadow-black/70 animate-in fade-in slide-in-from-bottom-1 duration-200">
-              <ThinkingOrb state="solving" size={20} />
-              <span className="text-[11px] font-medium text-zinc-200 tracking-wide select-none">
-                Thinking, Executing
-              </span>
+        {/* Floating Controls Area above Input Box (Scroll-to-bottom button & Thinking pill) */}
+        <div className="flex flex-col items-center gap-1.5 pointer-events-none">
+          {/* Circle White Scroll-to-Bottom Button */}
+          {!isAtBottom && (
+            <button
+              type="button"
+              onClick={() => scrollToBottom(true)}
+              className="pointer-events-auto w-7 h-7 rounded-full bg-white text-zinc-950 hover:bg-zinc-100 shadow-xl shadow-black/70 flex items-center justify-center transition-all cursor-pointer active:scale-95 animate-in fade-in zoom-in-75 duration-200"
+              title="Scroll to bottom"
+            >
+              <ChevronDown className="w-4 h-4 stroke-[2.5]" />
+            </button>
+          )}
+
+          {/* Floating Thinking/Executing Pill above input box */}
+          {isBusy && (
+            <div className="flex justify-center pointer-events-auto">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/95 backdrop-blur-md border border-zinc-800/90 shadow-xl shadow-black/70 animate-in fade-in slide-in-from-bottom-1 duration-200">
+                <ThinkingOrb state="solving" size={20} />
+                <span className="text-[11px] font-medium text-zinc-200 tracking-wide select-none">
+                  Thinking, Executing
+                </span>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
         <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 backdrop-blur-md rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
