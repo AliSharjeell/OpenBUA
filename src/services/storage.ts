@@ -270,10 +270,28 @@ export async function saveChatSessions(sessions: ChatSession[]): Promise<void> {
 
 export async function createNewChatSession(title?: string): Promise<ChatSession> {
   const sessions = await loadChatSessions();
-  const num = sessions.length + 1;
+  let defaultTitle = title;
+  if (!defaultTitle) {
+    // Scan all existing session titles to find highest number among "Chat N"
+    const numbers = sessions
+      .map((s) => {
+        const match = s.title.match(/^Chat\s+(\d+)$/i);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter((n) => n > 0);
+
+    const maxNum = numbers.length > 0 ? Math.max(...numbers) : 0;
+    let nextNum = maxNum + 1;
+    // Extra safety: ensure title is not duplicate with any existing session
+    while (sessions.some((s) => s.title.trim().toLowerCase() === `chat ${nextNum}`.toLowerCase())) {
+      nextNum++;
+    }
+    defaultTitle = `Chat ${nextNum}`;
+  }
+
   const newSession: ChatSession = {
     id: `session_${Date.now()}`,
-    title: title || `Chat ${num}`,
+    title: defaultTitle,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
