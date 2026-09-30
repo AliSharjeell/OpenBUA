@@ -19,6 +19,8 @@ import {
   deleteChatSession,
   renameChatSession,
   setActiveSessionIdState,
+  saveLastActiveState,
+  loadLastActiveState,
   DEFAULT_SETTINGS,
 } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
@@ -106,20 +108,25 @@ export function App() {
       const loadedSettings = await loadSettings();
       const loadedGlobal = await loadGlobalMemories();
       const loadedSessions = await loadChatSessions();
+      const lastActive = await loadLastActiveState();
       
-      const firstSessionId = loadedSessions[0]?.id || 'session_default';
-      currentTabKeyRef.current = firstSessionId;
-      setActiveSessionIdState(firstSessionId);
+      const targetSessionId = (lastActive.sessionId && loadedSessions.some((s) => s.id === lastActive.sessionId))
+        ? lastActive.sessionId
+        : (loadedSessions[0]?.id || 'session_default');
+
+      currentTabKeyRef.current = targetSessionId;
+      setActiveSessionIdState(targetSessionId);
 
       const [loadedTabMems, loadedChat] = await Promise.all([
-        loadTabMemories(firstSessionId),
-        loadChatHistoryForTab(firstSessionId),
+        loadTabMemories(targetSessionId),
+        loadChatHistoryForTab(targetSessionId),
       ]);
 
       setSettings(loadedSettings);
       setGlobalMemories(loadedGlobal);
       setSessions(loadedSessions);
-      setActiveSessionId(firstSessionId);
+      setActiveNavTab(lastActive.navTab || 'chat');
+      setActiveSessionId(targetSessionId);
       setTabMemories(loadedTabMems);
       setMessages(loadedChat);
 
@@ -297,7 +304,7 @@ export function App() {
         },
       },
       loadedChat,
-      firstSessionId);
+      targetSessionId);
 
       harnessRef.current = harness;
       setInitialized(true);
@@ -306,12 +313,18 @@ export function App() {
     init();
   }, []);
 
+  const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings') => {
+    setActiveNavTab(tab);
+    saveLastActiveState(tab, currentTabKeyRef.current);
+  };
+
   // When active session changes, load its scoped chat history and tab memories
   const handleSelectSession = async (sessionId: string) => {
     if (sessionId === activeSessionId) return;
     setActiveSessionId(sessionId);
     currentTabKeyRef.current = sessionId;
     setActiveSessionIdState(sessionId);
+    saveLastActiveState(activeNavTab, sessionId);
     const [tMems, msgs] = await Promise.all([
       loadTabMemories(sessionId),
       loadChatHistoryForTab(sessionId),
@@ -465,7 +478,7 @@ export function App() {
         <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
           <button
             type="button"
-            onClick={() => setActiveNavTab('chat')}
+            onClick={() => handleSelectNavTab('chat')}
             className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
               activeNavTab === 'chat'
                 ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
@@ -476,7 +489,7 @@ export function App() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveNavTab('memory')}
+            onClick={() => handleSelectNavTab('memory')}
             className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
               activeNavTab === 'memory'
                 ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
@@ -491,7 +504,7 @@ export function App() {
         <div className="flex items-center justify-end min-w-[36px] pointer-events-auto">
           {!hasKey && (
             <button
-              onClick={() => setActiveNavTab('settings')}
+              onClick={() => handleSelectNavTab('settings')}
               className="text-[10px] font-medium py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full transition-colors shadow-md"
             >
               Setup Key
@@ -534,7 +547,7 @@ export function App() {
               type="button"
               onClick={async () => {
                 await handleCreateSession();
-                setActiveNavTab('chat');
+                handleSelectNavTab('chat');
                 setIsSidebarOpen(false);
               }}
               className="flex items-center gap-2.5 w-full px-2 py-2 rounded-xl text-xs font-bold text-white hover:bg-zinc-900/60 transition-colors cursor-pointer"
@@ -560,7 +573,7 @@ export function App() {
                   onClick={() => {
                     if (!isEditing) {
                       handleSelectSession(sess.id);
-                      setActiveNavTab('chat');
+                      handleSelectNavTab('chat');
                       setIsSidebarOpen(false);
                     }
                   }}
@@ -642,7 +655,7 @@ export function App() {
             <button
               type="button"
               onClick={() => {
-                setActiveNavTab('settings');
+                handleSelectNavTab('settings');
                 setIsSidebarOpen(false);
               }}
               className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
@@ -669,8 +682,8 @@ export function App() {
             activeTool={activeTool}
             settings={settings}
             documents={activeDocuments}
-            onNavigateToSettings={() => setActiveNavTab('settings')}
-            onNavigateToMemory={() => setActiveNavTab('memory')}
+            onNavigateToSettings={() => handleSelectNavTab('settings')}
+            onNavigateToMemory={() => handleSelectNavTab('memory')}
             onUploadDocument={handleChatDocumentUpload}
             inputDraft={inputDrafts[activeSessionId] || ''}
             onInputDraftChange={handleInputDraftChange}
