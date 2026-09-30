@@ -442,7 +442,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setActiveNavTab('chat')}
-            className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
+            className={`h-8 px-4 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
               activeNavTab === 'chat'
                 ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -453,7 +453,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setActiveNavTab('memory')}
-            className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
+            className={`h-8 px-4 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
               activeNavTab === 'memory'
                 ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                 : 'text-zinc-400 hover:text-zinc-200'
