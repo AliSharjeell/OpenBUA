@@ -87,6 +87,19 @@ export function App() {
     currentTabKeyRef.current = activeSessionId;
   }, [activeSessionId]);
 
+  // Close sidebar drawer smoothly on Escape key
+  useEffect(() => {
+    if (!isSidebarOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsSidebarOpen(false);
+        setEditingSessionId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSidebarOpen]);
+
   // Initial load of settings, sessions, memories, and harness
   useEffect(() => {
     async function init() {
@@ -487,157 +500,164 @@ export function App() {
         </div>
       </header>
 
-      {/* Sidebar Drawer (takes up 80% of screen) */}
-      {isSidebarOpen && (
-        <div className="fixed inset-0 z-50 flex">
-          {/* Backdrop Overlay */}
-          <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
-            onClick={() => {
-              setIsSidebarOpen(false);
-              setEditingSessionId(null);
-            }}
-          />
+      {/* Sidebar Drawer (takes up 80% of screen) with smooth slide in/out animation */}
+      <div
+        className={`fixed inset-0 z-50 flex transition-opacity duration-300 ease-in-out ${
+          isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        aria-hidden={!isSidebarOpen}
+      >
+        {/* Backdrop Overlay */}
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs cursor-pointer"
+          onClick={() => {
+            setIsSidebarOpen(false);
+            setEditingSessionId(null);
+          }}
+        />
 
-          {/* Drawer Container (80% width) */}
-          <div className="relative w-[80%] max-w-[320px] h-full bg-zinc-950 border-r border-zinc-900 flex flex-col z-50 shadow-2xl animate-in slide-in-from-left duration-200">
-            {/* Drawer Header (without dividing line, without cross icon) */}
-            <div className="p-4 pb-2 flex items-center">
-              <span className="font-bold text-sm tracking-tight text-white">
-                OpenBUA
-              </span>
+        {/* Drawer Container (80% width) */}
+        <div
+          className={`relative w-[80%] max-w-[320px] h-full bg-zinc-950 border-r border-zinc-900 flex flex-col z-50 shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+            isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
+          {/* Drawer Header (without dividing line, without cross icon) */}
+          <div className="p-4 pb-2 flex items-center">
+            <span className="font-bold text-sm tracking-tight text-white">
+              OpenBUA
+            </span>
+          </div>
+
+          {/* New Chat Create Button (no bg, bold white text) */}
+          <div className="px-3 py-1">
+            <button
+              type="button"
+              onClick={async () => {
+                await handleCreateSession();
+                setActiveNavTab('chat');
+                setIsSidebarOpen(false);
+              }}
+              className="flex items-center gap-2.5 w-full px-2 py-2 rounded-xl text-xs font-bold text-white hover:bg-zinc-900/60 transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-white" />
+              <span>New Chat</span>
+            </button>
+          </div>
+
+          {/* Recent Chats (Scrollable) */}
+          <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1">
+            <div className="px-2 py-1.5 text-xs font-bold text-white">
+              Recent
             </div>
 
-            {/* New Chat Create Button (no bg, bold white text) */}
-            <div className="px-3 py-1">
-              <button
-                type="button"
-                onClick={async () => {
-                  await handleCreateSession();
-                  setActiveNavTab('chat');
-                  setIsSidebarOpen(false);
-                }}
-                className="flex items-center gap-2.5 w-full px-2 py-2 rounded-xl text-xs font-bold text-white hover:bg-zinc-900/60 transition-colors cursor-pointer"
-              >
-                <Plus className="w-4 h-4 text-white" />
-                <span>New Chat</span>
-              </button>
-            </div>
+            {sessions.map((sess) => {
+              const isActive = activeSessionId === sess.id;
+              const isEditing = editingSessionId === sess.id;
 
-            {/* Recent Chats (Scrollable) */}
-            <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1">
-              <div className="px-2 py-1.5 text-xs font-bold text-white">
-                Recent
-              </div>
-
-              {sessions.map((sess) => {
-                const isActive = activeSessionId === sess.id;
-                const isEditing = editingSessionId === sess.id;
-
-                return (
-                  <div
-                    key={sess.id}
-                    onClick={() => {
-                      if (!isEditing) {
-                        handleSelectSession(sess.id);
-                        setActiveNavTab('chat');
-                        setIsSidebarOpen(false);
-                      }
-                    }}
-                    className={`group flex items-center justify-between px-2.5 py-2 rounded-xl text-xs transition-colors cursor-pointer ${
-                      isActive
-                        ? 'bg-zinc-900 text-white font-medium'
-                        : 'text-white/80 hover:text-white hover:bg-zinc-900/50'
-                    }`}
-                  >
-                    {isEditing ? (
-                      <div
-                        className="flex items-center gap-1.5 w-full"
-                        onClick={(e) => e.stopPropagation()}
+              return (
+                <div
+                  key={sess.id}
+                  onClick={() => {
+                    if (!isEditing) {
+                      handleSelectSession(sess.id);
+                      setActiveNavTab('chat');
+                      setIsSidebarOpen(false);
+                    }
+                  }}
+                  className={`group flex items-center justify-between px-2.5 py-2 rounded-xl text-xs transition-colors cursor-pointer ${
+                    isActive
+                      ? 'bg-zinc-900 text-white font-medium'
+                      : 'text-white/80 hover:text-white hover:bg-zinc-900/50'
+                  }`}
+                >
+                  {isEditing ? (
+                    <div
+                      className="flex items-center gap-1.5 w-full"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="text"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveRename(sess.id);
+                          if (e.key === 'Escape') handleCancelRename();
+                        }}
+                        autoFocus
+                        className="flex-1 bg-zinc-950 border border-zinc-700 rounded-md px-2 py-0.5 text-xs text-white focus:outline-none focus:border-zinc-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveRename(sess.id)}
+                        title="Save title"
+                        className="p-1 hover:text-emerald-400 text-zinc-400 cursor-pointer"
                       >
-                        <input
-                          type="text"
-                          value={editingTitle}
-                          onChange={(e) => setEditingTitle(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveRename(sess.id);
-                            if (e.key === 'Escape') handleCancelRename();
-                          }}
-                          autoFocus
-                          className="flex-1 bg-zinc-950 border border-zinc-700 rounded-md px-2 py-0.5 text-xs text-white focus:outline-none focus:border-zinc-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSaveRename(sess.id)}
-                          title="Save title"
-                          className="p-1 hover:text-emerald-400 text-zinc-400 cursor-pointer"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCancelRename}
-                          title="Cancel"
-                          className="p-1 hover:text-zinc-200 text-zinc-500 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelRename}
+                        title="Cancel"
+                        className="p-1 hover:text-zinc-200 text-zinc-500 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 truncate min-w-0 pr-1">
+                        <MessageSquare className="w-3.5 h-3.5 shrink-0 text-white" />
+                        <span className="truncate text-white">{sess.title}</span>
                       </div>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2 truncate min-w-0 pr-1">
-                          <MessageSquare className="w-3.5 h-3.5 shrink-0 text-white" />
-                          <span className="truncate text-white">{sess.title}</span>
-                        </div>
 
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleStartRename(e, sess)}
+                          title="Rename tab"
+                          className="p-1 rounded text-white/70 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        {sessions.length > 1 && (
                           <button
                             type="button"
-                            onClick={(e) => handleStartRename(e, sess)}
-                            title="Rename tab"
-                            className="p-1 rounded text-white/70 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                            onClick={(e) => handleDeleteSession(e, sess.id)}
+                            title="Delete tab"
+                            className="p-1 rounded text-white/70 hover:text-red-400 hover:bg-zinc-800 transition-colors cursor-pointer"
                           >
-                            <Pencil className="w-3 h-3" />
+                            <Trash2 className="w-3 h-3" />
                           </button>
-                          {sessions.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteSession(e, sess.id)}
-                              title="Delete tab"
-                              className="p-1 rounded text-white/70 hover:text-red-400 hover:bg-zinc-800 transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
 
-            {/* Sticky Settings Button at the bottom */}
-            <div className="p-3 border-t border-zinc-900/50 bg-zinc-950/95 sticky bottom-0 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveNavTab('settings');
-                  setIsSidebarOpen(false);
-                }}
-                className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-                  activeNavTab === 'settings'
-                    ? 'bg-zinc-900 text-white'
-                    : 'text-white hover:bg-zinc-900/60'
-                }`}
-              >
-                <Settings className="w-4 h-4 text-white" />
-                <span className="text-white">Settings</span>
-              </button>
-            </div>
+          {/* Sticky Settings Button at the bottom */}
+          <div className="p-3 border-t border-zinc-900/50 bg-zinc-950/95 sticky bottom-0 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveNavTab('settings');
+                setIsSidebarOpen(false);
+              }}
+              className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                activeNavTab === 'settings'
+                  ? 'bg-zinc-900 text-white'
+                  : 'text-white hover:bg-zinc-900/60'
+              }`}
+            >
+              <Settings className="w-4 h-4 text-white" />
+              <span className="text-white">Settings</span>
+            </button>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Main View Area */}
       <main className="h-full w-full flex flex-col overflow-hidden relative select-text">
