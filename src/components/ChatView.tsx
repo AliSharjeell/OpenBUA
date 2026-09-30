@@ -402,7 +402,6 @@ export function ChatView({
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
             <div className="flex flex-col items-center">
-              <img src="./icons/icon48.png" alt="OpenBUA Logo" className="w-10 h-10 rounded-xl mb-2.5 shadow-lg shadow-black/50" />
               <h3 className="font-semibold text-zinc-100 text-sm tracking-tight">OpenBUA</h3>
               <p className="text-[11px] text-zinc-400 mt-1 max-w-[260px] leading-relaxed">
                 Autonomous browser use agent using your active browser to research, interact, and fill forms.
