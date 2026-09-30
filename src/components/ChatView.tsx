@@ -577,12 +577,12 @@ export function ChatView({
             onClick={() => chatFileInputRef.current?.click()}
             title="Upload MD or PDF to memory"
             disabled={isBusy || isUploadingDoc}
-            className="p-1 mb-0.5 text-zinc-400 hover:text-zinc-200 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0 cursor-pointer flex items-center justify-center"
+            className="w-7 h-7 self-center flex items-center justify-center text-white hover:text-white/80 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0 cursor-pointer"
           >
             {isUploadingDoc ? (
-              <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+              <Loader2 className="w-4 h-4 animate-spin text-white" />
             ) : (
-              <Plus className="w-4 h-4 text-zinc-400 hover:text-zinc-200" />
+              <Plus className="w-4 h-4 text-white" />
             )}
           </button>
 
