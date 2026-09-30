@@ -421,8 +421,8 @@ export function App() {
 
   return (
     <div className="flex flex-col h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
-      {/* Top Application Header */}
-      <header className="h-11 px-3 border-b border-zinc-900 bg-zinc-950 flex items-center justify-between shrink-0 relative">
+      {/* Top Application Header (Floating, transparent background) */}
+      <header className="h-12 px-3 pt-2 bg-transparent flex items-center justify-between shrink-0 relative z-20">
         {/* Left: Circle 2-Line Hamburger Button */}
         <div className="flex items-center">
           <button
