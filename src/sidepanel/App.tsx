@@ -32,11 +32,27 @@ import {
   Settings,
   Plus,
   X,
-  Menu,
   Pencil,
   Trash2,
   Check,
 } from 'lucide-react';
+
+function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="4" y1="8.5" x2="20" y2="8.5" />
+      <line x1="4" y1="15.5" x2="20" y2="15.5" />
+    </svg>
+  );
+}
 
 export function App() {
   const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings'>('chat');
@@ -407,15 +423,15 @@ export function App() {
     <div className="flex flex-col h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
       {/* Top Application Header */}
       <header className="h-11 px-3 border-b border-zinc-900 bg-zinc-950 flex items-center justify-between shrink-0 relative">
-        {/* Left: Circle Hamburger Button */}
+        {/* Left: Circle 2-Line Hamburger Button */}
         <div className="flex items-center">
           <button
             type="button"
             onClick={() => setIsSidebarOpen(true)}
             title="Open Menu"
-            className="w-7 h-7 rounded-full bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-zinc-100 flex items-center justify-center transition-colors shadow-xs cursor-pointer"
+            className="w-8.5 h-8.5 rounded-full bg-zinc-900/90 hover:bg-zinc-850 border border-zinc-800/80 text-zinc-200 hover:text-white flex items-center justify-center transition-all shadow-md shadow-black/40 cursor-pointer active:scale-95"
           >
-            <Menu className="w-3.5 h-3.5" />
+            <TwoLineMenu className="w-4.5 h-4.5" />
           </button>
         </div>
 
