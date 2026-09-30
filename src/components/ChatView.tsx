@@ -188,7 +188,6 @@ export function ChatView({
   };
 
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
-  const [copiedEntireChat, setCopiedEntireChat] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -216,12 +215,9 @@ export function ChatView({
     captchaManager.resolveActiveGate(false, 'CAPTCHA skipped by user. ABORT this domain immediately and pivot to an alternate source/query.');
   };
 
-  const activeDocsCount = documents.filter((d) => d.isActiveForContext).length;
   const currentKey =
     settings.activeProvider === 'anthropic' ? settings.anthropic.apiKey : settings.openai.apiKey;
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
-
-  const handleOpenMemory = onNavigateToMemory;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -308,19 +304,6 @@ export function ChatView({
 
   const handleStop = () => {
     if (harness) harness.abort();
-  };
-
-  const handleClear = () => {
-    if (harness) harness.reset();
-    onMessagesChange([]);
-  };
-
-  const handleCopyEntireChat = () => {
-    if (messages.length === 0) return;
-    const text = formatEntireChatAsText(messages);
-    navigator.clipboard.writeText(text);
-    setCopiedEntireChat(true);
-    setTimeout(() => setCopiedEntireChat(false), 2000);
   };
 
   const handleCopyMessage = (msg: ChatMessage) => {
@@ -454,8 +437,8 @@ export function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Box Footer */}
-      <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 space-y-2">
+      {/* Floating Input Box Footer */}
+      <div className="p-3 pt-1 bg-transparent space-y-2">
         {/* Human-in-the-Loop (HITL) CAPTCHA Intercept Gate Banner */}
         {captchaState.isActive && (
           <div className="rounded-xl border border-amber-500/60 bg-amber-950/80 p-3 shadow-xl space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -511,9 +494,8 @@ export function ChatView({
           </div>
         )}
 
-
-        {/* Rounder, Sleek Low-Height Input Box */}
-        <div className="relative flex items-end bg-zinc-900/90 rounded-[22px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-0.5 pl-2.5 shadow-sm">
+        {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
+        <div className="relative flex items-end bg-zinc-900/95 backdrop-blur-md rounded-[22px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-0.5 pl-2.5 shadow-xl shadow-black/50">
           <Textarea
             ref={textareaRef}
             rows={1}
@@ -577,56 +559,6 @@ export function ChatView({
               </Button>
             )}
           </div>
-        </div>
-
-        {/* Footer Status Bar */}
-        <div className="flex items-center justify-between text-[10px] text-zinc-500 px-1">
-          <div className="flex items-center gap-2">
-            <span
-              className="hover:text-zinc-300 cursor-pointer"
-              onClick={handleOpenMemory}
-              title="Active stored memory"
-            >
-              {activeDocsCount} memories active
-            </span>
-            <span className="text-zinc-600">|</span>
-            <span className="text-zinc-400 truncate max-w-[120px]" title={settings.activeProvider === 'anthropic' ? settings.anthropic.model : settings.openai.model}>
-              {settings.activeProvider === 'anthropic' ? settings.anthropic.model : settings.openai.model}
-            </span>
-          </div>
-
-          {messages.length > 0 && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="hover:text-zinc-300 flex items-center gap-1 transition-colors text-zinc-450 cursor-pointer"
-                onClick={handleCopyEntireChat}
-                title="Copy entire chat transcript with timestamps and tool calls"
-              >
-                {copiedEntireChat ? (
-                  <>
-                    <Check className="w-2.5 h-2.5 text-emerald-400" />
-                    <span className="text-emerald-400 font-medium">Copied Chat</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-2.5 h-2.5" />
-                    <span>Copy Chat</span>
-                  </>
-                )}
-              </button>
-              <span className="text-zinc-700">|</span>
-              <button
-                type="button"
-                className="hover:text-zinc-300 flex items-center gap-1 transition-colors cursor-pointer"
-                onClick={handleClear}
-                title="Clear chat transcript"
-              >
-                <Trash2 className="w-2.5 h-2.5" />
-                Clear
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>
