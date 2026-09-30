@@ -577,7 +577,8 @@ export function App() {
         aria-hidden={!isSidebarOpen}
       >
           {/* Drawer Header (without dividing line, without cross icon) */}
-          <div className="p-4 pb-2 flex items-center">
+          <div className="p-4 pb-2 flex items-center gap-2">
+            <img src="./icons/icon48.png" alt="OpenBUA Logo" className="w-5 h-5 rounded-md" />
             <span className="font-bold text-sm tracking-tight text-white">
               OpenBUA
             </span>
