@@ -436,11 +436,11 @@ export function App() {
         </div>
 
         {/* Center: Chat / Memory Toggle */}
-        <div className="flex items-center p-0.5 bg-zinc-900/90 border border-zinc-800/90 rounded-full shadow-xs">
+        <div className="flex items-center p-1 bg-zinc-900/90 backdrop-blur-md border border-zinc-800/90 rounded-full shadow-lg shadow-black/50">
           <button
             type="button"
             onClick={() => setActiveNavTab('chat')}
-            className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all ${
+            className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
               activeNavTab === 'chat'
                 ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -451,22 +451,13 @@ export function App() {
           <button
             type="button"
             onClick={() => setActiveNavTab('memory')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all ${
+            className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
               activeNavTab === 'memory'
                 ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <span>Memory</span>
-            <span
-              className={`text-[9px] px-1.5 py-0.2 rounded-full font-sans ${
-                activeNavTab === 'memory'
-                  ? 'bg-zinc-300 text-zinc-950 font-semibold'
-                  : 'bg-zinc-800 text-zinc-400'
-              }`}
-            >
-              {activeDocuments.length}
-            </span>
+            Memory
           </button>
         </div>
 
