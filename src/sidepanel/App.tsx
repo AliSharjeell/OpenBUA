@@ -83,6 +83,8 @@ export function App() {
 
   const harnessRef = useRef<FormAgentHarness | null>(null);
   const currentTabKeyRef = useRef<string>('session_default');
+  const thinkingStartTimeRef = useRef<number | null>(null);
+  const thinkingDurationMsRef = useRef<number | null>(null);
 
   // Keep currentTabKeyRef synchronized with activeSessionId
   useEffect(() => {
@@ -142,9 +144,18 @@ export function App() {
         {
         onStatusChange: (busy) => {
           setIsBusy(busy);
-          if (!busy) setActiveTool(null);
+          if (busy) {
+            thinkingStartTimeRef.current = Date.now();
+            thinkingDurationMsRef.current = null;
+          } else {
+            setActiveTool(null);
+          }
         },
         onMessageDelta: (deltaText) => {
+          if (thinkingStartTimeRef.current && thinkingDurationMsRef.current === null) {
+            thinkingDurationMsRef.current = Math.max(1000, Date.now() - thinkingStartTimeRef.current);
+          }
+          const duration = thinkingDurationMsRef.current ?? undefined;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === 'assistant' && last.isStreaming) {
@@ -152,6 +163,7 @@ export function App() {
               updated[updated.length - 1] = {
                 ...last,
                 content: deltaText,
+                thinkingDurationMs: duration ?? last.thinkingDurationMs,
               };
               return updated;
             } else {
@@ -161,6 +173,7 @@ export function App() {
                   id: `asst-${Date.now()}`,
                   role: 'assistant',
                   content: deltaText,
+                  thinkingDurationMs: duration,
                   timestamp: Date.now(),
                   isStreaming: true,
                   toolCalls: [],
@@ -170,6 +183,9 @@ export function App() {
           });
         },
         onThinkingDelta: (thinkingText) => {
+          if (!thinkingStartTimeRef.current) {
+            thinkingStartTimeRef.current = Date.now();
+          }
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === 'assistant' && last.isStreaming) {
@@ -254,6 +270,12 @@ export function App() {
         },
         onTurnComplete: (assistantText, toolCalls, thinkingText) => {
           setActiveTool(null);
+          if (thinkingStartTimeRef.current && thinkingDurationMsRef.current === null) {
+            thinkingDurationMsRef.current = Math.max(1000, Date.now() - thinkingStartTimeRef.current);
+          }
+          const duration = thinkingDurationMsRef.current ?? undefined;
+          thinkingStartTimeRef.current = null;
+          thinkingDurationMsRef.current = null;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             let updated: ChatMessage[];
@@ -264,6 +286,7 @@ export function App() {
                 content: assistantText || last.content,
                 toolCalls: toolCalls.length > 0 ? toolCalls : last.toolCalls,
                 thinking: thinkingText || last.thinking,
+                thinkingDurationMs: duration ?? last.thinkingDurationMs,
                 isStreaming: false,
               };
             } else if (assistantText || toolCalls.length > 0 || thinkingText) {
@@ -272,6 +295,7 @@ export function App() {
                 role: 'assistant',
                 content: assistantText,
                 thinking: thinkingText,
+                thinkingDurationMs: duration,
                 toolCalls,
                 timestamp: Date.now(),
                 isStreaming: false,
@@ -467,14 +491,14 @@ export function App() {
 
   return (
     <div className="relative h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
-      {/* Top Blur Feather Overlay (One consistent blur) */}
+      {/* Top Blur Feather Overlay (Light subtle blur) */}
       <div
         className="pointer-events-none absolute top-0 left-0 right-0 h-16 z-20"
         style={{
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          maskImage: 'linear-gradient(to bottom, black 0%, black 35%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 35%, transparent 100%)',
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
+          maskImage: 'linear-gradient(to bottom, black 0%, black 25%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 25%, transparent 100%)',
         }}
       />
 
