@@ -179,10 +179,16 @@ export function ChatView({
 
   useEffect(() => {
     setInput(inputDraft || '');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
-  }, [inputDraft, activeSessionId]);
+  }, [inputDraft]);
+
+  // Auto-extend textarea height up to 6 lines (136px) as user writes
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const targetHeight = Math.min(Math.max(el.scrollHeight, 32), 136);
+    el.style.height = `${targetHeight}px`;
+  }, [input, activeSessionId]);
 
   const handleInputChange = (val: string) => {
     setInput(val);
@@ -593,14 +599,14 @@ export function ChatView({
             value={input}
             onChange={(e) => {
               handleInputChange(e.target.value);
-              // Auto-expand textarea height as text lines increase (up to 140px)
+              // Auto-expand textarea height as text lines increase (up to 6 lines, 136px)
               if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';
-                textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
+                textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 32), 136)}px`;
               }
             }}
             onKeyDown={handleKeyDown}
-            className="border-0 bg-transparent min-h-[32px] max-h-36 resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans flex-1"
+            className="border-0 bg-transparent min-h-[32px] max-h-[136px] resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans flex-1"
             disabled={isBusy || !hasKey}
           />
 
