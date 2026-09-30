@@ -550,7 +550,7 @@ export function App() {
                 handleSelectNavTab('chat');
                 setIsSidebarOpen(false);
               }}
-              className="flex items-center gap-2.5 w-full px-2 py-2 rounded-xl text-xs font-bold text-white hover:bg-zinc-900/60 transition-colors cursor-pointer"
+              className="flex items-center gap-2.5 w-full px-2 py-2 rounded-xl text-xs font-medium text-white hover:bg-zinc-900/60 transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4 text-white" />
               <span>New Chat</span>
