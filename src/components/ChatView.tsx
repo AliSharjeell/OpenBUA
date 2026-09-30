@@ -318,7 +318,7 @@ export function ChatView({
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
       {/* Messages Scroll Area - Full height canvas with top and bottom clearance for floating elements */}
-      <div className="flex-1 overflow-y-auto px-3.5 pt-16 pb-28 space-y-3.5 select-text">
+      <div className="flex-1 overflow-y-auto px-3.5 pt-16 pb-14 space-y-3.5 select-text">
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
             <div>
@@ -441,7 +441,7 @@ export function ChatView({
 
       {/* Bottom Blur Feather Overlay (Feathers out messages scrolling behind floating input box, transparent without vignette) */}
       <div
-        className="pointer-events-none absolute bottom-0 left-0 right-0 h-28 z-10 bg-transparent"
+        className="pointer-events-none absolute bottom-0 left-0 right-0 h-16 z-10 bg-transparent"
         style={{
           backdropFilter: 'blur(8px)',
           WebkitBackdropFilter: 'blur(8px)',
