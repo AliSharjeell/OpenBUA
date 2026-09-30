@@ -500,28 +500,27 @@ export function App() {
         </div>
       </header>
 
-      {/* Sidebar Drawer (takes up 80% of screen) with smooth slide in/out animation */}
+      {/* Backdrop Overlay (blurs background behind sidebar without dimming/lowering opacity) */}
       <div
-        className={`fixed inset-0 z-50 flex transition-opacity duration-300 ease-in-out ${
-          isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        className={`fixed inset-0 z-40 cursor-pointer transition-all duration-300 ease-in-out ${
+          isSidebarOpen
+            ? 'backdrop-blur-sm bg-transparent pointer-events-auto'
+            : 'backdrop-blur-none bg-transparent pointer-events-none'
+        }`}
+        onClick={() => {
+          setIsSidebarOpen(false);
+          setEditingSessionId(null);
+        }}
+        aria-hidden="true"
+      />
+
+      {/* Sidebar Drawer (takes up 65% of screen, pure slide in/out at 100% opacity) */}
+      <div
+        className={`fixed top-0 bottom-0 left-0 z-50 w-[65%] max-w-[280px] bg-zinc-950 border-r border-zinc-900 flex flex-col shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          isSidebarOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'
         }`}
         aria-hidden={!isSidebarOpen}
       >
-        {/* Backdrop Overlay */}
-        <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-xs cursor-pointer"
-          onClick={() => {
-            setIsSidebarOpen(false);
-            setEditingSessionId(null);
-          }}
-        />
-
-        {/* Drawer Container (80% width) */}
-        <div
-          className={`relative w-[80%] max-w-[320px] h-full bg-zinc-950 border-r border-zinc-900 flex flex-col z-50 shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-            isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
-          }`}
-        >
           {/* Drawer Header (without dividing line, without cross icon) */}
           <div className="p-4 pb-2 flex items-center">
             <span className="font-bold text-sm tracking-tight text-white">
@@ -657,7 +656,6 @@ export function App() {
             </button>
           </div>
         </div>
-      </div>
 
       {/* Main View Area */}
       <main className="h-full w-full flex flex-col overflow-hidden relative select-text">
