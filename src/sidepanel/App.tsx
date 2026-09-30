@@ -287,6 +287,10 @@ export function App() {
         onError: (err) => {
           setActiveTool(null);
           setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === 'assistant' && last.content.includes(err)) {
+              return prev;
+            }
             const errorMsg: ChatMessage = {
               id: `err-${Date.now()}`,
               role: 'assistant',
@@ -308,6 +312,20 @@ export function App() {
 
       harnessRef.current = harness;
       setInitialized(true);
+
+      // Non-blocking socket pre-warm on launch to eliminate cold-start TLS/DNS handshake delay & Failed to fetch
+      try {
+        const activeCfg =
+          loadedSettings.activeProvider === 'anthropic'
+            ? loadedSettings.anthropic
+            : loadedSettings.openai;
+        if (activeCfg?.baseUrl && activeCfg.apiKey?.trim()) {
+          const urlObj = new URL(activeCfg.baseUrl);
+          fetch(`${urlObj.origin}/`, { method: 'HEAD', mode: 'no-cors' }).catch(() => {});
+        }
+      } catch {
+        // Ignore URL parse error
+      }
     }
 
     init();
