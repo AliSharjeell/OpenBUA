@@ -25,6 +25,7 @@ import {
   Keyboard,
   Globe,
   ShieldAlert,
+  Wrench,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
 import { ThinkingOrb } from 'thinking-orbs';
@@ -200,6 +201,7 @@ export function ChatView({
 }: ChatViewProps) {
   const [input, setInput] = useState(inputDraft || '');
   const [expandedThoughtIds, setExpandedThoughtIds] = useState<Record<string, boolean>>({});
+  const [expandedToolsIds, setExpandedToolsIds] = useState<Record<string, boolean>>({});
 
   const toggleThought = (msgId: string) => {
     setExpandedThoughtIds((prev) => {
@@ -208,6 +210,21 @@ export function ChatView({
         targetMsg?.isStreaming && (!targetMsg.content || targetMsg.content.length === 0)
       );
       const currentExpanded = prev[msgId] ?? isCurrentlyStreamingBlock;
+      return {
+        ...prev,
+        [msgId]: !currentExpanded,
+      };
+    });
+  };
+
+  const toggleTools = (msgId: string) => {
+    setExpandedToolsIds((prev) => {
+      const targetMsg = messages.find((m) => m.id === msgId);
+      const isRunningAnyTool = Boolean(targetMsg?.toolCalls?.some((tc) => tc.status === 'running'));
+      const isCurrentlyStreamingTools = Boolean(
+        isRunningAnyTool || (targetMsg?.isStreaming && (!targetMsg.content || targetMsg.content.length === 0))
+      );
+      const currentExpanded = prev[msgId] ?? isCurrentlyStreamingTools;
       return {
         ...prev,
         [msgId]: !currentExpanded,
@@ -408,15 +425,15 @@ export function ChatView({
             key={msg.id}
             className={`group flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1.5 select-text`}
           >
-            {/* Compact Thinking & Tool Calling Accordion Section */}
-            {msg.role === 'assistant' && ((msg.thinking && msg.thinking.trim().length > 0) || (msg.toolCalls && msg.toolCalls.length > 0)) && (() => {
-              const isCurrentlyStreamingBlock = Boolean(
+            {/* Thought Collapsible Accordion */}
+            {msg.role === 'assistant' && msg.thinking && msg.thinking.trim().length > 0 && (() => {
+              const isCurrentlyStreamingThought = Boolean(
                 msg.isStreaming && (!msg.content || msg.content.length === 0)
               );
-              const isExpanded = expandedThoughtIds[msg.id] ?? isCurrentlyStreamingBlock;
-              const durationLabel = isCurrentlyStreamingBlock
+              const isExpanded = expandedThoughtIds[msg.id] ?? isCurrentlyStreamingThought;
+              const durationLabel = isCurrentlyStreamingThought
                 ? 'Thinking...'
-                : `Thought for ${formatThoughtDuration(msg.thinkingDurationMs, msg.thinking?.length)}`;
+                : `Thought for ${formatThoughtDuration(msg.thinkingDurationMs, msg.thinking.length)}`;
 
               return (
                 <div className="w-full max-w-[92%] flex flex-col items-start py-0.5 select-text font-sans">
@@ -437,45 +454,82 @@ export function ChatView({
                     />
                   </button>
 
-                  {/* Expandable Body: Reasoning text & Executed tool calls */}
+                  {/* Expandable Reasoning Body */}
                   {isExpanded && (
-                    <div className="w-full pl-2 pr-1 pt-1 pb-1 space-y-1.5 animate-in fade-in duration-150">
-                      {/* Thinking Reasoning Content */}
-                      {msg.thinking && msg.thinking.trim().length > 0 && (
-                        <div className="border-l-2 border-zinc-800 pl-2.5 py-0.5 text-[11px] text-zinc-400 italic font-normal whitespace-pre-wrap select-text leading-relaxed font-sans">
-                          {msg.thinking}
-                        </div>
-                      )}
+                    <div className="w-full pl-2 pr-1 pt-1 pb-1 animate-in fade-in duration-150">
+                      <div className="border-l-2 border-zinc-800 pl-2.5 py-0.5 text-[11px] text-zinc-400 italic font-normal whitespace-pre-wrap select-text leading-relaxed font-sans">
+                        {msg.thinking}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
-                      {/* Tool Calls List */}
-                      {msg.toolCalls && msg.toolCalls.length > 0 && (
-                        <div className="border-l-2 border-zinc-800/60 pl-2.5 py-0.5 space-y-1 select-text font-sans">
-                          {msg.toolCalls.map((tc) => {
-                            const meta = getToolMeta(tc.toolName);
-                            const Icon = meta.icon;
-                            return (
-                              <div
-                                key={tc.id}
-                                className="flex items-center gap-1.5 py-0.5 text-[11px] text-zinc-400 font-sans select-text leading-normal"
-                              >
-                                <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
-                                <span className="text-zinc-400 select-text cursor-text font-normal font-sans">
-                                  {tc.toolName}
+            {/* Tools Used Collapsible Accordion */}
+            {msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0 && (() => {
+              const isRunningAnyTool = msg.toolCalls.some((tc) => tc.status === 'running');
+              const isCurrentlyStreamingTools = Boolean(
+                isRunningAnyTool || (msg.isStreaming && (!msg.content || msg.content.length === 0))
+              );
+              const isExpanded = expandedToolsIds[msg.id] ?? isCurrentlyStreamingTools;
+              const toolCount = msg.toolCalls.length;
+              const toolsLabel = isRunningAnyTool
+                ? `Using tools (${toolCount})...`
+                : `Tools used (${toolCount})`;
+
+              return (
+                <div className="w-full max-w-[92%] flex flex-col items-start py-0.5 select-text font-sans">
+                  {/* Clickable Header: "Tools used (X)" with Chevron */}
+                  <button
+                    type="button"
+                    onClick={() => toggleTools(msg.id)}
+                    className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg text-[11px] font-sans text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer select-none group/tools"
+                    title={isExpanded ? 'Click to collapse tools' : 'Click to expand tools'}
+                  >
+                    <Wrench className="w-3 h-3 text-zinc-500 group-hover/tools:text-zinc-300 shrink-0" />
+                    <span className="font-medium tracking-tight text-zinc-400 group-hover/tools:text-zinc-200">
+                      {toolsLabel}
+                    </span>
+                    {isRunningAnyTool && (
+                      <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
+                    )}
+                    <ChevronRight
+                      className={`w-3 h-3 text-zinc-500 group-hover/tools:text-zinc-300 transition-transform duration-200 shrink-0 ${
+                        isExpanded ? 'rotate-90' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+
+                  {/* Expandable Tool Calls List */}
+                  {isExpanded && (
+                    <div className="w-full pl-2 pr-1 pt-1 pb-1 animate-in fade-in duration-150">
+                      <div className="border-l-2 border-zinc-800/60 pl-2.5 py-0.5 space-y-1 select-text font-sans">
+                        {msg.toolCalls.map((tc) => {
+                          const meta = getToolMeta(tc.toolName);
+                          const Icon = meta.icon;
+                          return (
+                            <div
+                              key={tc.id}
+                              className="flex items-center gap-1.5 py-0.5 text-[11px] text-zinc-400 font-sans select-text leading-normal"
+                            >
+                              <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
+                              <span className="text-zinc-400 select-text cursor-text font-normal font-sans">
+                                {tc.toolName}
+                              </span>
+                              {tc.status === 'running' && (
+                                <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
+                              )}
+                              {tc.status === 'error' && (
+                                <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans ml-1">
+                                  <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />
+                                  <span>{tc.errorMessage ? tc.errorMessage : 'Failed'}</span>
                                 </span>
-                                {tc.status === 'running' && (
-                                  <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
-                                )}
-                                {tc.status === 'error' && (
-                                  <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans ml-1">
-                                    <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />
-                                    <span>{tc.errorMessage ? tc.errorMessage : 'Failed'}</span>
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
