@@ -180,7 +180,7 @@ export function MemoryView({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs select-text bg-zinc-950">
+    <div className="flex-1 overflow-y-auto px-4 pt-16 pb-6 space-y-4 text-xs select-text bg-zinc-950">
       {/* Header and Scope Selector */}
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between">
@@ -192,7 +192,12 @@ export function MemoryView({
           </div>
 
           <div className="flex items-center gap-1.5">
-            <label className="cursor-pointer">
+            <label
+              className={`inline-flex items-center justify-center h-7 w-7 rounded-full border border-zinc-800 bg-zinc-900/80 hover:bg-zinc-850 text-zinc-300 shadow-xs transition-colors ${
+                isUploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+              }`}
+              title={isUploading ? 'Importing file...' : 'Upload MD or PDF'}
+            >
               <input
                 type="file"
                 accept=".pdf,.md,.txt,.json"
@@ -200,18 +205,7 @@ export function MemoryView({
                 onChange={handleFileUpload}
                 disabled={isUploading}
               />
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-7 w-7 rounded-full border-zinc-800 bg-zinc-900/80 hover:bg-zinc-850 text-zinc-300 shadow-xs"
-                disabled={isUploading}
-                title={isUploading ? 'Importing file...' : 'Upload MD or PDF'}
-                asChild
-              >
-                <span>
-                  <Upload className="w-3.5 h-3.5" />
-                </span>
-              </Button>
+              <Upload className="w-3.5 h-3.5" />
             </label>
 
             <Button

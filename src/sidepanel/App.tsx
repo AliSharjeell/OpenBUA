@@ -17,43 +17,92 @@ import {
   saveChatSessions,
   createNewChatSession,
   deleteChatSession,
+  renameChatSession,
   setActiveSessionIdState,
+  saveLastActiveState,
+  loadLastActiveState,
   DEFAULT_SETTINGS,
 } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
 import { FormAgentHarness } from '../agent/form-agent';
 import { ChatView } from '../components/ChatView';
 import { MemoryView } from '../components/MemoryView';
-import { InspectorView } from '../components/InspectorView';
 import { SettingsView } from '../components/SettingsView';
 import {
   MessageSquare,
   Layers,
-  Scan,
   Settings,
   Plus,
   X,
+  Pencil,
+  Trash2,
+  Check,
 } from 'lucide-react';
 
+function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="3" y1="8" x2="21" y2="8" />
+      <line x1="3" y1="16" x2="21" y2="16" />
+    </svg>
+  );
+}
+
 export function App() {
-  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'inspector' | 'settings'>('chat');
+  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings'>('chat');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [globalMemories, setGlobalMemories] = useState<UserDocument[]>([]);
   const [tabMemories, setTabMemories] = useState<UserDocument[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('session_default');
+  const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState<string>('');
   const [isBusy, setIsBusy] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolCallState | null>(null);
   const [initialized, setInitialized] = useState(false);
 
+  const handleInputDraftChange = (draft: string) => {
+    setInputDrafts((prev) => ({
+      ...prev,
+      [activeSessionId]: draft,
+    }));
+  };
+
   const harnessRef = useRef<FormAgentHarness | null>(null);
   const currentTabKeyRef = useRef<string>('session_default');
+  const thinkingStartTimeRef = useRef<number | null>(null);
+  const thinkingDurationMsRef = useRef<number | null>(null);
 
   // Keep currentTabKeyRef synchronized with activeSessionId
   useEffect(() => {
     currentTabKeyRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  // Close sidebar drawer smoothly on Escape key
+  useEffect(() => {
+    if (!isSidebarOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsSidebarOpen(false);
+        setEditingSessionId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSidebarOpen]);
 
   // Initial load of settings, sessions, memories, and harness
   useEffect(() => {
@@ -61,20 +110,25 @@ export function App() {
       const loadedSettings = await loadSettings();
       const loadedGlobal = await loadGlobalMemories();
       const loadedSessions = await loadChatSessions();
+      const lastActive = await loadLastActiveState();
       
-      const firstSessionId = loadedSessions[0]?.id || 'session_default';
-      currentTabKeyRef.current = firstSessionId;
-      setActiveSessionIdState(firstSessionId);
+      const targetSessionId = (lastActive.sessionId && loadedSessions.some((s) => s.id === lastActive.sessionId))
+        ? lastActive.sessionId
+        : (loadedSessions[0]?.id || 'session_default');
+
+      currentTabKeyRef.current = targetSessionId;
+      setActiveSessionIdState(targetSessionId);
 
       const [loadedTabMems, loadedChat] = await Promise.all([
-        loadTabMemories(firstSessionId),
-        loadChatHistoryForTab(firstSessionId),
+        loadTabMemories(targetSessionId),
+        loadChatHistoryForTab(targetSessionId),
       ]);
 
       setSettings(loadedSettings);
       setGlobalMemories(loadedGlobal);
       setSessions(loadedSessions);
-      setActiveSessionId(firstSessionId);
+      setActiveNavTab(lastActive.navTab || 'chat');
+      setActiveSessionId(targetSessionId);
       setTabMemories(loadedTabMems);
       setMessages(loadedChat);
 
@@ -90,9 +144,18 @@ export function App() {
         {
         onStatusChange: (busy) => {
           setIsBusy(busy);
-          if (!busy) setActiveTool(null);
+          if (busy) {
+            thinkingStartTimeRef.current = Date.now();
+            thinkingDurationMsRef.current = null;
+          } else {
+            setActiveTool(null);
+          }
         },
         onMessageDelta: (deltaText) => {
+          if (thinkingStartTimeRef.current && thinkingDurationMsRef.current === null) {
+            thinkingDurationMsRef.current = Math.max(1000, Date.now() - thinkingStartTimeRef.current);
+          }
+          const duration = thinkingDurationMsRef.current ?? undefined;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === 'assistant' && last.isStreaming) {
@@ -100,6 +163,7 @@ export function App() {
               updated[updated.length - 1] = {
                 ...last,
                 content: deltaText,
+                thinkingDurationMs: duration ?? last.thinkingDurationMs,
               };
               return updated;
             } else {
@@ -109,6 +173,7 @@ export function App() {
                   id: `asst-${Date.now()}`,
                   role: 'assistant',
                   content: deltaText,
+                  thinkingDurationMs: duration,
                   timestamp: Date.now(),
                   isStreaming: true,
                   toolCalls: [],
@@ -118,6 +183,9 @@ export function App() {
           });
         },
         onThinkingDelta: (thinkingText) => {
+          if (!thinkingStartTimeRef.current) {
+            thinkingStartTimeRef.current = Date.now();
+          }
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === 'assistant' && last.isStreaming) {
@@ -202,6 +270,12 @@ export function App() {
         },
         onTurnComplete: (assistantText, toolCalls, thinkingText) => {
           setActiveTool(null);
+          if (thinkingStartTimeRef.current && thinkingDurationMsRef.current === null) {
+            thinkingDurationMsRef.current = Math.max(1000, Date.now() - thinkingStartTimeRef.current);
+          }
+          const duration = thinkingDurationMsRef.current ?? undefined;
+          thinkingStartTimeRef.current = null;
+          thinkingDurationMsRef.current = null;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             let updated: ChatMessage[];
@@ -212,6 +286,7 @@ export function App() {
                 content: assistantText || last.content,
                 toolCalls: toolCalls.length > 0 ? toolCalls : last.toolCalls,
                 thinking: thinkingText || last.thinking,
+                thinkingDurationMs: duration ?? last.thinkingDurationMs,
                 isStreaming: false,
               };
             } else if (assistantText || toolCalls.length > 0 || thinkingText) {
@@ -220,6 +295,7 @@ export function App() {
                 role: 'assistant',
                 content: assistantText,
                 thinking: thinkingText,
+                thinkingDurationMs: duration,
                 toolCalls,
                 timestamp: Date.now(),
                 isStreaming: false,
@@ -235,6 +311,10 @@ export function App() {
         onError: (err) => {
           setActiveTool(null);
           setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === 'assistant' && last.content.includes(err)) {
+              return prev;
+            }
             const errorMsg: ChatMessage = {
               id: `err-${Date.now()}`,
               role: 'assistant',
@@ -252,14 +332,33 @@ export function App() {
         },
       },
       loadedChat,
-      firstSessionId);
+      targetSessionId);
 
       harnessRef.current = harness;
       setInitialized(true);
+
+      // Non-blocking socket pre-warm on launch to eliminate cold-start TLS/DNS handshake delay & Failed to fetch
+      try {
+        const activeCfg =
+          loadedSettings.activeProvider === 'anthropic'
+            ? loadedSettings.anthropic
+            : loadedSettings.openai;
+        if (activeCfg?.baseUrl && activeCfg.apiKey?.trim()) {
+          const urlObj = new URL(activeCfg.baseUrl);
+          fetch(`${urlObj.origin}/`, { method: 'HEAD', mode: 'no-cors' }).catch(() => {});
+        }
+      } catch {
+        // Ignore URL parse error
+      }
     }
 
     init();
   }, []);
+
+  const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings') => {
+    setActiveNavTab(tab);
+    saveLastActiveState(tab, currentTabKeyRef.current);
+  };
 
   // When active session changes, load its scoped chat history and tab memories
   const handleSelectSession = async (sessionId: string) => {
@@ -267,6 +366,7 @@ export function App() {
     setActiveSessionId(sessionId);
     currentTabKeyRef.current = sessionId;
     setActiveSessionIdState(sessionId);
+    saveLastActiveState(activeNavTab, sessionId);
     const [tMems, msgs] = await Promise.all([
       loadTabMemories(sessionId),
       loadChatHistoryForTab(sessionId),
@@ -290,12 +390,38 @@ export function App() {
     e.stopPropagation();
     const updated = await deleteChatSession(sessionId);
     setSessions(updated);
+    setInputDrafts((prev) => {
+      const copy = { ...prev };
+      delete copy[sessionId];
+      return copy;
+    });
     if (activeSessionId === sessionId) {
       const nextSession = updated[0];
       if (nextSession) {
         await handleSelectSession(nextSession.id);
       }
     }
+  };
+
+  const handleStartRename = (e: React.MouseEvent, sess: ChatSession) => {
+    e.stopPropagation();
+    setEditingSessionId(sess.id);
+    setEditingTitle(sess.title);
+  };
+
+  const handleSaveRename = async (sessionId: string) => {
+    const trimmed = editingTitle.trim();
+    if (!trimmed) {
+      setEditingSessionId(null);
+      return;
+    }
+    const updated = await renameChatSession(sessionId, trimmed);
+    setSessions(updated);
+    setEditingSessionId(null);
+  };
+
+  const handleCancelRename = () => {
+    setEditingSessionId(null);
   };
 
   // Keep harness synchronized with active memories and current settings
@@ -352,21 +478,6 @@ export function App() {
     }
   };
 
-  const handleInspectorFillRequested = (promptText?: string) => {
-    setActiveNavTab('chat');
-    if (promptText && harnessRef.current) {
-      const userMsg: ChatMessage = {
-        id: `msg-${Date.now()}`,
-        role: 'user',
-        content: promptText,
-        timestamp: Date.now(),
-      };
-      const updated = [...messages, userMsg];
-      handleMessagesChange(updated);
-      harnessRef.current.prompt(promptText);
-    }
-  };
-
   const currentKey =
     settings.activeProvider === 'anthropic'
       ? settings.anthropic.apiKey
@@ -379,20 +490,64 @@ export function App() {
   ];
 
   return (
-    <div className="flex flex-col h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
-      {/* Top Application Header */}
-      <header className="h-11 px-3 border-b border-zinc-900 bg-zinc-950 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-xs tracking-tight text-zinc-100">
-            OpenBUA
-          </span>
+    <div className="relative h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
+      {/* Top Blur Feather Overlay (Light subtle blur) */}
+      <div
+        className="pointer-events-none absolute top-0 left-0 right-0 h-16 z-20"
+        style={{
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
+          maskImage: 'linear-gradient(to bottom, black 0%, black 25%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 25%, transparent 100%)',
+        }}
+      />
+
+      {/* Floating Top Header (Positioned absolute over viewport, zero solid strip) */}
+      <header className="absolute top-2.5 left-0 right-0 z-30 px-3 flex items-center justify-between pointer-events-none">
+        {/* Left: Circle 2-Line Hamburger Button */}
+        <div className="flex items-center pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            title="Open Menu"
+            className="w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
+          >
+            <TwoLineMenu className="w-4 h-4 text-white" />
+          </button>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        {/* Center: Chat / Memory Floating Toggle with Drop Shadow */}
+        <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => handleSelectNavTab('chat')}
+            className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+              activeNavTab === 'chat'
+                ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSelectNavTab('memory')}
+            className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+              activeNavTab === 'memory'
+                ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Memory
+          </button>
+        </div>
+
+        {/* Right: Key setup or spacer */}
+        <div className="flex items-center justify-end min-w-[36px] pointer-events-auto">
           {!hasKey && (
             <button
-              onClick={() => setActiveNavTab('settings')}
-              className="text-[10px] font-medium py-0.5 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full transition-colors"
+              onClick={() => handleSelectNavTab('settings')}
+              className="text-[10px] font-medium py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full transition-colors shadow-md"
             >
               Setup Key
             </button>
@@ -400,108 +555,166 @@ export function App() {
         </div>
       </header>
 
-      {/* Chat Tabs Switcher Bar */}
-      <div className="h-9 px-2 bg-zinc-950/90 border-b border-zinc-900 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-        <div className="flex items-center gap-1 text-[10px] text-zinc-500 shrink-0 mr-0.5 font-medium">
-          <MessageSquare className="w-3 h-3 text-zinc-500" />
-          <span>Chats:</span>
-        </div>
-        {sessions.map((sess) => {
-          const isActive = activeSessionId === sess.id;
-          return (
-            <div
-              key={sess.id}
-              onClick={() => handleSelectSession(sess.id)}
-              className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] max-w-[130px] shrink-0 transition-all border outline-none cursor-pointer ${
-                isActive
-                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-sm border-zinc-100'
-                  : 'bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/80 border-zinc-850/60'
-              }`}
+      {/* Backdrop Overlay (blurs background behind sidebar without dimming/lowering opacity) */}
+      <div
+        className={`fixed inset-0 z-40 cursor-pointer transition-all duration-300 ease-in-out ${
+          isSidebarOpen
+            ? 'backdrop-blur-sm bg-transparent pointer-events-auto'
+            : 'backdrop-blur-none bg-transparent pointer-events-none'
+        }`}
+        onClick={() => {
+          setIsSidebarOpen(false);
+          setEditingSessionId(null);
+        }}
+        aria-hidden="true"
+      />
+
+      {/* Sidebar Drawer (takes up 65% of screen, pure slide in/out at 100% opacity) */}
+      <div
+        className={`fixed top-0 bottom-0 left-0 z-50 w-[65%] max-w-[280px] bg-zinc-950 border-r border-zinc-900 flex flex-col shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          isSidebarOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'
+        }`}
+        aria-hidden={!isSidebarOpen}
+      >
+          {/* Drawer Header (without dividing line, without cross icon) */}
+          <div className="p-4 pb-2 flex items-center gap-2">
+            <img src="./icons/icon48.png" alt="OpenBUA Logo" className="w-5 h-5 rounded-md" />
+            <span className="font-bold text-sm tracking-tight text-white">
+              OpenBUA
+            </span>
+          </div>
+
+          {/* New Chat Create Button (no bg, bold white text) */}
+          <div className="px-3 py-1">
+            <button
+              type="button"
+              onClick={async () => {
+                await handleCreateSession();
+                handleSelectNavTab('chat');
+                setIsSidebarOpen(false);
+              }}
+              className="flex items-center gap-2.5 w-full px-2 py-2 rounded-xl text-xs font-medium text-white hover:bg-zinc-900/60 transition-colors cursor-pointer"
             >
-              <span className="truncate">{sess.title}</span>
-              {sessions.length > 1 && (
-                <button
-                  type="button"
-                  title="Close tab"
-                  onClick={(e) => handleDeleteSession(e, sess.id)}
-                  className={`p-0.5 rounded-full hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors ${
-                    isActive ? 'text-zinc-950 hover:bg-zinc-300' : 'text-zinc-500 hover:text-zinc-200'
+              <Plus className="w-4 h-4 text-white" />
+              <span>New Chat</span>
+            </button>
+          </div>
+
+          {/* Recent Chats (Scrollable) */}
+          <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1">
+            <div className="px-2 py-1.5 text-xs font-bold text-white">
+              Recent
+            </div>
+
+            {sessions.map((sess) => {
+              const isActive = activeSessionId === sess.id;
+              const isEditing = editingSessionId === sess.id;
+
+              return (
+                <div
+                  key={sess.id}
+                  onClick={() => {
+                    if (!isEditing) {
+                      handleSelectSession(sess.id);
+                      handleSelectNavTab('chat');
+                      setIsSidebarOpen(false);
+                    }
+                  }}
+                  className={`group flex items-center justify-between px-2.5 py-2 rounded-xl text-xs transition-colors cursor-pointer ${
+                    isActive
+                      ? 'bg-zinc-900 text-white font-medium'
+                      : 'text-white/80 hover:text-white hover:bg-zinc-900/50'
                   }`}
                 >
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              )}
-            </div>
-          );
-        })}
-        <button
-          type="button"
-          onClick={handleCreateSession}
-          title="New Chat Tab"
-          className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 border border-zinc-800 transition-colors shrink-0"
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
-      </div>
+                  {isEditing ? (
+                    <div
+                      className="flex items-center gap-1.5 w-full"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="text"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveRename(sess.id);
+                          if (e.key === 'Escape') handleCancelRename();
+                        }}
+                        autoFocus
+                        className="flex-1 bg-zinc-950 border border-zinc-700 rounded-md px-2 py-0.5 text-xs text-white focus:outline-none focus:border-zinc-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveRename(sess.id)}
+                        title="Save title"
+                        className="p-1 hover:text-emerald-400 text-zinc-400 cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelRename}
+                        title="Cancel"
+                        className="p-1 hover:text-zinc-200 text-zinc-500 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 truncate min-w-0 pr-1">
+                        <MessageSquare className="w-3.5 h-3.5 shrink-0 text-white" />
+                        <span className="truncate text-white">{sess.title}</span>
+                      </div>
 
-      {/* Main Tab Bar */}
-      <nav className="h-9 px-2 border-b border-zinc-900 bg-zinc-950/60 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1.5 w-full">
-          <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
-              activeNavTab === 'chat'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
-            }`}
-            onClick={() => setActiveNavTab('chat')}
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span>Chat</span>
-          </button>
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleStartRename(e, sess)}
+                          title="Rename tab"
+                          className="p-1 rounded text-white/70 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        {sessions.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSession(e, sess.id)}
+                            title="Delete tab"
+                            className="p-1 rounded text-white/70 hover:text-red-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
 
-          <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
-              activeNavTab === 'memory'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
-            }`}
-            onClick={() => setActiveNavTab('memory')}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Memory</span>
-            <span className="ml-0.5 text-[9px] px-1.5 py-0.2 bg-zinc-800 rounded-full text-zinc-300">
-              {activeDocuments.length}
-            </span>
-          </button>
-
-          <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
-              activeNavTab === 'inspector'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
-            }`}
-            onClick={() => setActiveNavTab('inspector')}
-          >
-            <Scan className="w-3.5 h-3.5" />
-            <span>DOM</span>
-          </button>
-
-          <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
-              activeNavTab === 'settings'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
-            }`}
-            onClick={() => setActiveNavTab('settings')}
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Settings</span>
-          </button>
+          {/* Sticky Settings Button at the bottom */}
+          <div className="p-3 border-t border-zinc-900/50 bg-zinc-950/95 sticky bottom-0 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                handleSelectNavTab('settings');
+                setIsSidebarOpen(false);
+              }}
+              className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                activeNavTab === 'settings'
+                  ? 'bg-zinc-900 text-white'
+                  : 'text-white hover:bg-zinc-900/60'
+              }`}
+            >
+              <Settings className="w-4 h-4 text-white" />
+              <span className="text-white">Settings</span>
+            </button>
+          </div>
         </div>
-      </nav>
 
       {/* Main View Area */}
-      <main className="flex-1 flex flex-col overflow-hidden relative select-text">
+      <main className="h-full w-full flex flex-col overflow-hidden relative select-text">
         {activeNavTab === 'chat' && (
           <ChatView
             activeSessionId={activeSessionId}
@@ -512,9 +725,11 @@ export function App() {
             activeTool={activeTool}
             settings={settings}
             documents={activeDocuments}
-            onNavigateToSettings={() => setActiveNavTab('settings')}
-            onNavigateToMemory={() => setActiveNavTab('memory')}
+            onNavigateToSettings={() => handleSelectNavTab('settings')}
+            onNavigateToMemory={() => handleSelectNavTab('memory')}
             onUploadDocument={handleChatDocumentUpload}
+            inputDraft={inputDrafts[activeSessionId] || ''}
+            onInputDraftChange={handleInputDraftChange}
           />
         )}
 
@@ -527,10 +742,6 @@ export function App() {
             onGlobalMemoriesChange={handleGlobalMemoriesChange}
             onTabMemoriesChange={handleTabMemoriesChange}
           />
-        )}
-
-        {activeNavTab === 'inspector' && (
-          <InspectorView onFillRequested={handleInspectorFillRequested} />
         )}
 
         {activeNavTab === 'settings' && (

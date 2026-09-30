@@ -8,14 +8,15 @@ import {
   Send,
   Square,
   FormInput,
-  ChevronRight,
   ChevronDown,
+  ChevronRight,
   AlertCircle,
   Loader2,
   Trash2,
   FileText,
   Terminal,
   Upload,
+  Plus,
   BookOpen,
   Copy,
   Check,
@@ -24,9 +25,10 @@ import {
   Keyboard,
   Globe,
   ShieldAlert,
+  Wrench,
 } from 'lucide-react';
-import { getScratchpad } from '../services/storage';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
+import { ThinkingOrb } from 'thinking-orbs';
 
 interface ChatViewProps {
   activeSessionId?: string;
@@ -39,8 +41,9 @@ interface ChatViewProps {
   documents: UserDocument[];
   onNavigateToSettings: () => void;
   onNavigateToMemory: () => void;
-  onNavigateToVault?: () => void;
   onUploadDocument?: (file: File) => Promise<UserDocument>;
+  inputDraft?: string;
+  onInputDraftChange?: (draft: string) => void;
 }
 
 function getToolMeta(toolName: string) {
@@ -133,7 +136,7 @@ function formatSingleMessageAsText(msg: ChatMessage): string {
 
   if (msg.toolCalls && msg.toolCalls.length > 0) {
     msg.toolCalls.forEach((tc) => {
-      const status = tc.status === 'completed' ? 'Completed' : tc.status === 'error' ? 'Failed' : 'Running';
+      const status = tc.status === 'success' || (tc.status as string) === 'completed' ? 'Completed' : tc.status === 'error' ? 'Failed' : 'Running';
       lines.push(`Tool Call: ${tc.toolName} [${status}]`);
       if (tc.args && Object.keys(tc.args).length > 0) {
         lines.push(`Arguments:\n${JSON.stringify(tc.args, null, 2)}`);
@@ -159,6 +162,28 @@ function formatEntireChatAsText(messages: ChatMessage[]): string {
   return messages.map((m) => formatSingleMessageAsText(m)).join('\n\n---\n\n');
 }
 
+function formatThoughtDuration(ms?: number, fallbackLength?: number): string {
+  let effectiveMs = ms;
+  if (!effectiveMs || effectiveMs <= 0) {
+    if (fallbackLength && fallbackLength > 0) {
+      effectiveMs = Math.max(1000, Math.round((fallbackLength / 60) * 1000));
+    } else {
+      effectiveMs = 2000;
+    }
+  }
+
+  const totalSecs = Math.max(1, Math.round(effectiveMs / 1000));
+  if (totalSecs < 60) {
+    return `${totalSecs}s`;
+  }
+  const mins = Math.floor(totalSecs / 60);
+  const remainingSecs = totalSecs % 60;
+  if (remainingSecs === 0) {
+    return `${mins}m`;
+  }
+  return `${mins}m ${remainingSecs}s`;
+}
+
 export function ChatView({
   activeSessionId = 'session_default',
   messages,
@@ -170,33 +195,79 @@ export function ChatView({
   documents,
   onNavigateToSettings,
   onNavigateToMemory,
-  onNavigateToVault,
   onUploadDocument,
+  inputDraft,
+  onInputDraftChange,
 }: ChatViewProps) {
-  const [input, setInput] = useState('');
-  const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const [input, setInput] = useState(inputDraft || '');
+  const [expandedThoughtIds, setExpandedThoughtIds] = useState<Record<string, boolean>>({});
+  const [expandedToolsIds, setExpandedToolsIds] = useState<Record<string, boolean>>({});
+
+  const toggleThought = (msgId: string) => {
+    setExpandedThoughtIds((prev) => {
+      const targetMsg = messages.find((m) => m.id === msgId);
+      const isCurrentlyStreamingBlock = Boolean(
+        targetMsg?.isStreaming && (!targetMsg.content || targetMsg.content.length === 0)
+      );
+      const currentExpanded = prev[msgId] ?? isCurrentlyStreamingBlock;
+      return {
+        ...prev,
+        [msgId]: !currentExpanded,
+      };
+    });
+  };
+
+  const toggleTools = (msgId: string) => {
+    setExpandedToolsIds((prev) => {
+      const targetMsg = messages.find((m) => m.id === msgId);
+      const isRunningAnyTool = Boolean(targetMsg?.toolCalls?.some((tc) => tc.status === 'running'));
+      const isCurrentlyStreamingTools = Boolean(
+        isRunningAnyTool || (targetMsg?.isStreaming && (!targetMsg.content || targetMsg.content.length === 0))
+      );
+      const currentExpanded = prev[msgId] ?? isCurrentlyStreamingTools;
+      return {
+        ...prev,
+        [msgId]: !currentExpanded,
+      };
+    });
+  };
+
+  useEffect(() => {
+    setInput(inputDraft || '');
+  }, [inputDraft]);
+
+  // Auto-extend textarea height up to 6 lines (136px) as user writes
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const targetHeight = Math.min(Math.max(el.scrollHeight, 32), 136);
+    el.style.height = `${targetHeight}px`;
+  }, [input, activeSessionId]);
+
+  const handleInputChange = (val: string) => {
+    setInput(val);
+    onInputDraftChange?.(val);
+  };
+
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
-  const [showScratchpad, setShowScratchpad] = useState(false);
-  const [scratchpadText, setScratchpadText] = useState('');
-  const [copiedScratchpad, setCopiedScratchpad] = useState(false);
-  const [copiedEntireChat, setCopiedEntireChat] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load scratchpad content and listen for live agent updates for this chat session
-  useEffect(() => {
-    const sid = activeSessionId || 'session_default';
-    getScratchpad(sid).then((text) => setScratchpadText(text || ''));
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const isAtBottomRef = useRef(true);
 
-    const onScratchpadUpdate = (e: any) => {
-      if (e.detail?.sessionId && e.detail.sessionId !== sid) return;
-      setScratchpadText(e.detail?.content || '');
-    };
-    window.addEventListener('openbua_scratchpad_updated', onScratchpadUpdate);
-    return () => window.removeEventListener('openbua_scratchpad_updated', onScratchpadUpdate);
-  }, [activeSessionId]);
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom < 48;
+    setIsAtBottom(atBottom);
+    isAtBottomRef.current = atBottom;
+  };
 
   const [captchaState, setCaptchaState] = useState<CaptchaState>({
     isActive: false,
@@ -220,20 +291,27 @@ export function ChatView({
     captchaManager.resolveActiveGate(false, 'CAPTCHA skipped by user. ABORT this domain immediately and pivot to an alternate source/query.');
   };
 
-  const activeDocsCount = documents.filter((d) => d.isActiveForContext).length;
   const currentKey =
     settings.activeProvider === 'anthropic' ? settings.anthropic.apiKey : settings.openai.apiKey;
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
 
-  const handleOpenMemory = onNavigateToMemory || onNavigateToVault;
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (smooth = true) => {
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
   };
 
+  // Only auto-scroll on streaming or message updates if user was already at the bottom
   useEffect(() => {
-    scrollToBottom();
+    if (isAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, isBusy, activeTool]);
+
+  // When active session changes, reset scroll to bottom
+  useEffect(() => {
+    scrollToBottom(false);
+  }, [activeSessionId]);
 
   const handleChatFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -281,7 +359,7 @@ export function ChatView({
 
     const newMessages = [...messages, userMsg];
     onMessagesChange(newMessages);
-    setInput('');
+    handleInputChange('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -291,14 +369,6 @@ export function ChatView({
         await harness.prompt(promptText);
       } catch (e: any) {
         console.error('[ChatView] Prompt error:', e);
-        const errorMsg: ChatMessage = {
-          id: `err-${Date.now()}`,
-          role: 'assistant',
-          content: `⚠️ ${e?.message || String(e)}`,
-          timestamp: Date.now(),
-          isStreaming: false,
-        };
-        onMessagesChange([...newMessages, errorMsg]);
       }
     }
   };
@@ -314,23 +384,6 @@ export function ChatView({
     if (harness) harness.abort();
   };
 
-  const handleClear = () => {
-    if (harness) harness.reset();
-    onMessagesChange([]);
-  };
-
-  const toggleToolExpand = (toolId: string) => {
-    setExpandedTools((prev) => ({ ...prev, [toolId]: !prev[toolId] }));
-  };
-
-  const handleCopyEntireChat = () => {
-    if (messages.length === 0) return;
-    const text = formatEntireChatAsText(messages);
-    navigator.clipboard.writeText(text);
-    setCopiedEntireChat(true);
-    setTimeout(() => setCopiedEntireChat(false), 2000);
-  };
-
   const handleCopyMessage = (msg: ChatMessage) => {
     const text = formatSingleMessageAsText(msg);
     navigator.clipboard.writeText(text);
@@ -339,14 +392,19 @@ export function ChatView({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
-      {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3.5 select-text">
+    <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
+      {/* Messages Scroll Area - Full height canvas with top and bottom clearance for floating elements */}
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-3.5 pt-16 pb-14 space-y-3.5 select-text"
+      >
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
-            <div>
-              <h3 className="font-semibold text-zinc-200 text-xs">OpenBUA Ready</h3>
-              <p className="text-[11px] text-zinc-400 mt-1 max-w-[260px]">
+            <div className="flex flex-col items-center">
+              <img src="./icons/icon48.png" alt="OpenBUA Logo" className="w-10 h-10 rounded-xl mb-2.5 shadow-lg shadow-black/50" />
+              <h3 className="font-semibold text-zinc-100 text-sm tracking-tight">OpenBUA</h3>
+              <p className="text-[11px] text-zinc-400 mt-1 max-w-[260px] leading-relaxed">
                 Autonomous browser use agent using your active browser to research, interact, and fill forms.
               </p>
             </div>
@@ -360,28 +418,6 @@ export function ChatView({
                 </Button>
               </div>
             )}
-
-            {activeDocsCount === 0 && (
-              <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-md text-zinc-400 text-[11px] flex items-center gap-2">
-                <FileText className="w-4 h-4 shrink-0" />
-                <span>No active memories stored.</span>
-                <Button size="sm" variant="outline" className="h-6 text-[10px] ml-auto rounded-full" onClick={handleOpenMemory}>
-                  Add Memory
-                </Button>
-              </div>
-            )}
-
-            <div className="pt-2 flex flex-col gap-1.5 w-full max-w-[280px]">
-              <button
-                className="p-2 text-left rounded-xl bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800/80 text-[11px] text-zinc-300 hover:text-zinc-100 transition-colors flex items-center justify-between"
-                onClick={() =>
-                  handleSend('Scan this webpage form, match with my profile, and fill all inputs.')
-                }
-              >
-                <span>Fill active form automatically</span>
-                <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
-              </button>
-            </div>
           </div>
         )}
 
@@ -390,131 +426,123 @@ export function ChatView({
             key={msg.id}
             className={`group flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1.5 select-text`}
           >
-            {/* Thinking / Reasoning Section (Outside Message Bubble, lighter text color) */}
-            {msg.role === 'assistant' && msg.thinking && msg.thinking.trim().length > 0 && (
-              <div className="max-w-[92%] px-1 text-[11px] text-zinc-400 font-sans leading-relaxed flex items-start gap-1.5 py-0.5 select-text">
-                <span className="text-[11px] font-sans text-zinc-500 shrink-0 font-medium select-none mt-0.5">
-                  Thinking:
-                </span>
-                <div className="text-zinc-400 italic font-normal select-text whitespace-pre-wrap font-sans">
-                  {msg.thinking}
-                </div>
-              </div>
-            )}
+            {/* Thought Collapsible Accordion */}
+            {msg.role === 'assistant' && msg.thinking && msg.thinking.trim().length > 0 && (() => {
+              const isCurrentlyStreamingThought = Boolean(
+                msg.isStreaming && (!msg.content || msg.content.length === 0)
+              );
+              const isExpanded = expandedThoughtIds[msg.id] ?? isCurrentlyStreamingThought;
+              const durationLabel = isCurrentlyStreamingThought
+                ? 'Thinking...'
+                : `Thought for ${formatThoughtDuration(msg.thinkingDurationMs, msg.thinking.length)}`;
 
-            {/* Tool Calls (rendered outside the message bubble directly in stream background) */}
-            {msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0 && (
-              <div className="w-full max-w-[92%] space-y-1.5 py-0.5 select-text font-sans">
-                {msg.toolCalls.map((tc) => {
-                  const isExpanded = expandedTools[tc.id];
-                  const meta = getToolMeta(tc.toolName);
-                  const Icon = meta.icon;
-                  return (
-                    <div
-                      key={tc.id}
-                      className={`rounded-xl border overflow-hidden text-[11px] transition-all select-text font-sans ${
-                        tc.status === 'running'
-                          ? 'border-zinc-700 bg-zinc-900/90 shadow-sm'
-                          : tc.status === 'error'
-                          ? 'border-red-900/60 bg-red-950/20'
-                          : 'border-zinc-800/80 bg-zinc-900/40'
+              return (
+                <div className="w-full max-w-[92%] flex flex-col items-start py-0.5 select-text font-sans">
+                  {/* Clickable Header: "Thought for ___mins/secs" with Chevron */}
+                  <button
+                    type="button"
+                    onClick={() => toggleThought(msg.id)}
+                    className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg text-[11px] font-sans text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer select-none group/thought"
+                    title={isExpanded ? 'Click to collapse thoughts' : 'Click to expand thoughts'}
+                  >
+                    <span className="font-medium tracking-tight text-zinc-400 group-hover/thought:text-zinc-200">
+                      {durationLabel}
+                    </span>
+                    <ChevronRight
+                      className={`w-3 h-3 text-zinc-500 group-hover/thought:text-zinc-300 transition-transform duration-200 shrink-0 ${
+                        isExpanded ? 'rotate-90' : 'rotate-0'
                       }`}
-                    >
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        className="w-full p-2 px-2.5 flex items-center justify-between hover:bg-zinc-850/60 transition-colors text-left cursor-pointer select-text"
-                        onClick={() => toggleToolExpand(tc.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            toggleToolExpand(tc.id);
-                          }
-                        }}
-                      >
-                        <div className="flex items-center gap-2 font-sans text-[11px] text-zinc-300 min-w-0 pr-2 select-text">
-                          <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
-                          <span
-                            className="font-medium text-zinc-200 select-text cursor-text"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {tc.toolName}
-                          </span>
-                          <span
-                            className="text-[10.5px] text-zinc-400 truncate select-text cursor-text font-sans"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            • {meta.label}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 select-text font-sans">
-                          {tc.status === 'running' ? (
-                            <span className="flex items-center gap-1 text-[10px] text-amber-300 font-medium select-text font-sans">
-                              <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-                              <span>Running</span>
-                            </span>
-                          ) : tc.status === 'error' ? (
-                            <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans">
-                              <AlertCircle className="w-3 h-3 text-red-400" />
-                              <span>Failed</span>
-                            </span>
-                          ) : null}
-                          {isExpanded ? (
-                            <ChevronDown className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
-                          ) : (
-                            <ChevronRight className="w-3 h-3 text-zinc-500 ml-0.5 select-none" />
-                          )}
-                        </div>
-                      </div>
+                    />
+                  </button>
 
-                      {isExpanded && (
-                        <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 font-sans text-[11px] text-zinc-400 space-y-2 overflow-x-auto max-h-56 overflow-y-auto select-text cursor-text">
-                          {tc.args && Object.keys(tc.args).length > 0 && (
-                            <div className="select-text">
-                              <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
-                                Arguments:
-                              </span>
-                              <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700 font-sans text-[10.5px]">
-                                {JSON.stringify(tc.args, null, 2)}
-                              </pre>
-                            </div>
-                          )}
-                          {tc.result && (
-                            <div className="select-text">
-                              <span className="text-zinc-500 block font-medium mb-0.5 font-sans select-text">
-                                Output / Result:
-                              </span>
-                              <pre className="text-zinc-300 bg-zinc-900/60 p-1.5 rounded-lg border border-zinc-850 whitespace-pre-wrap select-text selection:bg-zinc-700 font-sans text-[10.5px]">
-                                {typeof tc.result === 'string'
-                                  ? tc.result
-                                  : JSON.stringify(tc.result, null, 2)}
-                              </pre>
-                            </div>
-                          )}
-                          {tc.errorMessage && (
-                            <div className="select-text">
-                              <span className="text-red-400 block font-medium mb-0.5 font-sans select-text">
-                                Error:
-                              </span>
-                              <pre className="text-red-300 bg-red-950/40 p-1.5 rounded-lg border border-red-900/40 whitespace-pre-wrap select-text selection:bg-zinc-700 font-sans text-[10.5px]">
-                                {tc.errorMessage}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                  {/* Expandable Reasoning Body */}
+                  {isExpanded && (
+                    <div className="w-full pl-2 pr-1 pt-1 pb-1 animate-in fade-in duration-150">
+                      <div className="border-l-2 border-zinc-800 pl-2.5 py-0.5 text-[11px] text-zinc-400 italic font-normal whitespace-pre-wrap select-text leading-relaxed font-sans">
+                        {msg.thinking}
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Tools Used Collapsible Accordion */}
+            {msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0 && (() => {
+              const isRunningAnyTool = msg.toolCalls.some((tc) => tc.status === 'running');
+              const isCurrentlyStreamingTools = Boolean(
+                isRunningAnyTool || (msg.isStreaming && (!msg.content || msg.content.length === 0))
+              );
+              const isExpanded = expandedToolsIds[msg.id] ?? isCurrentlyStreamingTools;
+              const toolCount = msg.toolCalls.length;
+              const toolsLabel = isRunningAnyTool
+                ? `Using tools (${toolCount})...`
+                : `Tools used (${toolCount})`;
+
+              return (
+                <div className="w-full max-w-[92%] flex flex-col items-start py-0.5 select-text font-sans">
+                  {/* Clickable Header: "Tools used (X)" with Chevron */}
+                  <button
+                    type="button"
+                    onClick={() => toggleTools(msg.id)}
+                    className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg text-[11px] font-sans text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer select-none group/tools"
+                    title={isExpanded ? 'Click to collapse tools' : 'Click to expand tools'}
+                  >
+                    <Wrench className="w-3 h-3 text-zinc-500 group-hover/tools:text-zinc-300 shrink-0" />
+                    <span className="font-medium tracking-tight text-zinc-400 group-hover/tools:text-zinc-200">
+                      {toolsLabel}
+                    </span>
+                    {isRunningAnyTool && (
+                      <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
+                    )}
+                    <ChevronRight
+                      className={`w-3 h-3 text-zinc-500 group-hover/tools:text-zinc-300 transition-transform duration-200 shrink-0 ${
+                        isExpanded ? 'rotate-90' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+
+                  {/* Expandable Tool Calls List */}
+                  {isExpanded && (
+                    <div className="w-full pl-2 pr-1 pt-1 pb-1 animate-in fade-in duration-150">
+                      <div className="border-l-2 border-zinc-800/60 pl-2.5 py-0.5 space-y-1 select-text font-sans">
+                        {msg.toolCalls.map((tc) => {
+                          const meta = getToolMeta(tc.toolName);
+                          const Icon = meta.icon;
+                          return (
+                            <div
+                              key={tc.id}
+                              className="flex items-center gap-1.5 py-0.5 text-[11px] text-zinc-400 font-sans select-text leading-normal"
+                            >
+                              <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
+                              <span className="text-zinc-400 select-text cursor-text font-normal font-sans">
+                                {tc.toolName}
+                              </span>
+                              {tc.status === 'running' && (
+                                <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
+                              )}
+                              {tc.status === 'error' && (
+                                <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans ml-1">
+                                  <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />
+                                  <span>{tc.errorMessage ? tc.errorMessage : 'Failed'}</span>
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Message Bubble (rendered if content exists, or if user message, or if still streaming) */}
             {(msg.content || (msg.isStreaming && !msg.thinking && (!msg.toolCalls || msg.toolCalls.length === 0)) || msg.role === 'user') && (
               <div
                 className={`max-w-[88%] rounded-2xl p-3 text-xs select-text font-sans ${
                   msg.role === 'user'
-                    ? 'bg-zinc-800 text-zinc-100 rounded-br-sm shadow-sm'
+                    ? 'bg-[#007AFF] text-white rounded-br-sm shadow-sm'
                     : 'bg-zinc-900/90 border border-zinc-800 text-zinc-200 rounded-bl-sm shadow-sm'
                 }`}
               >
@@ -561,11 +589,22 @@ export function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Box Footer */}
-      <div className="p-2.5 border-t border-zinc-900 bg-zinc-950 space-y-2">
+      {/* Bottom Blur Feather Overlay (Light subtle blur) */}
+      <div
+        className="pointer-events-none absolute bottom-0 left-0 right-0 h-16 z-10"
+        style={{
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
+          maskImage: 'linear-gradient(to top, black 0%, black 25%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to top, black 0%, black 25%, transparent 100%)',
+        }}
+      />
+
+      {/* Floating Input Box (Positioned absolute over viewport, zero solid strip) */}
+      <div className="absolute bottom-3 left-3 right-3 z-20 pointer-events-none space-y-2">
         {/* Human-in-the-Loop (HITL) CAPTCHA Intercept Gate Banner */}
         {captchaState.isActive && (
-          <div className="rounded-xl border border-amber-500/60 bg-amber-950/80 p-3 shadow-xl space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="pointer-events-auto rounded-xl border border-amber-500/60 bg-zinc-900/95 backdrop-blur-md p-3 shadow-2xl shadow-black/80 space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-6 h-6 rounded-lg bg-amber-900/80 border border-amber-600/70 flex items-center justify-center shrink-0 text-amber-200">
@@ -618,259 +657,100 @@ export function ChatView({
           </div>
         )}
 
-        {/* Live Active Tool Execution Banner */}
-        {isBusy && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/95 p-2 px-3 shadow-lg flex items-center justify-between gap-3 animate-in fade-in duration-200">
-            {activeTool ? (
-              (() => {
-                const meta = getToolMeta(activeTool.toolName);
-                const Icon = meta.icon;
-                return (
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-6 h-6 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0 text-zinc-100">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-300" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-zinc-100 truncate">
-                          {meta.label}
-                        </span>
-                        <span className="font-sans text-[10px] px-1.5 py-0.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-400">
-                          {activeTool.toolName}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 truncate">
-                        {meta.desc}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })()
-            ) : (
-              <div className="flex items-center gap-2.5 min-w-0">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400 shrink-0" />
-                <span className="text-[11px] text-zinc-300 font-medium truncate">
-                  OpenBUA is reasoning & planning next action...
-                </span>
-              </div>
-            )}
-
-            <Button
-              variant="destructive"
-              size="sm"
-              className="h-6 px-2 text-[10px] shrink-0 rounded-full"
-              onClick={handleStop}
-              title="Stop generation"
+        {/* Floating Controls Area above Input Box (Scroll-to-bottom button & Thinking pill) */}
+        <div className="flex flex-col items-center gap-1.5 pointer-events-none">
+          {/* Circle White Scroll-to-Bottom Button */}
+          {!isAtBottom && (
+            <button
+              type="button"
+              onClick={() => scrollToBottom(true)}
+              className="pointer-events-auto w-7 h-7 rounded-full bg-white text-zinc-950 hover:bg-zinc-100 shadow-xl shadow-black/70 flex items-center justify-center transition-all cursor-pointer active:scale-95 animate-in fade-in zoom-in-75 duration-200"
+              title="Scroll to bottom"
             >
-              <Square className="w-2.5 h-2.5 mr-1 fill-current" />
-              Stop
-            </Button>
-          </div>
-        )}
+              <ChevronDown className="w-4 h-4 stroke-[2.5]" />
+            </button>
+          )}
 
-        {/* Scratchpad Panel (collapsible notepad for research, leads, and extracted lists) */}
-        {showScratchpad && (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 shadow-xl space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <BookOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="text-xs font-semibold text-zinc-200">Research Scratchpad</span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700/80 font-sans shrink-0">
-                  Read-only
+          {/* Floating Agent's Thinking Pill above input box */}
+          {isBusy && (
+            <div className="flex justify-center pointer-events-auto">
+              <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-zinc-900/95 border border-zinc-800/90 shadow-xl shadow-black/70 animate-in fade-in slide-in-from-bottom-1 duration-200">
+                <ThinkingOrb state="solving" size={20} />
+                <span className="text-xs font-medium tracking-wide select-none agent-thinking-glow font-sans">
+                  Agent&apos;s Thinking
                 </span>
-                <span className="text-[10px] text-zinc-500 font-sans truncate">
-                  ({scratchpadText.split('\n').filter(Boolean).length} items, {scratchpadText.length} chars)
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {scratchpadText.trim() && (
-                  <button
-                    type="button"
-                    className="px-2 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-750 text-zinc-200 border border-zinc-700/60 flex items-center gap-1 transition-colors active:scale-95"
-                    onClick={() => {
-                      navigator.clipboard.writeText(scratchpadText);
-                      setCopiedScratchpad(true);
-                      setTimeout(() => setCopiedScratchpad(false), 2000);
-                    }}
-                    title="Copy all scratchpad text"
-                  >
-                    {copiedScratchpad ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
-                    <span>{copiedScratchpad ? 'Copied' : 'Copy All'}</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="p-1 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
-                  onClick={() => setShowScratchpad(false)}
-                  title="Close Scratchpad"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
               </div>
             </div>
-
-            <Textarea
-              rows={4}
-              value={scratchpadText}
-              readOnly={true}
-              placeholder="Scratchpad is empty for this chat tab. When OpenBUA collects research findings, leads, or multi-step notes, they will appear here in real time. (Read-only for user; managed autonomously by OpenBUA agent)"
-              className="w-full text-xs font-sans bg-zinc-950/80 border-zinc-800 text-zinc-200 rounded-lg p-2 resize-y min-h-[90px] max-h-[220px] focus-visible:ring-0 select-text cursor-text"
-            />
-          </div>
-        )}
-
-        {/* Action Buttons directly above input box */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-[11px] font-medium transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
-              onClick={() =>
-                handleSend(
-                  'Inspect this current page form, cross-reference my active stored documents, and fill all matching fields.'
-                )
-              }
-              disabled={isBusy}
-            >
-              <span>Fill Form</span>
-            </button>
-
-            <button
-              type="button"
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all shadow-sm active:scale-95 border ${
-                showScratchpad
-                  ? 'bg-amber-950/60 border-amber-800/80 text-amber-200'
-                  : 'bg-zinc-900 hover:bg-zinc-850 text-zinc-300 hover:text-zinc-100 border-zinc-800'
-              }`}
-              onClick={() => setShowScratchpad(!showScratchpad)}
-              title="Open Research Scratchpad / Notepad"
-            >
-              <BookOpen className="w-3 h-3 text-amber-400" />
-              <span>Scratchpad</span>
-              {scratchpadText.trim() && (
-                <span className="bg-amber-900/80 text-amber-300 border border-amber-700/80 px-1.5 py-0.2 rounded-full text-[9px]">
-                  {scratchpadText.split('\n').filter(Boolean).length}
-                </span>
-              )}
-            </button>
-          </div>
+          )}
         </div>
 
-        {/* Rounder Input Box */}
-        <div className="relative flex items-end bg-zinc-900/90 rounded-2xl border border-zinc-800 focus-within:border-zinc-700 transition-colors p-1 pl-2">
+        {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
+        <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
+          {/* Start of Bar: Plus Button for Memory Document Upload */}
+          <input
+            ref={chatFileInputRef}
+            type="file"
+            accept=".pdf,.md,.markdown,.txt,.json"
+            className="hidden"
+            onChange={handleChatFileUpload}
+            disabled={isBusy || isUploadingDoc}
+          />
+          <button
+            type="button"
+            onClick={() => chatFileInputRef.current?.click()}
+            title="Upload MD or PDF to memory"
+            disabled={isBusy || isUploadingDoc}
+            className="w-7 h-7 self-center flex items-center justify-center text-white hover:text-white/80 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0 cursor-pointer"
+          >
+            {isUploadingDoc ? (
+              <Loader2 className="w-4 h-4 animate-spin text-white" />
+            ) : (
+              <Plus className="w-4 h-4 text-white" />
+            )}
+          </button>
+
           <Textarea
             ref={textareaRef}
             rows={1}
             placeholder="Ask OpenBUA"
             value={input}
             onChange={(e) => {
-              setInput(e.target.value);
-              // Auto-expand textarea height as text lines increase (up to 160px)
+              handleInputChange(e.target.value);
+              // Auto-expand textarea height as text lines increase (up to 6 lines, 136px)
               if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';
-                textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+                textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 32), 136)}px`;
               }
             }}
             onKeyDown={handleKeyDown}
-            className="border-0 bg-transparent min-h-[38px] max-h-40 resize-none py-2 px-2 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed"
+            className="border-0 bg-transparent min-h-[32px] max-h-[136px] resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans flex-1"
             disabled={isBusy || !hasKey}
           />
 
-          <div className="p-1 flex items-center gap-1 shrink-0">
-            <input
-              ref={chatFileInputRef}
-              type="file"
-              accept=".pdf,.md,.markdown,.txt,.json"
-              className="hidden"
-              onChange={handleChatFileUpload}
-              disabled={isBusy || isUploadingDoc}
-            />
-            <button
-              type="button"
-              onClick={() => chatFileInputRef.current?.click()}
-              title="Upload MD or PDF to memory"
-              disabled={isBusy || isUploadingDoc}
-              className="p-1.5 text-zinc-400 hover:text-zinc-200 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0"
-            >
-              {isUploadingDoc ? (
-                <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
-              ) : (
-                <Upload className="w-4 h-4" />
-              )}
-            </button>
-
+          {/* End of Bar: Send / Stop Button */}
+          <div className="self-center flex items-center shrink-0">
             {isBusy ? (
               <Button
                 variant="destructive"
                 size="icon"
-                className="h-8 w-8 rounded-full shadow-sm"
+                className="h-7 w-7 rounded-full shadow-sm flex items-center justify-center cursor-pointer"
                 onClick={handleStop}
                 title="Stop generation"
               >
-                <Square className="w-3.5 h-3.5 fill-current" />
+                <Square className="w-3 h-3 fill-current" />
               </Button>
             ) : (
               <Button
                 size="icon"
-                className="h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 hover:bg-zinc-200 shadow-sm"
+                className="h-7 w-7 rounded-full bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF] shadow-sm transition-colors cursor-pointer flex items-center justify-center"
                 onClick={() => handleSend()}
                 disabled={!input.trim() || !hasKey}
                 title="Send (Enter)"
               >
-                <Send className="w-3.5 h-3.5" />
+                <Send className="w-3.5 h-3.5 text-white" />
               </Button>
             )}
           </div>
-        </div>
-
-        {/* Footer Status Bar */}
-        <div className="flex items-center justify-between text-[10px] text-zinc-500 px-1">
-          <div className="flex items-center gap-2">
-            <span
-              className="hover:text-zinc-300 cursor-pointer"
-              onClick={handleOpenMemory}
-              title="Active stored memory"
-            >
-              {activeDocsCount} memories active
-            </span>
-            <span className="text-zinc-600">|</span>
-            <span className="text-zinc-400 truncate max-w-[120px]" title={settings.activeProvider === 'anthropic' ? settings.anthropic.model : settings.openai.model}>
-              {settings.activeProvider === 'anthropic' ? settings.anthropic.model : settings.openai.model}
-            </span>
-          </div>
-
-          {messages.length > 0 && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="hover:text-zinc-300 flex items-center gap-1 transition-colors text-zinc-450 cursor-pointer"
-                onClick={handleCopyEntireChat}
-                title="Copy entire chat transcript with timestamps and tool calls"
-              >
-                {copiedEntireChat ? (
-                  <>
-                    <Check className="w-2.5 h-2.5 text-emerald-400" />
-                    <span className="text-emerald-400 font-medium">Copied Chat</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-2.5 h-2.5" />
-                    <span>Copy Chat</span>
-                  </>
-                )}
-              </button>
-              <span className="text-zinc-700">|</span>
-              <button
-                type="button"
-                className="hover:text-zinc-300 flex items-center gap-1 transition-colors cursor-pointer"
-                onClick={handleClear}
-                title="Clear chat transcript"
-              >
-                <Trash2 className="w-2.5 h-2.5" />
-                Clear
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>

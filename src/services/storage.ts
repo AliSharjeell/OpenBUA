@@ -270,10 +270,28 @@ export async function saveChatSessions(sessions: ChatSession[]): Promise<void> {
 
 export async function createNewChatSession(title?: string): Promise<ChatSession> {
   const sessions = await loadChatSessions();
-  const num = sessions.length + 1;
+  let defaultTitle = title;
+  if (!defaultTitle) {
+    // Scan all existing session titles to find highest number among "Chat N"
+    const numbers = sessions
+      .map((s) => {
+        const match = s.title.match(/^Chat\s+(\d+)$/i);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter((n) => n > 0);
+
+    const maxNum = numbers.length > 0 ? Math.max(...numbers) : 0;
+    let nextNum = maxNum + 1;
+    // Extra safety: ensure title is not duplicate with any existing session
+    while (sessions.some((s) => s.title.trim().toLowerCase() === `chat ${nextNum}`.toLowerCase())) {
+      nextNum++;
+    }
+    defaultTitle = `Chat ${nextNum}`;
+  }
+
   const newSession: ChatSession = {
     id: `session_${Date.now()}`,
-    title: title || `Chat ${num}`,
+    title: defaultTitle,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -298,6 +316,45 @@ export async function deleteChatSession(sessionId: string): Promise<ChatSession[
   await clearChatHistoryForTab(sessionId);
   await clearScratchpad(sessionId);
   return finalSessions;
+}
+
+export async function renameChatSession(sessionId: string, newTitle: string): Promise<ChatSession[]> {
+  const sessions = await loadChatSessions();
+  const trimmed = newTitle.trim();
+  if (!trimmed) return sessions;
+  const updated = sessions.map((s) =>
+    s.id === sessionId ? { ...s, title: trimmed, updatedAt: Date.now() } : s
+  );
+  await saveChatSessions(updated);
+  return updated;
+}
+
+// ========================================================
+// Last Active State (Nav Tab & Session ID Persistence)
+// ========================================================
+const LAST_ACTIVE_NAV_TAB_KEY = 'openbua_last_active_nav_tab';
+const LAST_ACTIVE_SESSION_ID_KEY = 'openbua_last_active_session_id';
+
+export async function saveLastActiveState(
+  navTab: 'chat' | 'memory' | 'settings',
+  sessionId?: string
+): Promise<void> {
+  const ops: Promise<void>[] = [setStorageItem(LAST_ACTIVE_NAV_TAB_KEY, navTab)];
+  if (sessionId) {
+    ops.push(setStorageItem(LAST_ACTIVE_SESSION_ID_KEY, sessionId));
+  }
+  await Promise.all(ops);
+}
+
+export async function loadLastActiveState(): Promise<{
+  navTab: 'chat' | 'memory' | 'settings';
+  sessionId?: string;
+}> {
+  const [navTab, sessionId] = await Promise.all([
+    getStorageItem<'chat' | 'memory' | 'settings'>(LAST_ACTIVE_NAV_TAB_KEY, 'chat'),
+    getStorageItem<string | undefined>(LAST_ACTIVE_SESSION_ID_KEY, undefined),
+  ]);
+  return { navTab, sessionId };
 }
 
 // ========================================================
