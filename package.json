@@ -20,7 +20,8 @@
     "pdfjs-dist": "^4.10.38",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.0.2"
+    "tailwind-merge": "^3.0.2",
+    "thinking-orbs": "^0.3.2"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.312",
