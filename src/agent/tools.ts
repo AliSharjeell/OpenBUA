@@ -325,7 +325,7 @@ const NavigateBrowserTabSchema = Type.Object({
 export const navigateBrowserTabTool: AgentTool<typeof NavigateBrowserTabSchema> = {
   name: 'navigate_browser_tab',
   label: 'Navigate Tab URL',
-  description: 'Navigates the active browser tab to a specified URL.',
+  description: 'Navigates the active browser tab to a specified URL. WARNING: This replaces the current page — if you are mid-form, use open_new_tab instead to avoid losing form progress!',
   parameters: NavigateBrowserTabSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
