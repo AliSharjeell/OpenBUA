@@ -9,6 +9,7 @@ import {
   Square,
   FormInput,
   ChevronDown,
+  ChevronRight,
   AlertCircle,
   Loader2,
   Trash2,
@@ -160,6 +161,28 @@ function formatEntireChatAsText(messages: ChatMessage[]): string {
   return messages.map((m) => formatSingleMessageAsText(m)).join('\n\n---\n\n');
 }
 
+function formatThoughtDuration(ms?: number, fallbackLength?: number): string {
+  let effectiveMs = ms;
+  if (!effectiveMs || effectiveMs <= 0) {
+    if (fallbackLength && fallbackLength > 0) {
+      effectiveMs = Math.max(1000, Math.round((fallbackLength / 60) * 1000));
+    } else {
+      effectiveMs = 2000;
+    }
+  }
+
+  const totalSecs = Math.max(1, Math.round(effectiveMs / 1000));
+  if (totalSecs < 60) {
+    return `${totalSecs}s`;
+  }
+  const mins = Math.floor(totalSecs / 60);
+  const remainingSecs = totalSecs % 60;
+  if (remainingSecs === 0) {
+    return `${mins}m`;
+  }
+  return `${mins}m ${remainingSecs}s`;
+}
+
 export function ChatView({
   activeSessionId = 'session_default',
   messages,
@@ -176,6 +199,21 @@ export function ChatView({
   onInputDraftChange,
 }: ChatViewProps) {
   const [input, setInput] = useState(inputDraft || '');
+  const [expandedThoughtIds, setExpandedThoughtIds] = useState<Record<string, boolean>>({});
+
+  const toggleThought = (msgId: string) => {
+    setExpandedThoughtIds((prev) => {
+      const targetMsg = messages.find((m) => m.id === msgId);
+      const isCurrentlyStreamingBlock = Boolean(
+        targetMsg?.isStreaming && (!targetMsg.content || targetMsg.content.length === 0)
+      );
+      const currentExpanded = prev[msgId] ?? isCurrentlyStreamingBlock;
+      return {
+        ...prev,
+        [msgId]: !currentExpanded,
+      };
+    });
+  };
 
   useEffect(() => {
     setInput(inputDraft || '');
@@ -370,47 +408,79 @@ export function ChatView({
             key={msg.id}
             className={`group flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1.5 select-text`}
           >
-            {/* Thinking / Reasoning Section (Outside Message Bubble, lighter text color) */}
-            {msg.role === 'assistant' && msg.thinking && msg.thinking.trim().length > 0 && (
-              <div className="max-w-[92%] px-1 text-[11px] text-zinc-400 font-sans leading-relaxed flex items-start gap-1.5 py-0.5 select-text">
-                <span className="text-[11px] font-sans text-zinc-500 shrink-0 font-medium select-none mt-0.5 min-w-[50px]">
-                  Thinking:
-                </span>
-                <div className="text-zinc-400 italic font-normal select-text whitespace-pre-wrap font-sans">
-                  {msg.thinking}
-                </div>
-              </div>
-            )}
+            {/* Compact Thinking & Tool Calling Accordion Section */}
+            {msg.role === 'assistant' && ((msg.thinking && msg.thinking.trim().length > 0) || (msg.toolCalls && msg.toolCalls.length > 0)) && (() => {
+              const isCurrentlyStreamingBlock = Boolean(
+                msg.isStreaming && (!msg.content || msg.content.length === 0)
+              );
+              const isExpanded = expandedThoughtIds[msg.id] ?? isCurrentlyStreamingBlock;
+              const durationLabel = isCurrentlyStreamingBlock
+                ? 'Thinking...'
+                : `Thought for ${formatThoughtDuration(msg.thinkingDurationMs, msg.thinking?.length)}`;
 
-            {/* Tool Calls (rendered outside the message bubble directly in stream background) */}
-            {msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0 && (
-              <div className="w-full max-w-[92%] space-y-1 py-0.5 pl-[60px] pr-1 select-text font-sans">
-                {msg.toolCalls.map((tc) => {
-                  const meta = getToolMeta(tc.toolName);
-                  const Icon = meta.icon;
-                  return (
-                    <div
-                      key={tc.id}
-                      className="flex items-center gap-1.5 py-0.5 text-[11px] text-zinc-400 font-sans select-text leading-normal"
-                    >
-                      <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
-                      <span className="text-zinc-400 select-text cursor-text font-normal font-sans">
-                        {tc.toolName}
-                      </span>
-                      {tc.status === 'running' && (
-                        <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
+              return (
+                <div className="w-full max-w-[92%] flex flex-col items-start py-0.5 select-text font-sans">
+                  {/* Clickable Header: "Thought for ___mins/secs" with Chevron */}
+                  <button
+                    type="button"
+                    onClick={() => toggleThought(msg.id)}
+                    className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg text-[11px] font-sans text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer select-none group/thought"
+                    title={isExpanded ? 'Click to collapse thoughts' : 'Click to expand thoughts'}
+                  >
+                    <span className="font-medium tracking-tight text-zinc-400 group-hover/thought:text-zinc-200">
+                      {durationLabel}
+                    </span>
+                    <ChevronRight
+                      className={`w-3 h-3 text-zinc-500 group-hover/thought:text-zinc-300 transition-transform duration-200 shrink-0 ${
+                        isExpanded ? 'rotate-90' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+
+                  {/* Expandable Body: Reasoning text & Executed tool calls */}
+                  {isExpanded && (
+                    <div className="w-full pl-2 pr-1 pt-1 pb-1 space-y-1.5 animate-in fade-in duration-150">
+                      {/* Thinking Reasoning Content */}
+                      {msg.thinking && msg.thinking.trim().length > 0 && (
+                        <div className="border-l-2 border-zinc-800 pl-2.5 py-0.5 text-[11px] text-zinc-400 italic font-normal whitespace-pre-wrap select-text leading-relaxed font-sans">
+                          {msg.thinking}
+                        </div>
                       )}
-                      {tc.status === 'error' && (
-                        <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans ml-1">
-                          <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />
-                          <span>{tc.errorMessage ? tc.errorMessage : 'Failed'}</span>
-                        </span>
+
+                      {/* Tool Calls List */}
+                      {msg.toolCalls && msg.toolCalls.length > 0 && (
+                        <div className="border-l-2 border-zinc-800/60 pl-2.5 py-0.5 space-y-1 select-text font-sans">
+                          {msg.toolCalls.map((tc) => {
+                            const meta = getToolMeta(tc.toolName);
+                            const Icon = meta.icon;
+                            return (
+                              <div
+                                key={tc.id}
+                                className="flex items-center gap-1.5 py-0.5 text-[11px] text-zinc-400 font-sans select-text leading-normal"
+                              >
+                                <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
+                                <span className="text-zinc-400 select-text cursor-text font-normal font-sans">
+                                  {tc.toolName}
+                                </span>
+                                {tc.status === 'running' && (
+                                  <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
+                                )}
+                                {tc.status === 'error' && (
+                                  <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans ml-1">
+                                    <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />
+                                    <span>{tc.errorMessage ? tc.errorMessage : 'Failed'}</span>
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Message Bubble (rendered if content exists, or if user message, or if still streaming) */}
             {(msg.content || (msg.isStreaming && !msg.thinking && (!msg.toolCalls || msg.toolCalls.length === 0)) || msg.role === 'user') && (
@@ -464,14 +534,14 @@ export function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Bottom Blur Feather Overlay (One consistent blur) */}
+      {/* Bottom Blur Feather Overlay (Light subtle blur) */}
       <div
         className="pointer-events-none absolute bottom-0 left-0 right-0 h-16 z-10"
         style={{
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          maskImage: 'linear-gradient(to top, black 0%, black 35%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to top, black 0%, black 35%, transparent 100%)',
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
+          maskImage: 'linear-gradient(to top, black 0%, black 25%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to top, black 0%, black 25%, transparent 100%)',
         }}
       />
 
