@@ -466,12 +466,16 @@ export function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Bottom Blur Feather Overlay (Pure progressive blur, zero mask glow) */}
-      <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-14 z-10 backdrop-blur-[1.5px]">
-        <div className="absolute bottom-0 left-0 right-0 h-10 backdrop-blur-[2px]">
-          <div className="absolute bottom-0 left-0 right-0 h-6 backdrop-blur-[3px]" />
-        </div>
-      </div>
+      {/* Bottom Blur Feather Overlay (Smooth feather gradient at the end of blur) */}
+      <div
+        className="pointer-events-none absolute bottom-0 left-0 right-0 h-16 z-10"
+        style={{
+          backdropFilter: 'blur(5px)',
+          WebkitBackdropFilter: 'blur(5px)',
+          maskImage: 'linear-gradient(to top, black 0%, black 35%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to top, black 0%, black 35%, transparent 100%)',
+        }}
+      />
 
       {/* Floating Input Box (Positioned absolute over viewport, zero solid strip) */}
       <div className="absolute bottom-3 left-3 right-3 z-20 pointer-events-none space-y-2">
