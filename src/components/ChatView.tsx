@@ -496,8 +496,8 @@ export function ChatView({
         )}
 
 
-        {/* Rounder Input Box */}
-        <div className="relative flex items-end bg-zinc-900/90 rounded-2xl border border-zinc-800 focus-within:border-zinc-700 transition-colors p-1 pl-2">
+        {/* Rounder, Sleek Low-Height Input Box */}
+        <div className="relative flex items-end bg-zinc-900/90 rounded-[22px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-0.5 pl-2.5 shadow-sm">
           <Textarea
             ref={textareaRef}
             rows={1}
@@ -505,18 +505,18 @@ export function ChatView({
             value={input}
             onChange={(e) => {
               setInput(e.target.value);
-              // Auto-expand textarea height as text lines increase (up to 160px)
+              // Auto-expand textarea height as text lines increase (up to 140px)
               if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';
-                textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+                textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
               }
             }}
             onKeyDown={handleKeyDown}
-            className="border-0 bg-transparent min-h-[38px] max-h-40 resize-none py-2 px-2 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed"
+            className="border-0 bg-transparent min-h-[32px] max-h-36 resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans"
             disabled={isBusy || !hasKey}
           />
 
-          <div className="p-1 flex items-center gap-1 shrink-0">
+          <div className="p-0.5 flex items-center gap-1 shrink-0">
             <input
               ref={chatFileInputRef}
               type="file"
@@ -530,12 +530,12 @@ export function ChatView({
               onClick={() => chatFileInputRef.current?.click()}
               title="Upload MD or PDF to memory"
               disabled={isBusy || isUploadingDoc}
-              className="p-1.5 text-zinc-400 hover:text-zinc-200 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0"
+              className="p-1 text-zinc-400 hover:text-zinc-200 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0"
             >
               {isUploadingDoc ? (
-                <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
               ) : (
-                <Upload className="w-4 h-4" />
+                <Upload className="w-3.5 h-3.5" />
               )}
             </button>
 
@@ -543,21 +543,21 @@ export function ChatView({
               <Button
                 variant="destructive"
                 size="icon"
-                className="h-8 w-8 rounded-full shadow-sm"
+                className="h-7 w-7 rounded-full shadow-sm"
                 onClick={handleStop}
                 title="Stop generation"
               >
-                <Square className="w-3.5 h-3.5 fill-current" />
+                <Square className="w-3 h-3 fill-current" />
               </Button>
             ) : (
               <Button
                 size="icon"
-                className="h-8 w-8 rounded-full bg-zinc-100 text-zinc-950 hover:bg-zinc-200 shadow-sm"
+                className="h-7 w-7 rounded-full bg-zinc-100 text-zinc-950 hover:bg-zinc-200 shadow-sm"
                 onClick={() => handleSend()}
                 disabled={!input.trim() || !hasKey}
                 title="Send (Enter)"
               >
-                <Send className="w-3.5 h-3.5" />
+                <Send className="w-3 h-3" />
               </Button>
             )}
           </div>
