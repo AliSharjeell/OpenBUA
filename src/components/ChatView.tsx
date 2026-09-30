@@ -192,8 +192,21 @@ export function ChatView({
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const isAtBottomRef = useRef(true);
+
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom < 48;
+    setIsAtBottom(atBottom);
+    isAtBottomRef.current = atBottom;
+  };
 
   const [captchaState, setCaptchaState] = useState<CaptchaState>({
     isActive: false,
@@ -221,13 +234,23 @@ export function ChatView({
     settings.activeProvider === 'anthropic' ? settings.anthropic.apiKey : settings.openai.apiKey;
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (smooth = true) => {
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
   };
 
+  // Only auto-scroll on streaming or message updates if user was already at the bottom
   useEffect(() => {
-    scrollToBottom();
+    if (isAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, isBusy, activeTool]);
+
+  // When active session changes, reset scroll to bottom
+  useEffect(() => {
+    scrollToBottom(false);
+  }, [activeSessionId]);
 
   const handleChatFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -318,7 +341,11 @@ export function ChatView({
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
       {/* Messages Scroll Area - Full height canvas with top and bottom clearance for floating elements */}
-      <div className="flex-1 overflow-y-auto px-3.5 pt-16 pb-14 space-y-3.5 select-text">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-3.5 pt-16 pb-14 space-y-3.5 select-text"
+      >
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
             <div>
