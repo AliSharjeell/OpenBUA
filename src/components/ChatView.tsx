@@ -15,6 +15,7 @@ import {
   FileText,
   Terminal,
   Upload,
+  Plus,
   BookOpen,
   Copy,
   Check,
@@ -519,7 +520,30 @@ export function ChatView({
         )}
 
         {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
-        <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 backdrop-blur-md rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-0.5 pl-3 shadow-2xl shadow-black/70">
+        <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 backdrop-blur-md rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
+          {/* Start of Bar: Plus Button for Memory Document Upload */}
+          <input
+            ref={chatFileInputRef}
+            type="file"
+            accept=".pdf,.md,.markdown,.txt,.json"
+            className="hidden"
+            onChange={handleChatFileUpload}
+            disabled={isBusy || isUploadingDoc}
+          />
+          <button
+            type="button"
+            onClick={() => chatFileInputRef.current?.click()}
+            title="Upload MD or PDF to memory"
+            disabled={isBusy || isUploadingDoc}
+            className="p-1 mb-0.5 text-zinc-400 hover:text-zinc-200 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0 cursor-pointer flex items-center justify-center"
+          >
+            {isUploadingDoc ? (
+              <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+            ) : (
+              <Plus className="w-4 h-4 text-zinc-400 hover:text-zinc-200" />
+            )}
+          </button>
+
           <Textarea
             ref={textareaRef}
             rows={1}
@@ -534,33 +558,12 @@ export function ChatView({
               }
             }}
             onKeyDown={handleKeyDown}
-            className="border-0 bg-transparent min-h-[32px] max-h-36 resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans"
+            className="border-0 bg-transparent min-h-[32px] max-h-36 resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans flex-1"
             disabled={isBusy || !hasKey}
           />
 
-          <div className="p-0.5 flex items-center gap-1 shrink-0">
-            <input
-              ref={chatFileInputRef}
-              type="file"
-              accept=".pdf,.md,.markdown,.txt,.json"
-              className="hidden"
-              onChange={handleChatFileUpload}
-              disabled={isBusy || isUploadingDoc}
-            />
-            <button
-              type="button"
-              onClick={() => chatFileInputRef.current?.click()}
-              title="Upload MD or PDF to memory"
-              disabled={isBusy || isUploadingDoc}
-              className="p-1 text-zinc-400 hover:text-zinc-200 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0"
-            >
-              {isUploadingDoc ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
-              ) : (
-                <Upload className="w-3.5 h-3.5" />
-              )}
-            </button>
-
+          {/* End of Bar: Send / Stop Button */}
+          <div className="p-0.5 mb-0.5 flex items-center shrink-0">
             {isBusy ? (
               <Button
                 variant="destructive"
@@ -574,7 +577,7 @@ export function ChatView({
             ) : (
               <Button
                 size="icon"
-                className="h-7 w-7 rounded-full bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF] shadow-sm transition-colors"
+                className="h-7 w-7 rounded-full bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF] shadow-sm transition-colors cursor-pointer"
                 onClick={() => handleSend()}
                 disabled={!input.trim() || !hasKey}
                 title="Send (Enter)"
