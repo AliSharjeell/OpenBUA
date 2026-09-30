@@ -436,16 +436,12 @@ export function App() {
 
   return (
     <div className="relative h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
-      {/* Top Blur Feather Overlay (Feathers out content scrolling behind hamburger and toggle, transparent without vignette) */}
-      <div
-        className="pointer-events-none absolute top-0 left-0 right-0 h-16 z-20 bg-transparent"
-        style={{
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          maskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, black 0%, transparent 100%)',
-        }}
-      />
+      {/* Top Blur Feather Overlay (Pure progressive blur, zero mask glow) */}
+      <div className="pointer-events-none absolute top-0 left-0 right-0 h-14 z-20 backdrop-blur-[1.5px]">
+        <div className="absolute top-0 left-0 right-0 h-10 backdrop-blur-[2px]">
+          <div className="absolute top-0 left-0 right-0 h-6 backdrop-blur-[3px]" />
+        </div>
+      </div>
 
       {/* Floating Top Header (Positioned absolute over viewport, zero solid strip) */}
       <header className="absolute top-2.5 left-0 right-0 z-30 px-3 flex items-center justify-between pointer-events-none">
