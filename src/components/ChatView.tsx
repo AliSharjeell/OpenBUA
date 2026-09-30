@@ -611,12 +611,12 @@ export function ChatView({
           />
 
           {/* End of Bar: Send / Stop Button */}
-          <div className="p-0.5 mb-0.5 flex items-center shrink-0">
+          <div className="self-center flex items-center shrink-0">
             {isBusy ? (
               <Button
                 variant="destructive"
                 size="icon"
-                className="h-7 w-7 rounded-full shadow-sm"
+                className="h-7 w-7 rounded-full shadow-sm flex items-center justify-center cursor-pointer"
                 onClick={handleStop}
                 title="Stop generation"
               >
@@ -625,12 +625,12 @@ export function ChatView({
             ) : (
               <Button
                 size="icon"
-                className="h-7 w-7 rounded-full bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF] shadow-sm transition-colors cursor-pointer"
+                className="h-7 w-7 rounded-full bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF] shadow-sm transition-colors cursor-pointer flex items-center justify-center"
                 onClick={() => handleSend()}
                 disabled={!input.trim() || !hasKey}
                 title="Send (Enter)"
               >
-                <Send className="w-3 h-3 text-white" />
+                <Send className="w-3.5 h-3.5 text-white" />
               </Button>
             )}
           </div>
