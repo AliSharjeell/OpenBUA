@@ -165,7 +165,7 @@ export function SettingsView({ settings, onSettingsSaved }: SettingsViewProps) {
   const isKeyConfigured = Boolean(currentKey && currentKey.trim().length > 3);
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+    <div className="flex-1 overflow-y-auto px-4 pt-16 pb-6 space-y-4 text-xs bg-zinc-950">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
         <div>
