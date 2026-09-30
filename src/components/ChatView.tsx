@@ -16,7 +16,6 @@ import {
   FileText,
   Terminal,
   Upload,
-  BookOpen,
   Copy,
   Check,
   X,
@@ -25,7 +24,6 @@ import {
   Globe,
   ShieldAlert,
 } from 'lucide-react';
-import { getScratchpad } from '../services/storage';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
 
 interface ChatViewProps {
@@ -176,27 +174,11 @@ export function ChatView({
   const [input, setInput] = useState('');
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
-  const [showScratchpad, setShowScratchpad] = useState(false);
-  const [scratchpadText, setScratchpadText] = useState('');
-  const [copiedScratchpad, setCopiedScratchpad] = useState(false);
   const [copiedEntireChat, setCopiedEntireChat] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
-
-  // Load scratchpad content and listen for live agent updates for this chat session
-  useEffect(() => {
-    const sid = activeSessionId || 'session_default';
-    getScratchpad(sid).then((text) => setScratchpadText(text || ''));
-
-    const onScratchpadUpdate = (e: any) => {
-      if (e.detail?.sessionId && e.detail.sessionId !== sid) return;
-      setScratchpadText(e.detail?.content || '');
-    };
-    window.addEventListener('openbua_scratchpad_updated', onScratchpadUpdate);
-    return () => window.removeEventListener('openbua_scratchpad_updated', onScratchpadUpdate);
-  }, [activeSessionId]);
 
   const [captchaState, setCaptchaState] = useState<CaptchaState>({
     isActive: false,
@@ -345,8 +327,8 @@ export function ChatView({
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
             <div>
-              <h3 className="font-semibold text-zinc-200 text-xs">OpenBUA Ready</h3>
-              <p className="text-[11px] text-zinc-400 mt-1 max-w-[260px]">
+              <h3 className="font-semibold text-zinc-100 text-sm tracking-tight">OpenBUA</h3>
+              <p className="text-[11px] text-zinc-400 mt-1 max-w-[260px] leading-relaxed">
                 Autonomous browser use agent using your active browser to research, interact, and fill forms.
               </p>
             </div>
@@ -360,28 +342,6 @@ export function ChatView({
                 </Button>
               </div>
             )}
-
-            {activeDocsCount === 0 && (
-              <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-md text-zinc-400 text-[11px] flex items-center gap-2">
-                <FileText className="w-4 h-4 shrink-0" />
-                <span>No active memories stored.</span>
-                <Button size="sm" variant="outline" className="h-6 text-[10px] ml-auto rounded-full" onClick={handleOpenMemory}>
-                  Add Memory
-                </Button>
-              </div>
-            )}
-
-            <div className="pt-2 flex flex-col gap-1.5 w-full max-w-[280px]">
-              <button
-                className="p-2 text-left rounded-xl bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800/80 text-[11px] text-zinc-300 hover:text-zinc-100 transition-colors flex items-center justify-between"
-                onClick={() =>
-                  handleSend('Scan this webpage form, match with my profile, and fill all inputs.')
-                }
-              >
-                <span>Fill active form automatically</span>
-                <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
-              </button>
-            </div>
           </div>
         )}
 
@@ -618,143 +578,6 @@ export function ChatView({
           </div>
         )}
 
-        {/* Live Active Tool Execution Banner */}
-        {isBusy && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/95 p-2 px-3 shadow-lg flex items-center justify-between gap-3 animate-in fade-in duration-200">
-            {activeTool ? (
-              (() => {
-                const meta = getToolMeta(activeTool.toolName);
-                const Icon = meta.icon;
-                return (
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-6 h-6 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0 text-zinc-100">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-300" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-zinc-100 truncate">
-                          {meta.label}
-                        </span>
-                        <span className="font-sans text-[10px] px-1.5 py-0.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-400">
-                          {activeTool.toolName}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 truncate">
-                        {meta.desc}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })()
-            ) : (
-              <div className="flex items-center gap-2.5 min-w-0">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400 shrink-0" />
-                <span className="text-[11px] text-zinc-300 font-medium truncate">
-                  OpenBUA is reasoning & planning next action...
-                </span>
-              </div>
-            )}
-
-            <Button
-              variant="destructive"
-              size="sm"
-              className="h-6 px-2 text-[10px] shrink-0 rounded-full"
-              onClick={handleStop}
-              title="Stop generation"
-            >
-              <Square className="w-2.5 h-2.5 mr-1 fill-current" />
-              Stop
-            </Button>
-          </div>
-        )}
-
-        {/* Scratchpad Panel (collapsible notepad for research, leads, and extracted lists) */}
-        {showScratchpad && (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 shadow-xl space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <BookOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="text-xs font-semibold text-zinc-200">Research Scratchpad</span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700/80 font-sans shrink-0">
-                  Read-only
-                </span>
-                <span className="text-[10px] text-zinc-500 font-sans truncate">
-                  ({scratchpadText.split('\n').filter(Boolean).length} items, {scratchpadText.length} chars)
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {scratchpadText.trim() && (
-                  <button
-                    type="button"
-                    className="px-2 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-750 text-zinc-200 border border-zinc-700/60 flex items-center gap-1 transition-colors active:scale-95"
-                    onClick={() => {
-                      navigator.clipboard.writeText(scratchpadText);
-                      setCopiedScratchpad(true);
-                      setTimeout(() => setCopiedScratchpad(false), 2000);
-                    }}
-                    title="Copy all scratchpad text"
-                  >
-                    {copiedScratchpad ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
-                    <span>{copiedScratchpad ? 'Copied' : 'Copy All'}</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="p-1 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
-                  onClick={() => setShowScratchpad(false)}
-                  title="Close Scratchpad"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            <Textarea
-              rows={4}
-              value={scratchpadText}
-              readOnly={true}
-              placeholder="Scratchpad is empty for this chat tab. When OpenBUA collects research findings, leads, or multi-step notes, they will appear here in real time. (Read-only for user; managed autonomously by OpenBUA agent)"
-              className="w-full text-xs font-sans bg-zinc-950/80 border-zinc-800 text-zinc-200 rounded-lg p-2 resize-y min-h-[90px] max-h-[220px] focus-visible:ring-0 select-text cursor-text"
-            />
-          </div>
-        )}
-
-        {/* Action Buttons directly above input box */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 hover:bg-zinc-850 text-zinc-200 border border-zinc-800 text-[11px] font-medium transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
-              onClick={() =>
-                handleSend(
-                  'Inspect this current page form, cross-reference my active stored documents, and fill all matching fields.'
-                )
-              }
-              disabled={isBusy}
-            >
-              <span>Fill Form</span>
-            </button>
-
-            <button
-              type="button"
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all shadow-sm active:scale-95 border ${
-                showScratchpad
-                  ? 'bg-amber-950/60 border-amber-800/80 text-amber-200'
-                  : 'bg-zinc-900 hover:bg-zinc-850 text-zinc-300 hover:text-zinc-100 border-zinc-800'
-              }`}
-              onClick={() => setShowScratchpad(!showScratchpad)}
-              title="Open Research Scratchpad / Notepad"
-            >
-              <BookOpen className="w-3 h-3 text-amber-400" />
-              <span>Scratchpad</span>
-              {scratchpadText.trim() && (
-                <span className="bg-amber-900/80 text-amber-300 border border-amber-700/80 px-1.5 py-0.2 rounded-full text-[9px]">
-                  {scratchpadText.split('\n').filter(Boolean).length}
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
 
         {/* Rounder Input Box */}
         <div className="relative flex items-end bg-zinc-900/90 rounded-2xl border border-zinc-800 focus-within:border-zinc-700 transition-colors p-1 pl-2">
