@@ -62,6 +62,8 @@ export interface ToolCallState {
   status: 'running' | 'success' | 'error';
   errorMessage?: string;
   timestamp: number;
+  extra_content?: any;
+  thought_signature?: string;
 }
 
 export interface ChatMessage {

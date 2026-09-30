@@ -74,6 +74,9 @@ export function convertChatMessagesToAgentMessages(
           id: tc.id,
           name: tc.toolName,
           arguments: tc.args || {},
+          args: tc.args || {},
+          extra_content: tc.extra_content,
+          thought_signature: tc.thought_signature,
         });
       }
 
@@ -413,6 +416,8 @@ ${this.settings.systemInstruction || ''}`.trim();
                 args: tc.args || {},
                 status: 'running',
                 timestamp: Date.now(),
+                extra_content: (tc as any).extra_content,
+                thought_signature: (tc as any).thought_signature,
               };
               this.activeToolCalls.set(tc.id, toolState);
               this.listeners.onToolCallStart?.(toolState);
@@ -423,6 +428,8 @@ ${this.settings.systemInstruction || ''}`.trim();
               const existing = this.activeToolCalls.get(tc.id);
               if (existing) {
                 existing.args = tc.args;
+                if ((tc as any).extra_content) existing.extra_content = (tc as any).extra_content;
+                if ((tc as any).thought_signature) existing.thought_signature = (tc as any).thought_signature;
                 this.listeners.onToolCallStart?.(existing);
               }
             }

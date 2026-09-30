@@ -205,6 +205,8 @@ async function streamOpenAI(
       let textParts = '';
       let toolCalls: any[] = [];
 
+      const isGoogle = endpoint.includes('generativelanguage.googleapis.com') || (config.model || '').toLowerCase().includes('gemini');
+
       if (typeof m.content === 'string') {
         textParts = m.content;
       } else if (Array.isArray(m.content)) {
@@ -217,7 +219,7 @@ async function streamOpenAI(
           .filter((c: any) => c.type === 'toolCall' || c.type === 'tool_use')
           .map((c: any) => {
             const rawArgs = c.arguments || c.args || c.input || {};
-            return {
+            const tcObj: any = {
               id: c.id,
               type: 'function',
               function: {
@@ -225,6 +227,22 @@ async function streamOpenAI(
                 arguments: typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs),
               },
             };
+            const thoughtSig = c.thought_signature || c.extra_content?.google?.thought_signature;
+            if (isGoogle) {
+              const sig = thoughtSig || 'skip_thought_signature_validator';
+              tcObj.extra_content = {
+                google: {
+                  thought_signature: sig,
+                },
+              };
+              tcObj.thought_signature = sig;
+            } else if (c.extra_content) {
+              tcObj.extra_content = c.extra_content;
+              if (c.thought_signature) tcObj.thought_signature = c.thought_signature;
+            } else if (c.thought_signature) {
+              tcObj.thought_signature = c.thought_signature;
+            }
+            return tcObj;
           });
       }
 
@@ -478,7 +496,10 @@ async function streamOpenAI(
   stream.push({ type: 'start', partial: assistantMessage });
 
   let textContentBlock: TextContent | null = null;
-  const toolCallAccumulators = new Map<number, { id: string; name: string; argsStr: string }>();
+  const toolCallAccumulators = new Map<
+    number,
+    { id: string; name: string; argsStr: string; extra_content?: any; thought_signature?: string }
+  >();
   let isInsideInlineThink = false;
 
   let buffer = '';
@@ -611,17 +632,28 @@ async function streamOpenAI(
         if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
           for (const tc of delta.tool_calls) {
             const idx = tc.index ?? 0;
+            const extra = tc.extra_content || delta.extra_content || choice.extra_content || (json as any).extra_content;
+            const thoughtSig =
+              tc.thought_signature ||
+              delta.thought_signature ||
+              extra?.google?.thought_signature ||
+              tc.provider_specific_fields?.thought_signature;
+
             if (!toolCallAccumulators.has(idx)) {
               toolCallAccumulators.set(idx, {
                 id: tc.id || `call_${idx}_${Date.now()}`,
                 name: tc.function?.name || '',
                 argsStr: tc.function?.arguments || '',
+                extra_content: extra,
+                thought_signature: thoughtSig,
               });
             } else {
               const acc = toolCallAccumulators.get(idx)!;
               if (tc.id) acc.id = tc.id;
               if (tc.function?.name) acc.name += tc.function.name;
               if (tc.function?.arguments) acc.argsStr += tc.function.arguments;
+              if (extra) acc.extra_content = extra;
+              if (thoughtSig) acc.thought_signature = thoughtSig;
             }
           }
         }
@@ -665,6 +697,8 @@ async function streamOpenAI(
         name: acc.name,
         arguments: parsedArgs,
         args: parsedArgs,
+        extra_content: acc.extra_content,
+        thought_signature: acc.thought_signature,
       };
 
       assistantMessage.content.push(toolCall);
