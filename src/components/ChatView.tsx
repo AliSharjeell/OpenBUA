@@ -363,7 +363,7 @@ export function ChatView({
             {/* Thinking / Reasoning Section (Outside Message Bubble, lighter text color) */}
             {msg.role === 'assistant' && msg.thinking && msg.thinking.trim().length > 0 && (
               <div className="max-w-[92%] px-1 text-[11px] text-zinc-400 font-sans leading-relaxed flex items-start gap-1.5 py-0.5 select-text">
-                <span className="text-[11px] font-sans text-zinc-500 shrink-0 font-medium select-none mt-0.5">
+                <span className="text-[11px] font-sans text-zinc-500 shrink-0 font-medium select-none mt-0.5 min-w-[50px]">
                   Thinking:
                 </span>
                 <div className="text-zinc-400 italic font-normal select-text whitespace-pre-wrap font-sans">
@@ -374,14 +374,14 @@ export function ChatView({
 
             {/* Tool Calls (rendered outside the message bubble directly in stream background) */}
             {msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0 && (
-              <div className="w-full max-w-[92%] space-y-1 py-0.5 select-text font-sans">
+              <div className="w-full max-w-[92%] space-y-1 py-0.5 pl-[60px] pr-1 select-text font-sans">
                 {msg.toolCalls.map((tc) => {
                   const meta = getToolMeta(tc.toolName);
                   const Icon = meta.icon;
                   return (
                     <div
                       key={tc.id}
-                      className="flex items-center gap-1.5 py-0.5 px-1 text-[11px] text-zinc-400 font-sans select-text leading-normal"
+                      className="flex items-center gap-1.5 py-0.5 text-[11px] text-zinc-400 font-sans select-text leading-normal"
                     >
                       <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
                       <span className="text-zinc-400 select-text cursor-text font-normal font-sans">
