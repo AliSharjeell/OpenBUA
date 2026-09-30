@@ -25,6 +25,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
+import { ThinkingOrb } from 'thinking-orbs';
 
 interface ChatViewProps {
   activeSessionId?: string;
@@ -490,6 +491,18 @@ export function ChatView({
                 className="bg-amber-400 h-full transition-all duration-1000 ease-linear rounded-full"
                 style={{ width: `${Math.max(0, (captchaState.remainingSeconds / 10) * 100)}%` }}
               />
+            </div>
+          </div>
+        )}
+
+        {/* Floating Thinking/Executing Pill above input box */}
+        {isBusy && (
+          <div className="flex justify-center pointer-events-auto">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/95 backdrop-blur-md border border-zinc-800/90 shadow-xl shadow-black/70 animate-in fade-in slide-in-from-bottom-1 duration-200">
+              <ThinkingOrb state="solving" size={20} />
+              <span className="text-[11px] font-medium text-zinc-200 tracking-wide select-none">
+                Thinking, Executing
+              </span>
             </div>
           </div>
         )}
