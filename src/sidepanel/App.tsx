@@ -41,15 +41,17 @@ function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
   return (
     <svg
       className={className}
+      width="16"
+      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.2"
+      strokeWidth="2.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <line x1="4" y1="8.5" x2="20" y2="8.5" />
-      <line x1="4" y1="15.5" x2="20" y2="15.5" />
+      <line x1="3" y1="8" x2="21" y2="8" />
+      <line x1="3" y1="16" x2="21" y2="16" />
     </svg>
   );
 }
@@ -420,23 +422,23 @@ export function App() {
   ];
 
   return (
-    <div className="flex flex-col h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
-      {/* Top Application Header (Floating, transparent background) */}
-      <header className="h-12 px-3 pt-2 bg-transparent flex items-center justify-between shrink-0 relative z-20">
+    <div className="relative h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
+      {/* Floating Top Header (Positioned absolute over viewport, zero solid strip) */}
+      <header className="absolute top-2.5 left-0 right-0 z-30 px-3 flex items-center justify-between pointer-events-none">
         {/* Left: Circle 2-Line Hamburger Button */}
-        <div className="flex items-center">
+        <div className="flex items-center pointer-events-auto">
           <button
             type="button"
             onClick={() => setIsSidebarOpen(true)}
             title="Open Menu"
-            className="w-8.5 h-8.5 rounded-full bg-zinc-900/90 hover:bg-zinc-850 border border-zinc-800/80 text-zinc-200 hover:text-white flex items-center justify-center transition-all shadow-md shadow-black/40 cursor-pointer active:scale-95"
+            className="w-9 h-9 rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
           >
-            <TwoLineMenu className="w-4.5 h-4.5" />
+            <TwoLineMenu className="w-4 h-4 text-white" />
           </button>
         </div>
 
-        {/* Center: Chat / Memory Toggle */}
-        <div className="flex items-center p-1 bg-zinc-900/90 backdrop-blur-md border border-zinc-800/90 rounded-full shadow-lg shadow-black/50">
+        {/* Center: Chat / Memory Floating Toggle with Drop Shadow */}
+        <div className="flex items-center p-1 bg-zinc-900/90 backdrop-blur-md border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
           <button
             type="button"
             onClick={() => setActiveNavTab('chat')}
@@ -462,11 +464,11 @@ export function App() {
         </div>
 
         {/* Right: Key setup or spacer */}
-        <div className="flex items-center justify-end min-w-[28px]">
+        <div className="flex items-center justify-end min-w-[36px] pointer-events-auto">
           {!hasKey && (
             <button
               onClick={() => setActiveNavTab('settings')}
-              className="text-[10px] font-medium py-0.5 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full transition-colors"
+              className="text-[10px] font-medium py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full transition-colors shadow-md"
             >
               Setup Key
             </button>
@@ -627,7 +629,7 @@ export function App() {
       )}
 
       {/* Main View Area */}
-      <main className="flex-1 flex flex-col overflow-hidden relative select-text">
+      <main className="h-full w-full flex flex-col overflow-hidden relative select-text">
         {activeNavTab === 'chat' && (
           <ChatView
             activeSessionId={activeSessionId}
