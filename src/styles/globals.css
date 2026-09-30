@@ -195,3 +195,31 @@ body {
   background-color: #1c1c20;
 }
 
+/* Agent's Thinking Shimmer Character Glow Animation */
+@keyframes agentShimmerWave {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.agent-thinking-glow {
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.90) 0%,
+    rgba(255, 255, 255, 0.90) 32%,
+    #ffffff 50%,
+    rgba(255, 255, 255, 0.90) 68%,
+    rgba(255, 255, 255, 0.90) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: agentShimmerWave 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.4));
+}
+
+

@@ -548,13 +548,13 @@ export function ChatView({
             </button>
           )}
 
-          {/* Floating Thinking/Executing Pill above input box */}
+          {/* Floating Agent's Thinking Pill above input box */}
           {isBusy && (
             <div className="flex justify-center pointer-events-auto">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/95 backdrop-blur-md border border-zinc-800/90 shadow-xl shadow-black/70 animate-in fade-in slide-in-from-bottom-1 duration-200">
+              <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-zinc-900/95 backdrop-blur-md border border-zinc-800/90 shadow-xl shadow-black/70 animate-in fade-in slide-in-from-bottom-1 duration-200">
                 <ThinkingOrb state="solving" size={20} />
-                <span className="text-[11px] font-medium text-zinc-200 tracking-wide select-none">
-                  Thinking, Executing
+                <span className="text-xs font-medium tracking-wide select-none agent-thinking-glow font-sans">
+                  Agent&apos;s Thinking
                 </span>
               </div>
             </div>
