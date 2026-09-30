@@ -472,12 +472,12 @@ export function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Bottom Blur Feather Overlay (Smooth feather gradient at the end of blur) */}
+      {/* Bottom Blur Feather Overlay (One consistent blur) */}
       <div
         className="pointer-events-none absolute bottom-0 left-0 right-0 h-16 z-10"
         style={{
-          backdropFilter: 'blur(5px)',
-          WebkitBackdropFilter: 'blur(5px)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
           maskImage: 'linear-gradient(to top, black 0%, black 35%, transparent 100%)',
           WebkitMaskImage: 'linear-gradient(to top, black 0%, black 35%, transparent 100%)',
         }}
@@ -557,7 +557,7 @@ export function ChatView({
           {/* Floating Agent's Thinking Pill above input box */}
           {isBusy && (
             <div className="flex justify-center pointer-events-auto">
-              <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-zinc-900/95 backdrop-blur-md border border-zinc-800/90 shadow-xl shadow-black/70 animate-in fade-in slide-in-from-bottom-1 duration-200">
+              <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-zinc-900/95 border border-zinc-800/90 shadow-xl shadow-black/70 animate-in fade-in slide-in-from-bottom-1 duration-200">
                 <ThinkingOrb state="solving" size={20} />
                 <span className="text-xs font-medium tracking-wide select-none agent-thinking-glow font-sans">
                   Agent&apos;s Thinking
@@ -568,7 +568,7 @@ export function ChatView({
         </div>
 
         {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
-        <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 backdrop-blur-md rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
+        <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
           {/* Start of Bar: Plus Button for Memory Document Upload */}
           <input
             ref={chatFileInputRef}

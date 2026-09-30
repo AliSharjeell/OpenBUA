@@ -436,12 +436,12 @@ export function App() {
 
   return (
     <div className="relative h-screen w-full bg-zinc-950 text-zinc-100 antialiased font-sans select-none overflow-hidden">
-      {/* Top Blur Feather Overlay (Smooth feather gradient at the end of blur) */}
+      {/* Top Blur Feather Overlay (One consistent blur) */}
       <div
         className="pointer-events-none absolute top-0 left-0 right-0 h-16 z-20"
         style={{
-          backdropFilter: 'blur(5px)',
-          WebkitBackdropFilter: 'blur(5px)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
           maskImage: 'linear-gradient(to bottom, black 0%, black 35%, transparent 100%)',
           WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 35%, transparent 100%)',
         }}
@@ -455,14 +455,14 @@ export function App() {
             type="button"
             onClick={() => setIsSidebarOpen(true)}
             title="Open Menu"
-            className="w-9 h-9 rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
+            className="w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
           >
             <TwoLineMenu className="w-4 h-4 text-white" />
           </button>
         </div>
 
         {/* Center: Chat / Memory Floating Toggle with Drop Shadow */}
-        <div className="flex items-center p-0.5 bg-zinc-900/90 backdrop-blur-md border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+        <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
           <button
             type="button"
             onClick={() => setActiveNavTab('chat')}
