@@ -24,19 +24,17 @@ import { readFileContent } from '../services/pdf-parser';
 import { FormAgentHarness } from '../agent/form-agent';
 import { ChatView } from '../components/ChatView';
 import { MemoryView } from '../components/MemoryView';
-import { InspectorView } from '../components/InspectorView';
 import { SettingsView } from '../components/SettingsView';
 import {
   MessageSquare,
   Layers,
-  Scan,
   Settings,
   Plus,
   X,
 } from 'lucide-react';
 
 export function App() {
-  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'inspector' | 'settings'>('chat');
+  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings'>('chat');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [globalMemories, setGlobalMemories] = useState<UserDocument[]>([]);
   const [tabMemories, setTabMemories] = useState<UserDocument[]>([]);
@@ -352,21 +350,6 @@ export function App() {
     }
   };
 
-  const handleInspectorFillRequested = (promptText?: string) => {
-    setActiveNavTab('chat');
-    if (promptText && harnessRef.current) {
-      const userMsg: ChatMessage = {
-        id: `msg-${Date.now()}`,
-        role: 'user',
-        content: promptText,
-        timestamp: Date.now(),
-      };
-      const updated = [...messages, userMsg];
-      handleMessagesChange(updated);
-      harnessRef.current.prompt(promptText);
-    }
-  };
-
   const currentKey =
     settings.activeProvider === 'anthropic'
       ? settings.anthropic.apiKey
@@ -476,18 +459,6 @@ export function App() {
 
           <button
             className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
-              activeNavTab === 'inspector'
-                ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
-            }`}
-            onClick={() => setActiveNavTab('inspector')}
-          >
-            <Scan className="w-3.5 h-3.5" />
-            <span>DOM</span>
-          </button>
-
-          <button
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-full text-[11px] font-medium transition-colors ${
               activeNavTab === 'settings'
                 ? 'bg-zinc-900 text-zinc-100 border border-zinc-800 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 border border-transparent'
@@ -527,10 +498,6 @@ export function App() {
             onGlobalMemoriesChange={handleGlobalMemoriesChange}
             onTabMemoriesChange={handleTabMemoriesChange}
           />
-        )}
-
-        {activeNavTab === 'inspector' && (
-          <InspectorView onFillRequested={handleInspectorFillRequested} />
         )}
 
         {activeNavTab === 'settings' && (
