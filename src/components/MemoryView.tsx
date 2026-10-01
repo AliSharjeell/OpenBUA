@@ -186,7 +186,7 @@ export function MemoryView({
 
       {/* Add / Edit Memory Form Panel */}
       {isAddingNew && (
-        <Card className="border-zinc-800 bg-zinc-900/90 rounded-2xl shadow-md">
+        <Card className="border-zinc-800 bg-zinc-900/90 rounded-3xl shadow-md">
           <CardHeader className="p-3 pb-2 border-b border-zinc-800">
             <CardTitle className="text-xs font-semibold text-zinc-100">
               {isEditing
@@ -241,7 +241,7 @@ export function MemoryView({
       {/* Memory Cards List */}
       <div className="space-y-2">
         {activeMemories.length === 0 ? (
-          <div className="text-center py-8 border border-dashed border-zinc-800/80 rounded-2xl p-6">
+          <div className="text-center py-8 border border-dashed border-zinc-800/80 rounded-3xl p-6">
             <FileText className="w-7 h-7 text-zinc-600 mx-auto mb-2" />
             <p className="text-xs text-zinc-400 mb-1 font-medium">
               No {memoryScope === 'global' ? 'global' : 'tab'} memories yet
@@ -256,7 +256,7 @@ export function MemoryView({
           activeMemories.map((doc) => (
             <div
               key={doc.id}
-              className={`p-3 rounded-2xl transition-all cursor-pointer ${
+              className={`p-3.5 rounded-3xl transition-all cursor-pointer ${
                 doc.isActiveForContext
                   ? 'border border-zinc-800 bg-zinc-900/90 hover:border-zinc-700'
                   : 'border border-transparent bg-zinc-900/50 hover:bg-zinc-900/80'
@@ -269,7 +269,7 @@ export function MemoryView({
                   <button
                     type="button"
                     title={doc.isActiveForContext ? 'Turn off memory' : 'Turn on memory'}
-                    className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5 transition-all cursor-pointer ${
+                    className={`w-6 h-6 rounded-xl flex items-center justify-center shrink-0 mt-0.5 transition-all cursor-pointer ${
                       doc.isActiveForContext
                         ? 'bg-zinc-800 text-white'
                         : 'bg-zinc-800/40 text-transparent hover:text-zinc-500'
