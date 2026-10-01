@@ -212,7 +212,7 @@ export function MemoryView({
                 placeholder="Paste personal details, bio, or form answers here..."
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                className="font-mono text-[11px] rounded-xl bg-zinc-950/80 border-zinc-800 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-600"
+                className="font-sans text-[11px] leading-relaxed rounded-xl bg-zinc-950/80 border-zinc-800 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-600"
               />
             </div>
 
