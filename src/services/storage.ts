@@ -18,12 +18,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   openai: {
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
-    model: 'gpt-4o',
+    model: '6 Astra',
   },
   anthropic: {
     baseUrl: 'https://api.anthropic.com/v1',
     apiKey: '',
-    model: 'claude-3-7-sonnet-20250219',
+    model: 'Sonnet 5.5',
   },
   autoConfirmSubmit: true,
   systemInstruction: 'You are OpenBUA, an autonomous browser use assistant that helps users navigate, research, interact, and fill forms accurately using their active browser and stored documents.',
