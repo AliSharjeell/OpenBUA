@@ -799,16 +799,18 @@ export function App() {
             </button>
           </div>
         ) : activeNavTab === 'suggestions' ? (
-          <div className="flex items-center gap-1.5 h-8 px-4 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
-            <span className="text-xs font-semibold text-zinc-100 tracking-tight">Suggested memory</span>
-            {suggestedMemories.length > 0 && (
-              <span
-                className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white leading-none"
-                style={{ backgroundColor: '#007AFF' }}
-              >
-                {suggestedMemories.length}
-              </span>
-            )}
+          <div className="absolute inset-x-0 flex justify-center pointer-events-none">
+            <div className="flex items-center gap-1.5 h-8 px-4 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+              <span className="text-xs font-semibold text-zinc-100 tracking-tight">Suggested memory</span>
+              {suggestedMemories.length > 0 && (
+                <span
+                  className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white leading-none"
+                  style={{ backgroundColor: '#007AFF' }}
+                >
+                  {suggestedMemories.length}
+                </span>
+              )}
+            </div>
           </div>
         ) : (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
