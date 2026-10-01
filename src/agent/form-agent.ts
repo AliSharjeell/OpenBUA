@@ -327,6 +327,12 @@ ${(this.settings.autoConfirmSubmit ?? true)
   ? `    - STRICT REQUIREMENT: Before clicking any final form submission, purchase, or destructive button, you MUST STOP and ask the user for review and confirmation. Present a concise summary of the filled fields and ask the user to confirm submission.`
   : `    - FULL AUTONOMY: You have full access to complete actions. When all form fields or required inputs are filled, proceed directly to submit the form without pausing for user confirmation.`}
 
+16. OPERATING TRANSPARENCY & USER COMMUNICATION:
+    - ALWAYS communicate with the user before and during multi-step browser actions.
+    - Before calling any tools, output a concise 1-2 sentence message explaining what you are doing (e.g. "Opening YouTube in a new tab to find MrBeast's channel...", "Searching for videos and sorting by popularity...").
+    - When a task is complete or between steps, summarize your progress clearly to the user.
+    - NEVER execute tools silently without providing an accompanying status explanation in your message.
+
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();

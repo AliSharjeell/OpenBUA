@@ -14,6 +14,8 @@ import { ALL_AGENT_TOOLS } from './tools';
 import { ProviderConfig } from '../types';
 import { incrementGeminiDailyUsage } from '../services/storage';
 
+let lastFreeRequestTimestamp = 0;
+
 export function createCustomModel(config: ProviderConfig): Model<any> {
   return {
     id: config.model,
@@ -163,6 +165,7 @@ async function streamOpenAI(
   // Standard providers (Mimo, DeepSeek, OpenAI, Claude, OpenRouter, MiniMax) are NEVER throttled or compacted.
   const isGroq = endpoint.includes('api.groq.com/openai/v1/chat/completions');
   const isGemini = endpoint.includes('generativelanguage.googleapis.com') || (config.model || '').toLowerCase().includes('gemini');
+  const isFreeMode = Boolean(config.isFreeMode || config.mode === 'free');
 
   const flushPendingImages = (targetArray: any[]) => {
     if (pendingToolImages.length > 0 && !isGroq) {
@@ -346,10 +349,21 @@ async function streamOpenAI(
   }
 
   let response: Response | null = null;
-  const maxRetries = isGroq ? 4 : 2;
+  const maxRetries = isGroq ? 4 : isFreeMode ? 4 : 2;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let fetchError: any = null;
+
+    if (isFreeMode) {
+      const minSpacingMs = 3500;
+      const elapsed = Date.now() - lastFreeRequestTimestamp;
+      if (elapsed < minSpacingMs && lastFreeRequestTimestamp > 0) {
+        const sleepMs = minSpacingMs - elapsed;
+        await new Promise((r) => setTimeout(r, sleepMs));
+      }
+      lastFreeRequestTimestamp = Date.now();
+    }
+
     try {
       response = await fetch(endpoint, {
         method: 'POST',
@@ -385,6 +399,47 @@ async function streamOpenAI(
     }
 
     const errorBody = await response.text();
+
+    // Free Mode (Gemini Free Tier) 429 Rate Limit Interception & Auto-Waiting
+    if (response && response.status === 429 && isFreeMode && attempt < maxRetries) {
+      let waitSeconds = 30;
+      const retryDelayMatch = errorBody.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s?"/i);
+      const retryInMatch = errorBody.match(/retry in\s*(\d+(?:\.\d+)?)s/i);
+      const retryAfterHeader = response.headers?.get('retry-after');
+
+      if (retryDelayMatch && retryDelayMatch[1]) {
+        waitSeconds = Math.ceil(parseFloat(retryDelayMatch[1])) + 1;
+      } else if (retryInMatch && retryInMatch[1]) {
+        waitSeconds = Math.ceil(parseFloat(retryInMatch[1])) + 1;
+      } else if (retryAfterHeader && !isNaN(Number(retryAfterHeader))) {
+        waitSeconds = Math.ceil(Number(retryAfterHeader)) + 1;
+      } else {
+        waitSeconds = Math.min(60, Math.max(15, (attempt + 1) * 15));
+      }
+
+      const activeModelName = config.model || 'Gemini Free';
+      stream.push({
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: `\n⏳ Rate limit reached for ${activeModelName} (${attempt + 1}/${maxRetries}). Auto-waiting ${waitSeconds}s to resume (or switch model in Settings)...\n`,
+        partial: { role: 'assistant', content: [] } as any,
+      });
+
+      for (let s = waitSeconds; s > 0; s--) {
+        if (signal?.aborted) {
+          throw new Error('Request cancelled during rate limit wait');
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      stream.push({
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: `🔄 Quota window refreshed. Resuming task...\n`,
+        partial: { role: 'assistant', content: [] } as any,
+      });
+      continue;
+    }
 
     // Check for 413 (Payload Too Large) or 429 (Rate Limit - ITPM input or OTPM output tokens)
     const isRateOrSizeLimit = response.status === 413 || response.status === 429;
@@ -470,8 +525,8 @@ async function streamOpenAI(
       continue;
     }
 
-    // For non-Groq providers, retry on transient 5xx server errors or transient 429 rate limits
-    if (!isGroq && response && (response.status >= 500 || response.status === 429) && attempt < maxRetries) {
+    // For non-Groq, non-Free (BYOK) providers, retry on transient 5xx server errors or transient 429 rate limits
+    if (!isGroq && !isFreeMode && response && (response.status >= 500 || response.status === 429) && attempt < maxRetries) {
       console.warn(`[streamOpenAI] HTTP ${response.status} received on attempt ${attempt + 1}/${maxRetries + 1}. Retrying...`);
       const delayMs = Math.min(3000, 800 * Math.pow(2, attempt));
       await new Promise((r) => setTimeout(r, delayMs));
@@ -506,6 +561,7 @@ async function streamOpenAI(
     { id: string; name: string; argsStr: string; extra_content?: any; thought_signature?: string }
   >();
   let isInsideInlineThink = false;
+  let activeThinkClosingTag = '</think>';
 
   let buffer = '';
 
@@ -531,8 +587,15 @@ async function streamOpenAI(
         const delta = choice.delta;
         if (!delta) continue;
 
-        // Reasoning / Thinking delta (e.g., DeepSeek R1, OpenAI o1/o3-mini, Minimax)
-        const reasoningDelta = delta.reasoning_content || delta.reasoning || delta.thought || '';
+        // Reasoning / Thinking delta (Gemini reasoning_content/thought, DeepSeek R1, OpenAI o1/o3-mini, Minimax)
+        const rawReasoning = delta.reasoning_content ?? delta.reasoning ?? delta.thought ?? '';
+        let reasoningDelta = '';
+        if (typeof rawReasoning === 'string') {
+          reasoningDelta = rawReasoning;
+        } else if (typeof rawReasoning === 'object' && rawReasoning !== null) {
+          reasoningDelta = (rawReasoning as any).text || (rawReasoning as any).content || (rawReasoning as any).thought || '';
+        }
+
         if (reasoningDelta) {
           stream.push({
             type: 'thinking_delta' as any,
@@ -541,13 +604,22 @@ async function streamOpenAI(
           });
         }
 
-        // Text delta (with inline <think>...</think> tag interception)
+        // Text delta (with inline <think>...</think> and <thought>...</thought> tag interception)
         if (delta.content) {
           let textToEmit = delta.content;
 
           if (isInsideInlineThink) {
-            const endIdx = textToEmit.indexOf('</think>');
+            const endIdx =
+              textToEmit.indexOf(activeThinkClosingTag) !== -1
+                ? textToEmit.indexOf(activeThinkClosingTag)
+                : textToEmit.indexOf('</think>') !== -1
+                ? textToEmit.indexOf('</think>')
+                : textToEmit.indexOf('</thought>');
+
             if (endIdx !== -1) {
+              const matchedCloseTag = textToEmit.slice(endIdx).startsWith('</thought>')
+                ? '</thought>'
+                : '</think>';
               const thinkPart = textToEmit.slice(0, endIdx);
               if (thinkPart) {
                 stream.push({
@@ -557,7 +629,7 @@ async function streamOpenAI(
                 });
               }
               isInsideInlineThink = false;
-              textToEmit = textToEmit.slice(endIdx + 8);
+              textToEmit = textToEmit.slice(endIdx + matchedCloseTag.length);
             } else {
               stream.push({
                 type: 'thinking_delta' as any,
@@ -567,10 +639,26 @@ async function streamOpenAI(
               textToEmit = '';
             }
           } else {
-            const startIdx = textToEmit.indexOf('<think>');
+            const thinkIdx = textToEmit.indexOf('<think>');
+            const thoughtIdx = textToEmit.indexOf('<thought>');
+            let startIdx = -1;
+            let tagLen = 0;
+            let closingTag = '</think>';
+
+            if (thinkIdx !== -1 && (thoughtIdx === -1 || thinkIdx < thoughtIdx)) {
+              startIdx = thinkIdx;
+              tagLen = 7; // '<think>'.length
+              closingTag = '</think>';
+            } else if (thoughtIdx !== -1) {
+              startIdx = thoughtIdx;
+              tagLen = 9; // '<thought>'.length
+              closingTag = '</thought>';
+            }
+
             if (startIdx !== -1) {
+              activeThinkClosingTag = closingTag;
               const beforeThink = textToEmit.slice(0, startIdx);
-              const afterThink = textToEmit.slice(startIdx + 7);
+              const afterThink = textToEmit.slice(startIdx + tagLen);
 
               if (beforeThink) {
                 if (!textContentBlock) {
@@ -589,7 +677,7 @@ async function streamOpenAI(
                 });
               }
 
-              const endIdx = afterThink.indexOf('</think>');
+              const endIdx = afterThink.indexOf(closingTag);
               if (endIdx !== -1) {
                 const thinkPart = afterThink.slice(0, endIdx);
                 if (thinkPart) {
@@ -600,7 +688,7 @@ async function streamOpenAI(
                   });
                 }
                 isInsideInlineThink = false;
-                textToEmit = afterThink.slice(endIdx + 8);
+                textToEmit = afterThink.slice(endIdx + closingTag.length);
               } else {
                 isInsideInlineThink = true;
                 if (afterThink) {
