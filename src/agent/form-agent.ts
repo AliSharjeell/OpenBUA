@@ -4,7 +4,7 @@ import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS, createAgentTools } from './tools';
 import { createCustomModel, createStreamFn } from './stream-adapter';
 import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
-import { setActiveSessionIdState, getScratchpad, appendToScratchpad } from '../services/storage';
+import { setActiveSessionIdState, getScratchpad, appendToScratchpad, loadSuggestedMemories, saveSuggestedMemory } from '../services/storage';
 
 export interface AgentUpdateListeners {
   onMessageDelta?: (text: string) => void;
@@ -143,57 +143,126 @@ export function convertChatMessagesToAgentMessages(
 }
 
 /**
- * Automatically extracts research discoveries and qualifying candidates (e.g. society inductions,
- * event dates, flight options, job criteria) from turn thinking and response text.
+ * Automatically detects user profile details, affiliations, and preferences
+ * from the user's prompt and queues them as Suggested Memories for 1-click review.
  */
-export function extractResearchFindings(thinking?: string, text?: string): string[] {
-  const combined = [thinking || '', text || ''].join('\n');
-  if (!combined.trim()) return [];
+export async function detectAndQueueMemorySuggestions(
+  input: string,
+  sessionId: string,
+  existingMemories: UserDocument[]
+): Promise<void> {
+  try {
+    const existingSugs = await loadSuggestedMemories(sessionId);
+    const existingTitles = new Set([
+      ...existingMemories.map((m) => m.title.toLowerCase()),
+      ...existingSugs.map((s) => s.title.toLowerCase()),
+    ]);
+    const existingContents = new Set([
+      ...existingMemories.map((m) => m.content.toLowerCase()),
+      ...existingSugs.map((s) => s.content.toLowerCase()),
+    ]);
 
-  // Split by newlines, bullet points, or sentence boundaries (. followed by space/capital letter)
-  const segments = combined
-    .split(/\n+|(?<=[.!?])\s+(?=[A-Z])/)
-    .map((s) => s.trim().replace(/^[-*•#\d.]+\s*/, '').trim())
-    .filter((s) => s.length >= 15 && s.length <= 350);
+    const suggestionsToQueue: Array<{
+      title: string;
+      content: string;
+      category: 'profile' | 'preference' | 'workflow' | 'fact' | 'task';
+      reason: string;
+    }> = [];
 
-  const findings: string[] = [];
+    // 1. Detect Email Addresses (e.g. k230904@nu.edu.pk, alex@gmail.com)
+    const emailMatches = input.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+    if (emailMatches) {
+      for (const email of emailMatches) {
+        const lowerEmail = email.toLowerCase();
+        if (!existingContents.has(lowerEmail)) {
+          const isStudent = lowerEmail.includes('.edu') || lowerEmail.includes('nu.edu.pk');
+          const title = isStudent ? 'Student Email' : 'Email Address';
+          if (!existingTitles.has(title.toLowerCase())) {
+            suggestionsToQueue.push({
+              title,
+              content: email,
+              category: 'profile',
+              reason: 'Identified email address provided in chat request',
+            });
+          }
 
-  for (const seg of segments) {
-    // Exclude meta-planning / intent / instructions
-    if (
-      /^(now\s+let\s+me|let'?s\s+|i\s+will\s+|i\s+should\s+|need\s+to\s+|first,\s+|next,\s+|let\s+me\s+|i'll\s+|we\s+need\s+to|checking\s+if)/i.test(
-        seg
-      )
-    ) {
-      continue;
+          // If FAST NUCES university email
+          if (lowerEmail.endsWith('@nu.edu.pk') || lowerEmail.includes('nu.edu.pk')) {
+            if (
+              !existingTitles.has('university') &&
+              !existingTitles.has('university affiliation') &&
+              !existingContents.has('national university of computer and emerging sciences (fast-nuces)')
+            ) {
+              suggestionsToQueue.push({
+                title: 'University Affiliation',
+                content: 'National University of Computer and Emerging Sciences (FAST-NUCES)',
+                category: 'profile',
+                reason: 'Inferred from @nu.edu.pk student email domain',
+              });
+            }
+          }
+        }
+      }
     }
-    // Exclude explicit negatives
-    if (
-      /(?:does\s+not\s+qualify|doesn'?t\s+qualify|not\s+qualifying|not\s+eligible|excluded|before\s+oct|prior\s+to\s+oct)/i.test(
-        seg
-      )
-    ) {
-      continue;
+
+    // 2. Detect University / College Mentions (e.g. FAST, NUCES)
+    if (/\b(?:fast[\s-]*(?:nuces|university)?|nuces)\b/i.test(input)) {
+      if (
+        !existingTitles.has('university') &&
+        !existingTitles.has('university affiliation') &&
+        !existingContents.has('national university of computer and emerging sciences (fast-nuces)')
+      ) {
+        suggestionsToQueue.push({
+          title: 'University Affiliation',
+          content: 'National University of Computer and Emerging Sciences (FAST-NUCES)',
+          category: 'profile',
+          reason: 'Mentioned FAST University in chat prompt',
+        });
+      }
     }
 
-    // Must match discovery / qualification patterns
-    const hasQualifySignal = /(?:qualif(?:ies|ied|y|ying)?|match(?:es|ed)?|meets?\s+criteria|eligible)/i.test(
-      seg
-    );
-    const hasDateSignal = /(?:oct(?:ober)?|\b\d{1,2}(?:st|nd|rd|th)?\b|day\s*\d|interview|induction|deadline|venue)/i.test(
-      seg
-    );
-    const hasInductionSignal = /(?:induction|inductions?|registration|audition|orientation)\s+(?:open|opened|start|starts|scheduled|held|is|are|on)/i.test(
-      seg
-    );
-
-    if ((hasQualifySignal && hasDateSignal) || hasInductionSignal) {
-      const clean = seg.replace(/[.]+$/, '');
-      findings.push(clean);
+    // 3. Detect Extracurricular / Society Interests
+    if (/(?:societ(?:y|ies)|induction|inductions|excom|club\s+recruitment)/i.test(input)) {
+      if (
+        !existingTitles.has('extracurricular interests') &&
+        !existingTitles.has('society interests')
+      ) {
+        suggestionsToQueue.push({
+          title: 'Extracurricular Interests',
+          content: 'Active interest in university student societies, club inductions, and executive committee roles',
+          category: 'preference',
+          reason: 'Inferred from request to discover university society inductions',
+        });
+      }
     }
+
+    // 4. Detect Phone Numbers
+    const phoneMatch = input.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
+    if (phoneMatch && !existingContents.has(phoneMatch[0].trim())) {
+      if (!existingTitles.has('phone number') && !existingTitles.has('contact phone')) {
+        suggestionsToQueue.push({
+          title: 'Phone Number',
+          content: phoneMatch[0].trim(),
+          category: 'profile',
+          reason: 'Detected contact phone number in chat prompt',
+        });
+      }
+    }
+
+    for (const item of suggestionsToQueue) {
+      await saveSuggestedMemory({
+        id: `sug-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        title: item.title,
+        content: item.content,
+        category: item.category,
+        reason: item.reason,
+        createdAt: Date.now(),
+        sessionId,
+      });
+    }
+  } catch (err) {
+    console.warn('[FormAgentHarness] Proactive suggestion detection error:', err);
   }
-
-  return findings;
 }
 
 export class FormAgentHarness {
@@ -269,52 +338,66 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - Never skip the <thought>...</thought> block on any turn.
 
 0.5. CRITICAL PROTOCOL: INCREMENTAL REPORTING & 1-ITEM CYCLE ('append_to_preview'):
+   - LIVE PREVIEW IS A CUSTOMER-FACING REPORT AREA:
+     * ONLY append clean, finalized findings (e.g. markdown table rows or clean summary sections).
+     * NEVER write internal reasoning, thoughts, searching status, or meta-planning into 'append_to_preview'. Put all thoughts strictly inside <thought>...</thought> tags!
    - WORKING MEMORY PERSISTENCE:
      * Your internal reasoning context gets compressed and pruned over long tasks.
-     * You MUST treat 'append_to_preview' (or 'scratchpad') as your persistent external memory.
+     * You MUST treat 'append_to_preview' as your persistent external data record.
      * NEVER wait until all search results or emails are examined before writing.
    - THE 1-ITEM CYCLE:
      Whenever processing a list of items (e.g. emails, search results, candidate threads, tabs):
      * Step A: Open 1 item.
      * Step B: Extract relevant details (or confirm it is irrelevant).
-     * Step C: If relevant, IMMEDIATELY invoke 'append_to_preview' with markdown for that item.
+     * Step C: If relevant, IMMEDIATELY invoke 'append_to_preview' with a clean markdown table row for that item.
      * Step D: Only after the tool returns success, navigate to the next item.
-   - PROTOCOL VIOLATION:
-     If you visit 2 relevant items without calling 'append_to_preview', it is considered a strict protocol violation.
    - ATOMIC TABLE PATTERN:
      In your very first research action, initialize the table header once:
-     append_to_preview({ content: "# Discovered Society Inductions (Fall 2026)\n\n| Society | Induction Dates | Venue & Timing | Status |\n| :--- | :--- | :--- | :--- |\n" })
+     append_to_preview({ content: "# Societies with Inductions — 2nd October Onwards\n\n| # | Society | Induction Date | Venue / Time | Notes |\n|---|---|---|---|---|\n" })
      Then for each item discovered, emit ONE atomic table row:
-     append_to_preview({ content: "| GitHub Campus Club | Oct 1 & Oct 2 | Room R-11, AB1 (12:35 PM) | Open |\n" })
+     append_to_preview({ content: "| 1 | FAST Entrepreneurship Society (FES) | Date not specified (email sent Oct 1) | Library Discussion Room (12:30–1:30 PM) | ExCom 2026–27 |\n" })
+
+0.6. MANDATORY PROACTIVE MEMORY SUGGESTIONS ('suggest_memory'):
+   - DETECT USER DETAILS IMMEDIATELY ON TURN 1 AND THROUGHOUT RUN:
+     * Proactively inspect the user's prompt and active browsing data for personal facts, contact details, affiliations, or preferences:
+       - Student / Contact Email (e.g. k230904@nu.edu.pk) -> suggest_memory({ title: "Student Email", content: "k230904@nu.edu.pk", category: "profile", reason: "Identified student email in request" })
+       - University Affiliation (e.g. FAST-NUCES from @nu.edu.pk) -> suggest_memory({ title: "University Affiliation", content: "National University of Computer and Emerging Sciences (FAST-NUCES)", category: "profile", reason: "Inferred from @nu.edu.pk student domain" })
+       - Extracurricular Interests (e.g. university societies) -> suggest_memory({ title: "Extracurricular Interests", content: "Active interest in university student societies and executive committee inductions", category: "preference", reason: "Inferred from society induction research inquiry" })
+       - Full Name, Phone numbers, Major/Degree, Graduation Year, Career Roles.
+     * Always call 'suggest_memory' proactively whenever you see such facts! The user will see a badge on their top-right Suggested Memories button and can approve them with 1 click.
 
    - FEW-SHOT REASONING TRAJECTORY (FOLLOW THIS EXACT PATTERN):
-     User: Find society inductions from Gmail.
+     User: "i want you to access my gmail (k230904@nu.edu.pk) and find me the societies that have their inductions opened 2nd october onwards for all societies."
      Turn 1:
      <thought>
-     I need to initialize the preview with a table structure, then check emails one by one and append rows.
+     The user provided their student email k230904@nu.edu.pk and university context. I should proactively suggest saving this email, university affiliation, and society interests to memories, and initialize the preview table.
      </thought>
-     Tool Call: append_to_preview({ content: "# Society Inductions (Fall 2026)\n\n| Society | Dates | Venue | Link |\n|---|---|---|---|\n" })
-     Observation: Appended to Live Preview successfully.
+     Tool Call: suggest_memory({ title: "Student Email", content: "k230904@nu.edu.pk", category: "profile", reason: "Student email provided in prompt" })
+     Tool Call: suggest_memory({ title: "University Affiliation", content: "National University of Computer and Emerging Sciences (FAST-NUCES)", category: "profile", reason: "Identified from @nu.edu.pk domain" })
+     Tool Call: suggest_memory({ title: "Extracurricular Interests", content: "Active interest in university student societies and executive committee inductions", category: "preference", reason: "Inferred from society induction research task" })
+     Tool Call: append_to_preview({ content: "# Societies with Inductions — 2nd October Onwards\n\n| # | Society | Induction Date | Venue / Time | Notes |\n|---|---|---|---|---|\n" })
+     Observation: Suggested memories queued & Table initialized in Live Preview.
 
      Turn 2:
      <thought>
-     Opening first email "FES Inductions".
+     Now navigating directly to Gmail search results URL to inspect induction emails without relying on browser back button.
      </thought>
-     Tool Call: click_element({ text: "Recruitment of inductions" })
-     Observation: Email loaded. FES applications open Oct 1, venue E32.
+     Tool Call: navigate_browser_tab({ url: "https://mail.google.com/mail/u/3/#search/in%3Aanywhere+after%3A2026%2F09%2F28+(induction+OR+inductions)" })
+     Observation: Email list loaded with relevant society threads.
 
      Turn 3:
      <thought>
-     Found relevant details for FES. Appending row immediately before going back.
+     Opening thread 1: TLC Inductions.
      </thought>
-     Tool Call: append_to_preview({ content: "| FAST Entrepreneurship Society | Oct 1 (Ongoing) | E32 (12:30 PM) | [Form](...) |\n" })
-     Observation: Appended to Live Preview successfully.
+     Tool Call: click_element({ text: "The Literary Club" })
+     Observation: TLC dates: Day 1 Oct 1, Day 2 Oct 2 (10:00am–3:30pm). Matches Oct 2 onwards.
 
      Turn 4:
      <thought>
-     FES row recorded. Now navigating directly to the Gmail search results URL to check the next society without relying on browser back button.
+     Appending row 1 for TLC to live preview immediately.
      </thought>
-     Tool Call: navigate_browser_tab({ url: "https://mail.google.com/mail/u/3/#search/in%3Aanywhere+after%3A2026%2F09%2F28+(induction+OR+inductions)" })
+     Tool Call: append_to_preview({ content: "| 1 | The Literary Club (TLC) | Thu Oct 1 & Fri Oct 2 (10:00am–3:30pm) | Day 1: LLC; Day 2: S2, AB1 | Apply online + interview |\n" })
+     Observation: Appended row to Live Preview successfully.
 
 1. USER'S PRIMARY BROWSER & SIGNED-IN SESSIONS:
    - You run directly inside the user's everyday personal desktop browser.
@@ -476,15 +559,6 @@ ${(this.settings.autoConfirmSubmit ?? true)
     - Put your internal planning, DOM analysis, and tool decisions inside <thought>...</thought> tags.
     - When communicating directly to the user (e.g. asking a question, reporting results, or summarizing completed work), output clean text outside of the <thought> tags.
     - When a task is complete or between steps, summarize your progress clearly to the user.
-
-18. AUTOMATIC MEMORY SUGGESTION PROTOCOL ('suggest_memory'):
-    - While researching, browsing, or executing tasks, proactively detect persistent, high-value facts about the user or repeatable task steps:
-      * User profile & contact details (e.g. phone number, full name, address, email, portfolio URL, LinkedIn profile, graduation year, work authorization).
-      * User preferences (e.g. "Prefers economy class on Fly Jinnah", "Prefers remote AI engineer roles", "Use authuser=3 for university portal").
-      * Repeatable task workflows (e.g. "Step-by-step application flow for Skild AI").
-    - When you discover such facts or preferences, immediately call 'suggest_memory' with a concise title, content, category, and reason.
-    - The user will see this suggestion in their top-right Suggested Memories button and can approve it with 1 click as Global Memory (available in all chats) or Tab Memory, or discard it.
-    - Do not suggest temporary single-use session noise (like ephemeral search URLs or one-time verification codes).
 
 ${docsSummary}
 
@@ -660,42 +734,6 @@ ${this.settings.systemInstruction || ''}`.trim();
           (hasTools && this.currentStreamingText.trim() ? this.currentStreamingText.trim() : undefined);
         const textForTurn = hasTools && !this.currentThinkingText ? '' : this.currentStreamingText;
 
-        // Safety fallback: If agent detected qualifying findings in its reasoning or turn text
-        // but omitted calling 'append_to_preview' or 'scratchpad', automatically sync to preview & record tool call
-        const hasPreviewCall = Array.from(this.activeToolCalls.values()).some(
-          (tc) => tc.toolName === 'scratchpad' || tc.toolName === 'append_to_preview'
-        );
-        if (!hasPreviewCall) {
-          const findings = extractResearchFindings(thinkingForTurn, textForTurn);
-          if (findings.length > 0) {
-            try {
-              const currentPad = await getScratchpad(this.sessionId);
-              const newFindings = findings.filter(
-                (f) => !currentPad.toLowerCase().includes(f.toLowerCase().slice(0, 30))
-              );
-              if (newFindings.length > 0) {
-                const formatted = newFindings.map((f) => `- ${f}`).join('\n');
-                const appendText = `### Discovered Finding\n${formatted}\n`;
-                await appendToScratchpad(appendText, this.sessionId);
-                const tcId = `tc_auto_preview_${Date.now()}`;
-                const autoTc: ToolCallState = {
-                  id: tcId,
-                  toolName: 'append_to_preview',
-                  args: { content: appendText },
-                  status: 'success',
-                  result: `Appended to Live Preview:\n${appendText}`,
-                  timestamp: Date.now(),
-                };
-                this.activeToolCalls.set(tcId, autoTc);
-                this.listeners.onToolCallStart?.(autoTc);
-                this.listeners.onToolCallEnd?.(autoTc);
-              }
-            } catch (err) {
-              console.error('[FormAgentHarness] Auto preview sync error:', err);
-            }
-          }
-        }
-
         this.listeners.onTurnComplete?.(
           textForTurn,
           Array.from(this.activeToolCalls.values()),
@@ -720,6 +758,9 @@ ${this.settings.systemInstruction || ''}`.trim();
       this.listeners.onStatusChange?.(false);
       throw new Error(err);
     }
+
+    // Proactively scan user input for personal details, student email, university, or interests
+    await detectAndQueueMemorySuggestions(input, this.sessionId, this.documents);
 
     if (!this.agent) {
       this.setupAgent();
