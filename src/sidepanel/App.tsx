@@ -854,8 +854,10 @@ export function App() {
           </div>
         )}
 
-        {/* Right: Circle Suggested Memories Button with Notification Dot */}
-        {activeNavTab !== 'suggestions' && (
+        {/* Right: Circle Suggested Memories Button with Notification Dot (hidden on suggestions page, replaced by spacer to keep pill centered) */}
+        {activeNavTab === 'suggestions' ? (
+          <div className="w-9 h-9 shrink-0" aria-hidden="true" />
+        ) : (
         <div className="flex items-center pointer-events-auto">
           <button
             type="button"
