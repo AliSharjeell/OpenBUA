@@ -5,6 +5,7 @@ import {
   ChatMessage,
   ToolCallState,
   ChatSession,
+  ModelMode,
 } from '../types';
 import {
   loadSettings,
@@ -37,6 +38,7 @@ import {
   Pencil,
   Trash2,
   Check,
+  ArrowLeft,
 } from 'lucide-react';
 
 function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
@@ -60,6 +62,7 @@ function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
 
 export function App() {
   const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings'>('chat');
+  const [settingsTab, setSettingsTab] = useState<ModelMode>(DEFAULT_SETTINGS.selectedMode || 'free');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [globalMemories, setGlobalMemories] = useState<UserDocument[]>([]);
   const [tabMemories, setTabMemories] = useState<UserDocument[]>([]);
@@ -125,6 +128,7 @@ export function App() {
       ]);
 
       setSettings(loadedSettings);
+      setSettingsTab(loadedSettings.selectedMode || 'free');
       setGlobalMemories(loadedGlobal);
       setSessions(loadedSessions);
       setActiveNavTab(lastActive.navTab || 'chat');
@@ -145,10 +149,14 @@ export function App() {
         onStatusChange: (busy) => {
           setIsBusy(busy);
           if (busy) {
-            thinkingStartTimeRef.current = Date.now();
+            if (!thinkingStartTimeRef.current) {
+              thinkingStartTimeRef.current = Date.now();
+            }
             thinkingDurationMsRef.current = null;
           } else {
             setActiveTool(null);
+            thinkingStartTimeRef.current = null;
+            thinkingDurationMsRef.current = null;
           }
         },
         onMessageDelta: (deltaText) => {
@@ -158,12 +166,13 @@ export function App() {
           const duration = thinkingDurationMsRef.current ?? undefined;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant' && last.isStreaming) {
+            if (last && last.role === 'assistant') {
               const updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
                 content: deltaText,
                 thinkingDurationMs: duration ?? last.thinkingDurationMs,
+                isStreaming: true,
               };
               return updated;
             } else {
@@ -188,11 +197,12 @@ export function App() {
           }
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant' && last.isStreaming) {
+            if (last && last.role === 'assistant') {
               const updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
                 thinking: thinkingText,
+                isStreaming: true,
               };
               return updated;
             } else {
@@ -340,7 +350,9 @@ export function App() {
       // Non-blocking socket pre-warm on launch to eliminate cold-start TLS/DNS handshake delay & Failed to fetch
       try {
         const activeCfg =
-          loadedSettings.activeProvider === 'anthropic'
+          loadedSettings.selectedMode === 'free'
+            ? loadedSettings.free
+            : loadedSettings.activeProvider === 'anthropic'
             ? loadedSettings.anthropic
             : loadedSettings.openai;
         if (activeCfg?.baseUrl && activeCfg.apiKey?.trim()) {
@@ -438,6 +450,10 @@ export function App() {
 
   const handleSettingsSaved = (updated: AppSettings) => {
     setSettings(updated);
+    setSettingsTab(updated.selectedMode || 'free');
+    if (harnessRef.current) {
+      harnessRef.current.updateConfig(updated, activeDocuments);
+    }
   };
 
   const handleGlobalMemoriesChange = (updated: UserDocument[]) => {
@@ -479,7 +495,9 @@ export function App() {
   };
 
   const currentKey =
-    settings.activeProvider === 'anthropic'
+    settings.selectedMode === 'free'
+      ? settings.free?.apiKey
+      : settings.activeProvider === 'anthropic'
       ? settings.anthropic.apiKey
       : settings.openai.apiKey;
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
@@ -504,55 +522,84 @@ export function App() {
 
       {/* Floating Top Header (Positioned absolute over viewport, zero solid strip) */}
       <header className="absolute top-2.5 left-0 right-0 z-30 px-3 flex items-center justify-between pointer-events-none">
-        {/* Left: Circle 2-Line Hamburger Button */}
+        {/* Left: Circle Back Button (in Settings) OR 2-Line Hamburger Button (in Chat/Memory) */}
         <div className="flex items-center pointer-events-auto">
-          <button
-            type="button"
-            onClick={() => setIsSidebarOpen(true)}
-            title="Open Menu"
-            className="w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
-          >
-            <TwoLineMenu className="w-4 h-4 text-white" />
-          </button>
-        </div>
-
-        {/* Center: Chat / Memory Floating Toggle with Drop Shadow */}
-        <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
-          <button
-            type="button"
-            onClick={() => handleSelectNavTab('chat')}
-            className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
-              activeNavTab === 'chat'
-                ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            Chat
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSelectNavTab('memory')}
-            className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
-              activeNavTab === 'memory'
-                ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            Memory
-          </button>
-        </div>
-
-        {/* Right: Key setup or spacer */}
-        <div className="flex items-center justify-end min-w-[36px] pointer-events-auto">
-          {!hasKey && (
+          {activeNavTab === 'settings' ? (
             <button
-              onClick={() => handleSelectNavTab('settings')}
-              className="text-[10px] font-medium py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full transition-colors shadow-md"
+              type="button"
+              onClick={() => handleSelectNavTab('chat')}
+              title="Back to Chat"
+              className="w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
             >
-              Setup Key
+              <ArrowLeft className="w-4 h-4 text-white" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(true)}
+              title="Open Menu"
+              className="w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
+            >
+              <TwoLineMenu className="w-4 h-4 text-white" />
             </button>
           )}
         </div>
+
+        {/* Center: Chat / Memory Floating Toggle OR Free / BYOK Toggle in Settings */}
+        {activeNavTab === 'settings' ? (
+          <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => setSettingsTab('free')}
+              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                settingsTab === 'free'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Free
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettingsTab('byok')}
+              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                settingsTab === 'byok'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              BYOK
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => handleSelectNavTab('chat')}
+              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                activeNavTab === 'chat'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectNavTab('memory')}
+              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                activeNavTab === 'memory'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Memory
+            </button>
+          </div>
+        )}
+
+        {/* Right: Balanced spacer matching hamburger button */}
+        <div className="w-9 pointer-events-none" />
       </header>
 
       {/* Backdrop Overlay (blurs background behind sidebar without dimming/lowering opacity) */}
@@ -577,8 +624,7 @@ export function App() {
         aria-hidden={!isSidebarOpen}
       >
           {/* Drawer Header (without dividing line, without cross icon) */}
-          <div className="p-4 pb-2 flex items-center gap-2">
-            <img src="./icons/icon48.png" alt="OpenBUA Logo" className="w-5 h-5 rounded-md" />
+          <div className="p-4 pb-2 flex items-center">
             <span className="font-bold text-sm tracking-tight text-white">
               OpenBUA
             </span>
@@ -748,6 +794,8 @@ export function App() {
           <SettingsView
             settings={settings}
             onSettingsSaved={handleSettingsSaved}
+            activeTab={settingsTab}
+            onTabChange={setSettingsTab}
           />
         )}
       </main>

@@ -74,6 +74,9 @@ export function convertChatMessagesToAgentMessages(
           id: tc.id,
           name: tc.toolName,
           arguments: tc.args || {},
+          args: tc.args || {},
+          extra_content: tc.extra_content,
+          thought_signature: tc.thought_signature,
         });
       }
 
@@ -142,6 +145,7 @@ export class FormAgentHarness {
   private activeToolCalls = new Map<string, ToolCallState>();
   private currentStreamingText = '';
   private currentThinkingText = '';
+  private sessionThinkingText = '';
   private chatHistory: ChatMessage[] = [];
   private sessionId: string = 'session_default';
 
@@ -196,6 +200,9 @@ export class FormAgentHarness {
     return `You are OpenBUA (Open Browser Use Agent), an autonomous browser extension agent that uses the user's active browser to navigate, research, extract data, interact with elements, fill forms, and automate web tasks directly.
 
 CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
+0. REASONING & CHAIN-OF-THOUGHT MANDATE:
+   - For every user message or turn, you must FIRST reason step-by-step: understand the user's intent, inspect what needs to be done, evaluate the browser context, and plan your immediate action or response before executing tools or outputting your response.
+   - Always think concisely step-by-step.
 1. USER'S PRIMARY BROWSER & SIGNED-IN SESSIONS:
    - You run directly inside the user's everyday personal desktop browser.
    - ALWAYS assume the user is ALREADY signed into their accounts (Google, YouTube, GitHub, Twitter/X, Reddit, work portals, etc.) unless an explicit "Sign in" button is visible and blocking form interaction.
@@ -319,22 +326,48 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
       6. Call 'switch_browser_tab' back to the original form tab ID.
       7. Continue filling the form with the information you gathered.
     - It is SAFE to use 'navigate_browser_tab' ONLY when you are not mid-form (e.g. the user just asked you to go to a URL, or you haven't started filling anything yet).
+15. SUBMISSION PERMISSION (${(this.settings.autoConfirmSubmit ?? true) ? 'ASK FOR REVIEW' : 'FULL ACCESS'}):
+${(this.settings.autoConfirmSubmit ?? true)
+  ? `    - STRICT REQUIREMENT: Before clicking any final form submission, purchase, or destructive button, you MUST STOP and ask the user for review and confirmation. Present a concise summary of the filled fields and ask the user to confirm submission.`
+  : `    - FULL AUTONOMY: You have full access to complete actions. When all form fields or required inputs are filled, proceed directly to submit the form without pausing for user confirmation.`}
+
+16. OPERATING TRANSPARENCY & USER COMMUNICATION:
+    - ALWAYS communicate with the user before and during multi-step browser actions.
+    - Before calling any tools, output a concise 1-2 sentence message explaining what you are doing (e.g. "Opening YouTube in a new tab to find MrBeast's channel...", "Searching for videos and sorting by popularity...").
+    - When a task is complete or between steps, summarize your progress clearly to the user.
+    - NEVER execute tools silently without providing an accompanying status explanation in your message.
 
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
   }
 
+  public getActiveConfig(): ProviderConfig {
+    if (this.settings.selectedMode === 'free') {
+      return {
+        provider: 'openai',
+        baseUrl: this.settings.free?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/',
+        apiKey: this.settings.free?.apiKey || '',
+        model: this.settings.free?.model || 'gemini-3.5-flash-lite',
+        isFreeMode: true,
+        mode: 'free',
+      };
+    }
+    const isAnthropic = this.settings.activeProvider === 'anthropic';
+    const cfg = isAnthropic ? this.settings.anthropic : this.settings.openai;
+    return {
+      provider: this.settings.activeProvider,
+      baseUrl: cfg.baseUrl,
+      apiKey: cfg.apiKey,
+      model: cfg.model,
+      isFreeMode: false,
+      mode: 'byok',
+    };
+  }
+
   public setConversationHistory(history: ChatMessage[]) {
     this.chatHistory = history;
-    const providerConfig =
-      this.settings.activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
-    const config = {
-      provider: this.settings.activeProvider,
-      baseUrl: providerConfig.baseUrl,
-      apiKey: providerConfig.apiKey,
-      model: providerConfig.model,
-    };
+    const config = this.getActiveConfig();
     const agentMessages = convertChatMessagesToAgentMessages(this.chatHistory, config);
     if (this.agent) {
       try {
@@ -351,14 +384,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     if (initialHistory) {
       this.chatHistory = initialHistory;
     }
-    const activeProvider = this.settings.activeProvider;
-    const providerConfig = activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
-    const config = {
-      provider: activeProvider,
-      baseUrl: providerConfig.baseUrl,
-      apiKey: providerConfig.apiKey,
-      model: providerConfig.model,
-    };
+    const config = this.getActiveConfig();
 
     const model = createCustomModel(config);
     const systemPrompt = this.buildSystemPrompt();
@@ -387,6 +413,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         this.listeners.onStatusChange?.(true);
         this.currentStreamingText = '';
         this.currentThinkingText = '';
+        this.sessionThinkingText = '';
         this.activeToolCalls.clear();
         break;
 
@@ -403,7 +430,14 @@ ${this.settings.systemInstruction || ''}`.trim();
             this.listeners.onMessageDelta?.(this.currentStreamingText);
           } else if (ame.type === 'thinking_delta') {
             this.currentThinkingText += ame.delta;
-            this.listeners.onThinkingDelta?.(this.currentThinkingText);
+            if (!this.sessionThinkingText) {
+              this.sessionThinkingText = ame.delta;
+            } else if (this.currentThinkingText === ame.delta && !this.sessionThinkingText.endsWith('\n\n')) {
+              this.sessionThinkingText += `\n\n${ame.delta}`;
+            } else {
+              this.sessionThinkingText += ame.delta;
+            }
+            this.listeners.onThinkingDelta?.(this.sessionThinkingText);
           } else if (ame.type === 'toolcall_start') {
             const tc = ame.partial?.content?.[ame.contentIndex];
             if (tc && tc.type === 'toolCall') {
@@ -413,6 +447,8 @@ ${this.settings.systemInstruction || ''}`.trim();
                 args: tc.args || {},
                 status: 'running',
                 timestamp: Date.now(),
+                extra_content: (tc as any).extra_content,
+                thought_signature: (tc as any).thought_signature,
               };
               this.activeToolCalls.set(tc.id, toolState);
               this.listeners.onToolCallStart?.(toolState);
@@ -423,6 +459,8 @@ ${this.settings.systemInstruction || ''}`.trim();
               const existing = this.activeToolCalls.get(tc.id);
               if (existing) {
                 existing.args = tc.args;
+                if ((tc as any).extra_content) existing.extra_content = (tc as any).extra_content;
+                if ((tc as any).thought_signature) existing.thought_signature = (tc as any).thought_signature;
                 this.listeners.onToolCallStart?.(existing);
               }
             }
@@ -476,7 +514,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         this.listeners.onTurnComplete?.(
           this.currentStreamingText,
           Array.from(this.activeToolCalls.values()),
-          this.currentThinkingText || undefined
+          this.sessionThinkingText || this.currentThinkingText || undefined
         );
         break;
 
@@ -487,10 +525,11 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public async prompt(input: string): Promise<void> {
-    const providerConfig =
-      this.settings.activeProvider === 'anthropic' ? this.settings.anthropic : this.settings.openai;
-    if (!providerConfig.apiKey || !providerConfig.apiKey.trim()) {
-      const err = `Please enter your ${this.settings.activeProvider.toUpperCase()} API Key in Settings to continue.`;
+    const config = this.getActiveConfig();
+    if (!config.apiKey || !config.apiKey.trim()) {
+      const modeLabel =
+        this.settings.selectedMode === 'free' ? 'Gemini Free' : this.settings.activeProvider.toUpperCase();
+      const err = `Please enter your ${modeLabel} API Key in Settings to continue.`;
       this.listeners.onError?.(err);
       this.listeners.onStatusChange?.(false);
       throw new Error(err);
@@ -546,6 +585,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     this.activeToolCalls.clear();
     this.currentStreamingText = '';
     this.currentThinkingText = '';
+    this.sessionThinkingText = '';
     this.listeners.onStatusChange?.(false);
     this.setupAgent();
   }

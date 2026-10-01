@@ -1,6 +1,6 @@
 {
   "name": "openbua-extension",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "OpenBUA - Open Browser Use Agent Chrome Extension powered by pi-agent-core and pi-ai",
   "type": "module",

@@ -7,18 +7,26 @@ import {
   createAssistantMessageEventStream,
   Model,
   TextContent,
+  ThinkingContent,
   ToolCall,
   TranscriptContext,
 } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS } from './tools';
 import { ProviderConfig } from '../types';
+import { incrementGeminiDailyUsage } from '../services/storage';
+
+let lastFreeRequestTimestamp = 0;
 
 export function createCustomModel(config: ProviderConfig): Model<any> {
+  const isGemini =
+    (config.model || '').toLowerCase().includes('gemini') ||
+    (config.baseUrl || '').includes('generativelanguage.googleapis.com');
   return {
     id: config.model,
     name: config.model,
     provider: config.provider,
     api: config.provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+    reasoning: isGemini || false,
     capabilities: ['tools', 'streaming', 'image'],
   } as unknown as Model<any>;
 }
@@ -161,6 +169,8 @@ async function streamOpenAI(
   // Detect Groq specifically by checking for the exact Groq API endpoint.
   // Standard providers (Mimo, DeepSeek, OpenAI, Claude, OpenRouter, MiniMax) are NEVER throttled or compacted.
   const isGroq = endpoint.includes('api.groq.com/openai/v1/chat/completions');
+  const isGemini = endpoint.includes('generativelanguage.googleapis.com') || (config.model || '').toLowerCase().includes('gemini');
+  const isFreeMode = Boolean(config.isFreeMode || config.mode === 'free');
 
   const flushPendingImages = (targetArray: any[]) => {
     if (pendingToolImages.length > 0 && !isGroq) {
@@ -205,6 +215,8 @@ async function streamOpenAI(
       let textParts = '';
       let toolCalls: any[] = [];
 
+      const isGoogle = isGemini;
+
       if (typeof m.content === 'string') {
         textParts = m.content;
       } else if (Array.isArray(m.content)) {
@@ -217,7 +229,7 @@ async function streamOpenAI(
           .filter((c: any) => c.type === 'toolCall' || c.type === 'tool_use')
           .map((c: any) => {
             const rawArgs = c.arguments || c.args || c.input || {};
-            return {
+            const tcObj: any = {
               id: c.id,
               type: 'function',
               function: {
@@ -225,6 +237,22 @@ async function streamOpenAI(
                 arguments: typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs),
               },
             };
+            const thoughtSig = c.thought_signature || c.extra_content?.google?.thought_signature;
+            if (isGoogle) {
+              const sig = thoughtSig || 'skip_thought_signature_validator';
+              tcObj.extra_content = {
+                google: {
+                  thought_signature: sig,
+                },
+              };
+              tcObj.thought_signature = sig;
+            } else if (c.extra_content) {
+              tcObj.extra_content = c.extra_content;
+              if (c.thought_signature) tcObj.thought_signature = c.thought_signature;
+            } else if (c.thought_signature) {
+              tcObj.thought_signature = c.thought_signature;
+            }
+            return tcObj;
           });
       }
 
@@ -315,6 +343,34 @@ async function streamOpenAI(
     payload.tool_choice = 'auto';
   }
 
+  // Request thoughts / reasoning traces for Gemini models via Google OpenAI-compatible endpoint
+  if (isGemini) {
+    const isGemini3 =
+      (config.model || '').includes('3.') ||
+      (config.model || '').includes('3-') ||
+      (config.model || '').includes('3.5') ||
+      (config.model || '').includes('3.8') ||
+      (config.model || '').includes('3.1');
+
+    const thinkingConfig: any = {
+      include_thoughts: true,
+    };
+    if (isGemini3) {
+      thinkingConfig.thinking_level = 'low';
+    } else {
+      thinkingConfig.thinking_budget = 1024;
+    }
+
+    payload.google = {
+      thinking_config: thinkingConfig,
+    };
+    payload.extra_body = {
+      google: {
+        thinking_config: thinkingConfig,
+      },
+    };
+  }
+
   // If using Groq, clamp max_tokens to prevent OTPM (output tokens per minute) errors on Groq's free tier.
   // Standard models (Mimo, Claude, OpenAI, DeepSeek) are NEVER clamped.
   if (isGroq) {
@@ -326,10 +382,21 @@ async function streamOpenAI(
   }
 
   let response: Response | null = null;
-  const maxRetries = isGroq ? 4 : 2;
+  const maxRetries = isGroq ? 4 : isFreeMode ? 4 : 2;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let fetchError: any = null;
+
+    if (isFreeMode) {
+      const minSpacingMs = 3500;
+      const elapsed = Date.now() - lastFreeRequestTimestamp;
+      if (elapsed < minSpacingMs && lastFreeRequestTimestamp > 0) {
+        const sleepMs = minSpacingMs - elapsed;
+        await new Promise((r) => setTimeout(r, sleepMs));
+      }
+      lastFreeRequestTimestamp = Date.now();
+    }
+
     try {
       response = await fetch(endpoint, {
         method: 'POST',
@@ -358,10 +425,69 @@ async function streamOpenAI(
     }
 
     if (response && response.ok) {
+      if (isGemini || endpoint.includes('generativelanguage.googleapis.com')) {
+        incrementGeminiDailyUsage().catch(() => {});
+      }
       break;
     }
 
     const errorBody = await response.text();
+
+    // If Gemini model rejected thinking_config with 400 Bad Request on attempt 0, try reasoning_effort fallback
+    if (response && response.status === 400 && payload.google && attempt === 0) {
+      console.warn('[streamOpenAI] Model returned 400 with thinking_config. Retrying with reasoning_effort...');
+      delete payload.google;
+      delete payload.extra_body;
+      payload.reasoning_effort = 'low';
+      continue;
+    }
+    // If reasoning_effort was also rejected with 400, strip reasoning controls completely
+    if (response && response.status === 400 && payload.reasoning_effort && attempt <= 1) {
+      console.warn('[streamOpenAI] Model returned 400 with reasoning_effort. Retrying without reasoning params...');
+      delete payload.reasoning_effort;
+      continue;
+    }
+
+    // Free Mode (Gemini Free Tier) 429 Rate Limit Interception & Auto-Waiting
+    if (response && response.status === 429 && isFreeMode && attempt < maxRetries) {
+      let waitSeconds = 30;
+      const retryDelayMatch = errorBody.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s?"/i);
+      const retryInMatch = errorBody.match(/retry in\s*(\d+(?:\.\d+)?)s/i);
+      const retryAfterHeader = response.headers?.get('retry-after');
+
+      if (retryDelayMatch && retryDelayMatch[1]) {
+        waitSeconds = Math.ceil(parseFloat(retryDelayMatch[1])) + 1;
+      } else if (retryInMatch && retryInMatch[1]) {
+        waitSeconds = Math.ceil(parseFloat(retryInMatch[1])) + 1;
+      } else if (retryAfterHeader && !isNaN(Number(retryAfterHeader))) {
+        waitSeconds = Math.ceil(Number(retryAfterHeader)) + 1;
+      } else {
+        waitSeconds = Math.min(60, Math.max(15, (attempt + 1) * 15));
+      }
+
+      const activeModelName = config.model || 'Gemini Free';
+      stream.push({
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: `\n⏳ Rate limit reached for ${activeModelName} (${attempt + 1}/${maxRetries}). Auto-waiting ${waitSeconds}s to resume (or switch model in Settings)...\n`,
+        partial: { role: 'assistant', content: [] } as any,
+      });
+
+      for (let s = waitSeconds; s > 0; s--) {
+        if (signal?.aborted) {
+          throw new Error('Request cancelled during rate limit wait');
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      stream.push({
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: `🔄 Quota window refreshed. Resuming task...\n`,
+        partial: { role: 'assistant', content: [] } as any,
+      });
+      continue;
+    }
 
     // Check for 413 (Payload Too Large) or 429 (Rate Limit - ITPM input or OTPM output tokens)
     const isRateOrSizeLimit = response.status === 413 || response.status === 429;
@@ -447,8 +573,8 @@ async function streamOpenAI(
       continue;
     }
 
-    // For non-Groq providers, retry on transient 5xx server errors or transient 429 rate limits
-    if (!isGroq && response && (response.status >= 500 || response.status === 429) && attempt < maxRetries) {
+    // For non-Groq, non-Free (BYOK) providers, retry on transient 5xx server errors or transient 429 rate limits
+    if (!isGroq && !isFreeMode && response && (response.status >= 500 || response.status === 429) && attempt < maxRetries) {
       console.warn(`[streamOpenAI] HTTP ${response.status} received on attempt ${attempt + 1}/${maxRetries + 1}. Retrying...`);
       const delayMs = Math.min(3000, 800 * Math.pow(2, attempt));
       await new Promise((r) => setTimeout(r, delayMs));
@@ -478,8 +604,31 @@ async function streamOpenAI(
   stream.push({ type: 'start', partial: assistantMessage });
 
   let textContentBlock: TextContent | null = null;
-  const toolCallAccumulators = new Map<number, { id: string; name: string; argsStr: string }>();
+  let thinkingContentBlock: ThinkingContent | null = null;
+  const toolCallAccumulators = new Map<
+    number,
+    { id: string; name: string; argsStr: string; extra_content?: any; thought_signature?: string }
+  >();
   let isInsideInlineThink = false;
+  let activeThinkClosingTag = '</think>';
+
+  const emitThinkingDelta = (chunk: string) => {
+    if (!chunk) return;
+    if (!thinkingContentBlock) {
+      thinkingContentBlock = { type: 'thinking', thinking: '' };
+      assistantMessage.content.push(thinkingContentBlock);
+      const contentIndex = assistantMessage.content.length - 1;
+      stream.push({ type: 'thinking_start' as any, contentIndex, partial: assistantMessage });
+    }
+    thinkingContentBlock.thinking += chunk;
+    const contentIndex = assistantMessage.content.indexOf(thinkingContentBlock);
+    stream.push({
+      type: 'thinking_delta' as any,
+      contentIndex,
+      delta: chunk,
+      partial: assistantMessage,
+    });
+  };
 
   let buffer = '';
 
@@ -502,49 +651,90 @@ async function streamOpenAI(
         const choice = json.choices?.[0];
         if (!choice) continue;
 
-        const delta = choice.delta;
-        if (!delta) continue;
+        const delta = choice.delta || choice.message || {};
 
-        // Reasoning / Thinking delta (e.g., DeepSeek R1, OpenAI o1/o3-mini, Minimax)
-        const reasoningDelta = delta.reasoning_content || delta.reasoning || delta.thought || '';
-        if (reasoningDelta) {
-          stream.push({
-            type: 'thinking_delta' as any,
-            delta: reasoningDelta,
-            partial: assistantMessage,
-          });
+        // Reasoning / Thinking delta (Gemini reasoning_content/thought/parts, DeepSeek R1, OpenAI o1/o3-mini, Minimax)
+        let reasoningDelta = '';
+        if (typeof delta.reasoning_content === 'string') {
+          reasoningDelta = delta.reasoning_content;
+        } else if (typeof delta.thought === 'string') {
+          reasoningDelta = delta.thought;
+        } else if (typeof delta.thought_summary === 'string') {
+          reasoningDelta = delta.thought_summary;
+        } else if (typeof delta.reasoning === 'string') {
+          reasoningDelta = delta.reasoning;
+        } else if (typeof (choice as any).reasoning_content === 'string') {
+          reasoningDelta = (choice as any).reasoning_content;
+        } else if (typeof (choice as any).thought === 'string') {
+          reasoningDelta = (choice as any).thought;
+        } else if (Array.isArray(delta.parts)) {
+          for (const p of delta.parts) {
+            if (p && p.thought && p.text) {
+              reasoningDelta += p.text;
+            } else if (p && !p.thought && p.text && !delta.content) {
+              delta.content = (delta.content || '') + p.text;
+            }
+          }
+        } else if (delta.extra_content?.google?.thought) {
+          const gThought = delta.extra_content.google.thought;
+          reasoningDelta = typeof gThought === 'string' ? gThought : (gThought?.text || '');
+        } else if (delta.thought && typeof delta.thought === 'object') {
+          reasoningDelta = delta.thought.text || delta.thought.content || '';
+        } else if (delta.reasoning_content && typeof delta.reasoning_content === 'object') {
+          reasoningDelta = (delta.reasoning_content as any).text || '';
         }
 
-        // Text delta (with inline <think>...</think> tag interception)
+        if (reasoningDelta) {
+          emitThinkingDelta(reasoningDelta);
+        }
+
+        // Text delta (with inline <think>...</think> and <thought>...</thought> tag interception)
         if (delta.content) {
           let textToEmit = delta.content;
 
           if (isInsideInlineThink) {
-            const endIdx = textToEmit.indexOf('</think>');
+            const endIdx =
+              textToEmit.indexOf(activeThinkClosingTag) !== -1
+                ? textToEmit.indexOf(activeThinkClosingTag)
+                : textToEmit.indexOf('</think>') !== -1
+                ? textToEmit.indexOf('</think>')
+                : textToEmit.indexOf('</thought>');
+
             if (endIdx !== -1) {
+              const matchedCloseTag = textToEmit.slice(endIdx).startsWith('</thought>')
+                ? '</thought>'
+                : '</think>';
               const thinkPart = textToEmit.slice(0, endIdx);
               if (thinkPart) {
-                stream.push({
-                  type: 'thinking_delta' as any,
-                  delta: thinkPart,
-                  partial: assistantMessage,
-                });
+                emitThinkingDelta(thinkPart);
               }
               isInsideInlineThink = false;
-              textToEmit = textToEmit.slice(endIdx + 8);
+              textToEmit = textToEmit.slice(endIdx + matchedCloseTag.length);
             } else {
-              stream.push({
-                type: 'thinking_delta' as any,
-                delta: textToEmit,
-                partial: assistantMessage,
-              });
+              emitThinkingDelta(textToEmit);
               textToEmit = '';
             }
           } else {
-            const startIdx = textToEmit.indexOf('<think>');
+            const thinkIdx = textToEmit.indexOf('<think>');
+            const thoughtIdx = textToEmit.indexOf('<thought>');
+            let startIdx = -1;
+            let tagLen = 0;
+            let closingTag = '</think>';
+
+            if (thinkIdx !== -1 && (thoughtIdx === -1 || thinkIdx < thoughtIdx)) {
+              startIdx = thinkIdx;
+              tagLen = 7; // '<think>'.length
+              closingTag = '</think>';
+            } else if (thoughtIdx !== -1) {
+              startIdx = thoughtIdx;
+              tagLen = 9; // '<thought>'.length
+              closingTag = '</thought>';
+            }
+
             if (startIdx !== -1) {
+              activeThinkClosingTag = closingTag;
               const beforeThink = textToEmit.slice(0, startIdx);
-              const afterThink = textToEmit.slice(startIdx + 7);
+              const afterThink = textToEmit.slice(startIdx + tagLen);
 
               if (beforeThink) {
                 if (!textContentBlock) {
@@ -563,26 +753,18 @@ async function streamOpenAI(
                 });
               }
 
-              const endIdx = afterThink.indexOf('</think>');
+              const endIdx = afterThink.indexOf(closingTag);
               if (endIdx !== -1) {
                 const thinkPart = afterThink.slice(0, endIdx);
                 if (thinkPart) {
-                  stream.push({
-                    type: 'thinking_delta' as any,
-                    delta: thinkPart,
-                    partial: assistantMessage,
-                  });
+                  emitThinkingDelta(thinkPart);
                 }
                 isInsideInlineThink = false;
-                textToEmit = afterThink.slice(endIdx + 8);
+                textToEmit = afterThink.slice(endIdx + closingTag.length);
               } else {
                 isInsideInlineThink = true;
                 if (afterThink) {
-                  stream.push({
-                    type: 'thinking_delta' as any,
-                    delta: afterThink,
-                    partial: assistantMessage,
-                  });
+                  emitThinkingDelta(afterThink);
                 }
                 textToEmit = '';
               }
@@ -611,17 +793,28 @@ async function streamOpenAI(
         if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
           for (const tc of delta.tool_calls) {
             const idx = tc.index ?? 0;
+            const extra = tc.extra_content || delta.extra_content || choice.extra_content || (json as any).extra_content;
+            const thoughtSig =
+              tc.thought_signature ||
+              delta.thought_signature ||
+              extra?.google?.thought_signature ||
+              tc.provider_specific_fields?.thought_signature;
+
             if (!toolCallAccumulators.has(idx)) {
               toolCallAccumulators.set(idx, {
                 id: tc.id || `call_${idx}_${Date.now()}`,
                 name: tc.function?.name || '',
                 argsStr: tc.function?.arguments || '',
+                extra_content: extra,
+                thought_signature: thoughtSig,
               });
             } else {
               const acc = toolCallAccumulators.get(idx)!;
               if (tc.id) acc.id = tc.id;
               if (tc.function?.name) acc.name += tc.function.name;
               if (tc.function?.arguments) acc.argsStr += tc.function.arguments;
+              if (extra) acc.extra_content = extra;
+              if (thoughtSig) acc.thought_signature = thoughtSig;
             }
           }
         }
@@ -635,6 +828,17 @@ async function streamOpenAI(
         // Skip malformed SSE lines
       }
     }
+  }
+
+  // Finalize thinking block
+  if (thinkingContentBlock) {
+    const contentIndex = assistantMessage.content.indexOf(thinkingContentBlock);
+    stream.push({
+      type: 'thinking_end' as any,
+      contentIndex,
+      content: thinkingContentBlock.thinking,
+      partial: assistantMessage,
+    });
   }
 
   // Finalize text block
@@ -665,6 +869,8 @@ async function streamOpenAI(
         name: acc.name,
         arguments: parsedArgs,
         args: parsedArgs,
+        extra_content: acc.extra_content,
+        thought_signature: acc.thought_signature,
       };
 
       assistantMessage.content.push(toolCall);

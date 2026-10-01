@@ -1039,3 +1039,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 console.log('[AutoForm AI] Content script loaded and active.');
+
+// Detect Arc Browser via injected CSS custom properties
+try {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const isArc = !!(
+    rootStyle.getPropertyValue('--arc-palette-title') ||
+    rootStyle.getPropertyValue('--arc-palette-subtitle') ||
+    rootStyle.getPropertyValue('--arc-background-simple-color') ||
+    (window as any).arc
+  );
+  if (isArc) {
+    chrome.storage?.local?.set({ isArcBrowser: true });
+    chrome.runtime?.sendMessage?.({ type: 'ARC_BROWSER_DETECTED' }).catch(() => {});
+  }
+} catch {}
+

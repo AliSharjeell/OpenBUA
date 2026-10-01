@@ -9,15 +9,21 @@ const TAB_MEMORY_PREFIX = 'autoform_tab_mem_';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   activeProvider: 'openai',
+  selectedMode: 'free',
+  free: {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    apiKey: '',
+    model: 'gemini-3.5-flash-lite',
+  },
   openai: {
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
-    model: 'gpt-4o',
+    model: 'gpt-6-astra',
   },
   anthropic: {
     baseUrl: 'https://api.anthropic.com/v1',
     apiKey: '',
-    model: 'claude-3-7-sonnet-20250219',
+    model: 'claude-sonnet-5-5',
   },
   autoConfirmSubmit: true,
   systemInstruction: 'You are OpenBUA, an autonomous browser use assistant that helps users navigate, research, interact, and fill forms accurately using their active browser and stored documents.',
@@ -132,12 +138,28 @@ export async function setStorageItem<T>(key: string, value: T): Promise<void> {
 // Settings
 export async function loadSettings(): Promise<AppSettings> {
   const settings = await getStorageItem<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS);
-  return {
+  const loadedFreeModel = settings?.free?.model;
+  // Automatically migrate deprecated 2.5 models to gemini-3.5-flash-lite
+  const activeFreeModel =
+    loadedFreeModel === 'gemini-2.5-flash-lite' || loadedFreeModel === 'gemini-2.5-flash'
+      ? 'gemini-3.5-flash-lite'
+      : loadedFreeModel || DEFAULT_SETTINGS.free.model;
+
+  const mergedSettings: AppSettings = {
     ...DEFAULT_SETTINGS,
     ...settings,
+    selectedMode: settings?.selectedMode || 'free',
+    free: { ...DEFAULT_SETTINGS.free, ...(settings?.free || {}), model: activeFreeModel },
     openai: { ...DEFAULT_SETTINGS.openai, ...(settings?.openai || {}) },
     anthropic: { ...DEFAULT_SETTINGS.anthropic, ...(settings?.anthropic || {}) },
   };
+
+  // If migration occurred, persist the updated model to storage
+  if (loadedFreeModel && loadedFreeModel !== activeFreeModel) {
+    setStorageItem(SETTINGS_KEY, mergedSettings).catch(() => {});
+  }
+
+  return mergedSettings;
 }
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
@@ -447,5 +469,67 @@ export async function clearScratchpad(sessionId?: string): Promise<void> {
     );
   }
 }
+
+// Gemini Daily Usage Tracking (Free Tier Limit: 1,500 Requests/Day)
+export const GEMINI_USAGE_KEY = 'gemini_daily_usage';
+export const GEMINI_DAILY_LIMIT = 1500;
+
+export interface GeminiUsageInfo {
+  count: number;
+  limit: number;
+  remaining: number;
+  remainingPercent: number;
+  date: string;
+}
+
+export async function getGeminiDailyUsage(): Promise<GeminiUsageInfo> {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const data = await chrome.storage.local.get(GEMINI_USAGE_KEY);
+      const usage = data[GEMINI_USAGE_KEY];
+      if (usage && usage.date === today && typeof usage.count === 'number') {
+        const remaining = Math.max(0, GEMINI_DAILY_LIMIT - usage.count);
+        const remainingPercent = Math.max(0, Math.min(100, Math.round((remaining / GEMINI_DAILY_LIMIT) * 100)));
+        return { count: usage.count, limit: GEMINI_DAILY_LIMIT, remaining, remainingPercent, date: today };
+      }
+    } else if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(GEMINI_USAGE_KEY);
+      if (raw) {
+        const usage = JSON.parse(raw);
+        if (usage && usage.date === today && typeof usage.count === 'number') {
+          const remaining = Math.max(0, GEMINI_DAILY_LIMIT - usage.count);
+          const remainingPercent = Math.max(0, Math.min(100, Math.round((remaining / GEMINI_DAILY_LIMIT) * 100)));
+          return { count: usage.count, limit: GEMINI_DAILY_LIMIT, remaining, remainingPercent, date: today };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load Gemini daily usage:', e);
+  }
+  return { count: 0, limit: GEMINI_DAILY_LIMIT, remaining: GEMINI_DAILY_LIMIT, remainingPercent: 100, date: today };
+}
+
+export async function incrementGeminiDailyUsage(): Promise<GeminiUsageInfo> {
+  const current = await getGeminiDailyUsage();
+  const nextCount = current.count + 1;
+  const today = new Date().toISOString().slice(0, 10);
+  const updatedData = { date: today, count: nextCount };
+
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      await chrome.storage.local.set({ [GEMINI_USAGE_KEY]: updatedData });
+    } else if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(GEMINI_USAGE_KEY, JSON.stringify(updatedData));
+    }
+  } catch (e) {
+    console.warn('Failed to save Gemini daily usage:', e);
+  }
+
+  const remaining = Math.max(0, GEMINI_DAILY_LIMIT - nextCount);
+  const remainingPercent = Math.max(0, Math.min(100, Math.round((remaining / GEMINI_DAILY_LIMIT) * 100)));
+  return { count: nextCount, limit: GEMINI_DAILY_LIMIT, remaining, remainingPercent, date: today };
+}
+
 
 
