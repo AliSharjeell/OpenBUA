@@ -1,6 +1,6 @@
 // Local storage service using chrome.storage.local with browser fallback for dev/testing
 
-import { AppSettings, UserDocument, ChatMessage, ChatSession } from '../types';
+import { AppSettings, UserDocument, ChatMessage, ChatSession, SuggestedMemory } from '../types';
 
 const SETTINGS_KEY = 'autoform_settings';
 const GLOBAL_MEMORY_KEY = 'autoform_global_memory';
@@ -334,9 +334,10 @@ export async function deleteChatSession(sessionId: string): Promise<ChatSession[
     },
   ];
   await saveChatSessions(finalSessions);
-  // Also clear messages, tab memories, and scratchpad associated with deleted session
+  // Also clear messages, tab memories, scratchpad, and suggested memories associated with deleted session
   await clearChatHistoryForTab(sessionId);
   await clearScratchpad(sessionId);
+  await clearSuggestedMemories(sessionId);
   return finalSessions;
 }
 
@@ -531,5 +532,65 @@ export async function incrementGeminiDailyUsage(): Promise<GeminiUsageInfo> {
   return { count: nextCount, limit: GEMINI_DAILY_LIMIT, remaining, remainingPercent, date: today };
 }
 
+// ========================================================
+// Suggested Memories Storage
+// ========================================================
+const SUGGESTED_MEMORIES_KEY = 'openbua_suggested_memories';
 
+export async function loadSuggestedMemories(sessionId?: string): Promise<SuggestedMemory[]> {
+  const all = await getStorageItem<SuggestedMemory[]>(SUGGESTED_MEMORIES_KEY, []);
+  if (!sessionId) return all;
+  return all.filter((s) => !s.sessionId || s.sessionId === sessionId);
+}
 
+export async function saveSuggestedMemory(suggestion: SuggestedMemory): Promise<SuggestedMemory[]> {
+  const all = await getStorageItem<SuggestedMemory[]>(SUGGESTED_MEMORIES_KEY, []);
+  const existingIdx = all.findIndex((s) => s.id === suggestion.id);
+  let updated: SuggestedMemory[];
+  if (existingIdx >= 0) {
+    updated = [...all];
+    updated[existingIdx] = suggestion;
+  } else {
+    updated = [suggestion, ...all];
+  }
+  await setStorageItem(SUGGESTED_MEMORIES_KEY, updated);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('openbua_suggested_memories_updated', {
+        detail: { suggestion, sessionId: suggestion.sessionId },
+      })
+    );
+  }
+  return updated;
+}
+
+export async function deleteSuggestedMemory(id: string): Promise<SuggestedMemory[]> {
+  const all = await getStorageItem<SuggestedMemory[]>(SUGGESTED_MEMORIES_KEY, []);
+  const updated = all.filter((s) => s.id !== id);
+  await setStorageItem(SUGGESTED_MEMORIES_KEY, updated);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('openbua_suggested_memories_updated', {
+        detail: { deletedId: id },
+      })
+    );
+  }
+  return updated;
+}
+
+export async function clearSuggestedMemories(sessionId?: string): Promise<void> {
+  if (sessionId) {
+    const all = await getStorageItem<SuggestedMemory[]>(SUGGESTED_MEMORIES_KEY, []);
+    const remaining = all.filter((s) => s.sessionId && s.sessionId !== sessionId);
+    await setStorageItem(SUGGESTED_MEMORIES_KEY, remaining);
+  } else {
+    await setStorageItem(SUGGESTED_MEMORIES_KEY, []);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('openbua_suggested_memories_updated', {
+        detail: { clearedSessionId: sessionId },
+      })
+    );
+  }
+}

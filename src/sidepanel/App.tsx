@@ -876,31 +876,8 @@ export function App() {
             })}
           </div>
 
-          {/* Sticky Live Preview & Settings Buttons at the bottom */}
-          <div className="p-3 border-t border-zinc-900/50 bg-zinc-950/95 sticky bottom-0 shrink-0 space-y-1">
-            <button
-              type="button"
-              onClick={() => {
-                handleSelectNavTab('preview');
-                setIsSidebarOpen(false);
-              }}
-              className={`flex items-center justify-between w-full px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-                activeNavTab === 'preview'
-                  ? 'bg-zinc-900 text-white'
-                  : 'text-white hover:bg-zinc-900/60'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <Eye className="w-4 h-4 text-white" />
-                <span className="text-white">Live Preview</span>
-              </div>
-              {hasUnseenPreview && (
-                <span
-                  className="w-2 h-2 rounded-full ring-2 ring-zinc-950 animate-pulse"
-                  style={{ backgroundColor: '#007AFF' }}
-                />
-              )}
-            </button>
+          {/* Sticky Settings Button at the bottom */}
+          <div className="p-3 border-t border-zinc-900/50 bg-zinc-950/95 sticky bottom-0 shrink-0">
             <button
               type="button"
               onClick={() => {

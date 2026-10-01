@@ -57,6 +57,16 @@ export interface ChatSession {
   updatedAt: number;
 }
 
+export interface SuggestedMemory {
+  id: string;
+  title: string;
+  content: string;
+  category?: 'profile' | 'preference' | 'workflow' | 'fact' | 'task';
+  reason?: string;
+  createdAt: number;
+  sessionId?: string;
+}
+
 export interface BrowserTabInfo {
   id: number;
   title: string;
