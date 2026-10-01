@@ -76,7 +76,8 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>('session_default');
   const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
   const [previewMarkdown, setPreviewMarkdown] = useState<string>('');
-  const [hasUnseenPreview, setHasUnseenPreview] = useState<boolean>(false);
+  const [unseenPreviews, setUnseenPreviews] = useState<Record<string, boolean>>({});
+  const hasUnseenPreview = Boolean(unseenPreviews[activeSessionId]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
@@ -102,9 +103,9 @@ export function App() {
   useEffect(() => {
     activeNavTabRef.current = activeNavTab;
     if (activeNavTab === 'preview') {
-      setHasUnseenPreview(false);
+      setUnseenPreviews((prev) => ({ ...prev, [activeSessionId]: false }));
     }
-  }, [activeNavTab]);
+  }, [activeNavTab, activeSessionId]);
 
   useEffect(() => {
     currentTabKeyRef.current = activeSessionId;
@@ -116,12 +117,13 @@ export function App() {
       const customEvt = e as CustomEvent<{ content: string; sessionId?: string }>;
       if (customEvt.detail) {
         const { content, sessionId } = customEvt.detail;
-        if (!sessionId || sessionId === currentTabKeyRef.current) {
+        const targetSid = sessionId || currentTabKeyRef.current;
+        if (targetSid === currentTabKeyRef.current) {
           setPreviewMarkdown(content || '');
-          if (content && content.trim().length > 0) {
-            if (activeNavTabRef.current !== 'preview') {
-              setHasUnseenPreview(true);
-            }
+        }
+        if (content && content.trim().length > 0) {
+          if (targetSid !== currentTabKeyRef.current || activeNavTabRef.current !== 'preview') {
+            setUnseenPreviews((prev) => ({ ...prev, [targetSid]: true }));
           }
         }
       }
@@ -434,7 +436,7 @@ export function App() {
 
   const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings' | 'preview') => {
     if (tab === 'preview') {
-      setHasUnseenPreview(false);
+      setUnseenPreviews((prev) => ({ ...prev, [activeSessionId]: false }));
     }
     setActiveNavTab(tab);
     saveLastActiveState(tab, currentTabKeyRef.current);
@@ -444,7 +446,7 @@ export function App() {
     if (activeNavTab === 'preview') {
       handleSelectNavTab('chat');
     } else {
-      setHasUnseenPreview(false);
+      setUnseenPreviews((prev) => ({ ...prev, [activeSessionId]: false }));
       handleSelectNavTab('preview');
     }
   };
@@ -464,7 +466,9 @@ export function App() {
     setTabMemories(tMems);
     setMessages(msgs);
     setPreviewMarkdown(loadedScratch || '');
-    setHasUnseenPreview(false);
+    if (activeNavTabRef.current === 'preview') {
+      setUnseenPreviews((prev) => ({ ...prev, [sessionId]: false }));
+    }
     if (harnessRef.current) {
       harnessRef.current.setSessionId(sessionId);
       harnessRef.current.setConversationHistory(msgs);
@@ -622,9 +626,9 @@ export function App() {
 
       {/* Floating Top Header (Positioned absolute over viewport, zero solid strip) */}
       <header className="absolute top-2.5 left-0 right-0 z-30 px-3 flex items-center justify-between pointer-events-none">
-        {/* Left: Circle Back Button (in Settings or Preview) OR 2-Line Hamburger Button (in Chat/Memory) */}
+        {/* Left: Circle Back Button (in Settings) OR 2-Line Hamburger Button (in Chat/Memory/Preview) */}
         <div className="flex items-center pointer-events-auto">
-          {activeNavTab === 'settings' || activeNavTab === 'preview' ? (
+          {activeNavTab === 'settings' ? (
             <button
               type="button"
               onClick={() => handleSelectNavTab('chat')}
@@ -645,7 +649,7 @@ export function App() {
           )}
         </div>
 
-        {/* Center: Chat / Memory Floating Toggle OR Free / BYOK Toggle in Settings OR Preview Header */}
+        {/* Center: Chat / Memory / Preview Floating Toggle OR Free / BYOK Toggle in Settings */}
         {activeNavTab === 'settings' ? (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
             <button
@@ -671,18 +675,12 @@ export function App() {
               BYOK
             </button>
           </div>
-        ) : activeNavTab === 'preview' ? (
-          <div className="flex items-center px-4 py-1.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
-            <span className="text-xs font-semibold text-white tracking-wide">
-              Preview
-            </span>
-          </div>
         ) : (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
             <button
               type="button"
               onClick={() => handleSelectNavTab('chat')}
-              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+              className={`h-7 px-3 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
                 activeNavTab === 'chat'
                   ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -693,13 +691,30 @@ export function App() {
             <button
               type="button"
               onClick={() => handleSelectNavTab('memory')}
-              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+              className={`h-7 px-3 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
                 activeNavTab === 'memory'
                   ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
               Memory
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectNavTab('preview')}
+              className={`relative h-7 px-3 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeNavTab === 'preview'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span>Preview</span>
+              {hasUnseenPreview && activeNavTab !== 'preview' && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0"
+                  style={{ backgroundColor: '#007AFF' }}
+                />
+              )}
             </button>
           </div>
         )}
