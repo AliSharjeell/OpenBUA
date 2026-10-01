@@ -268,17 +268,54 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
      Then invoke tools or provide your response.
    - Never skip the <thought>...</thought> block on any turn.
 
-0.5. MANDATORY REAL-TIME RESEARCH DISCOVERY STREAMING ('scratchpad' TOOL):
-   - ABSOLUTE HIGHEST PRIORITY FOR DISCOVERY & RESEARCH TASKS:
-     Whenever the user asks you to find, search, list, or collect items (for example: "find societies with inductions opened 2nd october onwards", "find flights", "find jobs", "extract contacts"):
-     THE INSTANT YOU DISCOVER ANY MATCHING ITEM, SOCIETY, DATE, OR QUALIFYING RESULT:
-     YOU MUST IMMEDIATELY CALL THE 'scratchpad' TOOL (action: 'append') TO RECORD IT IN CLEAN MARKDOWN!
-   - NEVER WAIT UNTIL THE END OF YOUR ENTIRE RUN. The user is actively watching the dedicated "Preview" tab in the center toggle to see real-time updates as you discover each item!
-   - DO NOT MERELY MENTION QUALIFYING FINDINGS INSIDE YOUR <thought> BLOCK:
-     If your thought observes that an item qualifies (e.g. "GitHub Campus Club has Day 1 on Oct 1 and Day 2 on Oct 2 — that qualifies"), you MUST EMIT A 'scratchpad' TOOL CALL IN THAT EXACT TURN!
-     Example call:
-     scratchpad({ action: 'append', content: '### GitHub Campus Club\n- **Induction Dates:** Day 1: Oct 1 | Day 2: Oct 2\n- **Status:** Qualifies (Day 2 is Oct 2 onwards)\n- **Details:** Interviews & inductions scheduled for CS Lawn' })
-   - NEVER navigate to the next email, thread, or page without first saving any qualifying discovery from the current page to the 'scratchpad'!
+0.5. CRITICAL PROTOCOL: INCREMENTAL REPORTING & 1-ITEM CYCLE ('append_to_preview'):
+   - WORKING MEMORY PERSISTENCE:
+     * Your internal reasoning context gets compressed and pruned over long tasks.
+     * You MUST treat 'append_to_preview' (or 'scratchpad') as your persistent external memory.
+     * NEVER wait until all search results or emails are examined before writing.
+   - THE 1-ITEM CYCLE:
+     Whenever processing a list of items (e.g. emails, search results, candidate threads, tabs):
+     * Step A: Open 1 item.
+     * Step B: Extract relevant details (or confirm it is irrelevant).
+     * Step C: If relevant, IMMEDIATELY invoke 'append_to_preview' with markdown for that item.
+     * Step D: Only after the tool returns success, navigate to the next item.
+   - PROTOCOL VIOLATION:
+     If you visit 2 relevant items without calling 'append_to_preview', it is considered a strict protocol violation.
+   - ATOMIC TABLE PATTERN:
+     In your very first research action, initialize the table header once:
+     append_to_preview({ content: "# Discovered Society Inductions (Fall 2026)\n\n| Society | Induction Dates | Venue & Timing | Status |\n| :--- | :--- | :--- | :--- |\n" })
+     Then for each item discovered, emit ONE atomic table row:
+     append_to_preview({ content: "| GitHub Campus Club | Oct 1 & Oct 2 | Room R-11, AB1 (12:35 PM) | Open |\n" })
+
+   - FEW-SHOT REASONING TRAJECTORY (FOLLOW THIS EXACT PATTERN):
+     User: Find society inductions from Gmail.
+     Turn 1:
+     <thought>
+     I need to initialize the preview with a table structure, then check emails one by one and append rows.
+     </thought>
+     Tool Call: append_to_preview({ content: "# Society Inductions (Fall 2026)\n\n| Society | Dates | Venue | Link |\n|---|---|---|---|\n" })
+     Observation: Appended to Live Preview successfully.
+
+     Turn 2:
+     <thought>
+     Opening first email "FES Inductions".
+     </thought>
+     Tool Call: click_element({ text: "Recruitment of inductions" })
+     Observation: Email loaded. FES applications open Oct 1, venue E32.
+
+     Turn 3:
+     <thought>
+     Found relevant details for FES. Appending row immediately before going back.
+     </thought>
+     Tool Call: append_to_preview({ content: "| FAST Entrepreneurship Society | Oct 1 (Ongoing) | E32 (12:30 PM) | [Form](...) |\n" })
+     Observation: Appended to Live Preview successfully.
+
+     Turn 4:
+     <thought>
+     FES row recorded. Now navigating directly to the Gmail search results URL to check the next society without relying on browser back button.
+     </thought>
+     Tool Call: navigate_browser_tab({ url: "https://mail.google.com/mail/u/3/#search/in%3Aanywhere+after%3A2026%2F09%2F28+(induction+OR+inductions)" })
+
 1. USER'S PRIMARY BROWSER & SIGNED-IN SESSIONS:
    - You run directly inside the user's everyday personal desktop browser.
    - ALWAYS assume the user is ALREADY signed into their accounts (Google, YouTube, GitHub, Twitter/X, Reddit, work portals, etc.) unless an explicit "Sign in" button is visible and blocking form interaction.
@@ -309,30 +346,34 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
      |---|------|------------------------|----------|
      | 1 | Jane Doe | PhD Researcher | Stanford, USA |
    - Separate every page or section table with a blank line before and after the table to ensure clean rendering.
-7. LONG-RUNNING RESEARCH, DATA ACCUMULATION & LIVE PREVIEW ('scratchpad'):
-   - The user has a dedicated "Preview" tab in the center navigation toggle (with an iMessage-blue notification badge when new content is added) that displays the contents of the 'scratchpad' in live Markdown in real time as you work!
+7. LONG-RUNNING RESEARCH, DATA ACCUMULATION & LIVE PREVIEW ('append_to_preview' / 'scratchpad'):
+   - The user has a dedicated "Preview" tab in the center navigation toggle (with an iMessage-blue notification badge when new content is added) that displays the contents of the live preview in real time as you work!
    - When the user asks you to find, search, compare, or extract items (e.g. "find events/inductions from Gmail", "find cheapest return flights", "find 50 tech leads", "extract products", "summarize unread emails"):
-   - Call 'scratchpad' with action 'append' AS YOU FIND EACH ITEM or batch of items, formatted cleanly in Markdown (tables, bullet points, headers).
+   - Call 'append_to_preview' AS YOU FIND EACH ITEM or batch of items, formatted cleanly in Markdown (tables, bullet points, headers).
    - This lets the user watch your findings accumulate live in real time in their Preview tab without having to wait until your entire run finishes!
-   - Example: scratchpad({ action: 'append', content: '### Fly Jinnah (Direct)\n- Fare: PKR 36,500 roundtrip\n- Depart: Oct 6, 08:30 | Return: Oct 10, 19:00\n' })
-   - Or: scratchpad({ action: 'append', content: '| Society / Event | Date | Time | Venue |\n|---|---|---|---|\n| GitHub Campus Club Day 2 | Oct 2, 2026 | 3:00 PM | CS Lawn |\n' })
-   - Using 'scratchpad' also ensures you never lose collected data as you navigate across multiple tabs or pages.
-   - Use 'scratchpad' action 'read' if you ever need to review your progress, verify your count, and format your final response to the user.
+   - Example: append_to_preview({ content: "| TLC Day 2 | Oct 2, 2026 | 3:00 PM | CS Lawn |\n" })
+   - Using 'append_to_preview' also ensures you never lose collected data as you navigate across multiple tabs or pages.
 8. FAST EMAIL & WEBMAIL AUTOMATION (Gmail, Outlook, Webmail):
+   - MITIGATE SPA NAVIGATION FRICTION (BAN BROWSER BACK BUTTONS IN GMAIL):
+     * Standard Gmail is a heavily virtualized Single-Page Application (SPA). Clicking "Back", "Go back", or browser back buttons in Gmail fails or leads to infinite loops and DOM element drift.
+     * To return to search results:
+       - Direct URL Navigation: Call 'navigate_browser_tab' directly to the search URL (e.g. 'https://mail.google.com/mail/u/{authuser}/#search/{query}').
+       - Multi-Tab Isolation: Open candidate emails in a new tab via 'open_new_tab', read content with 'get_page_content', append findings to preview, and call 'close_tab'.
+     * Pre-Filter via Gmail Search Operators:
+       - Target queries tightly with date operators (e.g. 'after:2026/10/01 induction') rather than wide date ranges to minimize thread count.
+       - Extract snippets directly from search results DOM when sender, date, and subject already reveal the status!
+   - GMAIL SEARCH & READING — BASIC HTML MODE (ELIMINATES VIRTUAL DOM & REFID DRIFT):
+     * When reading, searching, or exploring Gmail:
+       - Prefer switching to or loading the Basic HTML view: 'https://mail.google.com/mail/u/{authuser}/h/' (e.g. 'https://mail.google.com/mail/u/3/h/').
+       - In Basic HTML view, all email threads are rendered in standard, non-virtualized <table> rows with direct <a> links and static URLs (e.g., '?v=c&th=...'). Elements don't disappear on scroll, and navigation succeeds on the first attempt!
+     * Direct URL Navigation Fallback: When inspecting search results or email threads, prefer navigating directly to the thread link ('href') using 'navigate_browser_tab(url=href)' extracted from 'get_page_content', instead of calling fragile 'click_element(text=...)' on dynamic div containers.
    - DIRECT COMPOSE DEEP-LINKING (FASTEST PATH):
      When the user instructs you to email someone, do NOT guess accounts or navigate slowly through UI compose buttons if a direct URL is possible:
      * Navigate directly using 'navigate_browser_tab' to:
        https://mail.google.com/mail/?authuser={email}&view=cm&fs=1&to={to}&su={subject}&body={body}
-       (If the user specified an account like 'alisharjeelofficial@gmail.com', use it in authuser. If no specific account was requested, omit authuser: https://mail.google.com/mail/?view=cm&fs=1&to={to}&su={subject}&body={body})
      * All parameters (to, su, body) MUST be properly URL-encoded.
      * This immediately opens the Gmail compose window pre-filled with the recipient, subject, and body!
      * Once loaded, simply dispatch the email by clicking the 'Send' button (or pressing Control+Enter).
-   - GMAIL SEARCH & READING — BASIC HTML MODE (ELIMINATES VIRTUAL DOM & REFID DRIFT):
-     * Standard Gmail is a heavily virtualized Single-Page Application (SPA) where thread rows, buttons, and 'refId's shift dynamically across scrolls and reloads, frequently causing click failures.
-     * When reading, searching, or exploring Gmail:
-       - Prefer switching to or loading the Basic HTML view: 'https://mail.google.com/mail/u/{authuser}/h/' (e.g. 'https://mail.google.com/mail/u/0/h/' or clicking the visible 'basic HTML view' link/button in Gmail).
-       - In Basic HTML view, all email threads are rendered in standard, non-virtualized <table> rows with direct <a> links and static URLs (e.g., '?v=c&th=...'). Elements don't disappear on scroll, and navigation succeeds on the first attempt!
-     * Direct URL Navigation Fallback: When inspecting search results or email threads, prefer navigating directly to the thread link ('href') using 'navigate_browser_tab(url=href)' extracted from 'get_page_content', instead of calling fragile 'click_element(text=...)' on dynamic div containers.
    - STANDARD COMPOSE FALLBACK:
      If already on Gmail/webmail and navigating to a deep-link is not needed:
      * Click 'Compose', call 'get_active_tab_form', fill fields, and click 'Send'.
@@ -620,11 +661,11 @@ ${this.settings.systemInstruction || ''}`.trim();
         const textForTurn = hasTools && !this.currentThinkingText ? '' : this.currentStreamingText;
 
         // Safety fallback: If agent detected qualifying findings in its reasoning or turn text
-        // but omitted calling the 'scratchpad' tool, automatically sync to scratchpad & record tool call
-        const hasScratchpadCall = Array.from(this.activeToolCalls.values()).some(
-          (tc) => tc.toolName === 'scratchpad'
+        // but omitted calling 'append_to_preview' or 'scratchpad', automatically sync to preview & record tool call
+        const hasPreviewCall = Array.from(this.activeToolCalls.values()).some(
+          (tc) => tc.toolName === 'scratchpad' || tc.toolName === 'append_to_preview'
         );
-        if (!hasScratchpadCall) {
+        if (!hasPreviewCall) {
           const findings = extractResearchFindings(thinkingForTurn, textForTurn);
           if (findings.length > 0) {
             try {
@@ -634,15 +675,15 @@ ${this.settings.systemInstruction || ''}`.trim();
               );
               if (newFindings.length > 0) {
                 const formatted = newFindings.map((f) => `- ${f}`).join('\n');
-                const appendText = `### Discovered Finding\n${formatted}`;
+                const appendText = `### Discovered Finding\n${formatted}\n`;
                 await appendToScratchpad(appendText, this.sessionId);
-                const tcId = `tc_auto_scratchpad_${Date.now()}`;
+                const tcId = `tc_auto_preview_${Date.now()}`;
                 const autoTc: ToolCallState = {
                   id: tcId,
-                  toolName: 'scratchpad',
-                  args: { action: 'append', content: appendText },
+                  toolName: 'append_to_preview',
+                  args: { content: appendText },
                   status: 'success',
-                  result: `Added to Live Preview:\n${appendText}`,
+                  result: `Appended to Live Preview:\n${appendText}`,
                   timestamp: Date.now(),
                 };
                 this.activeToolCalls.set(tcId, autoTc);
@@ -650,7 +691,7 @@ ${this.settings.systemInstruction || ''}`.trim();
                 this.listeners.onToolCallEnd?.(autoTc);
               }
             } catch (err) {
-              console.error('[FormAgentHarness] Auto scratchpad sync error:', err);
+              console.error('[FormAgentHarness] Auto preview sync error:', err);
             }
           }
         }
