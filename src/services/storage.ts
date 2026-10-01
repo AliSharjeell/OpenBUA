@@ -29,53 +29,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   systemInstruction: 'You are OpenBUA, an autonomous browser use assistant that helps users navigate, research, interact, and fill forms accurately using their active browser and stored documents.',
 };
 
-export const DEFAULT_GLOBAL_MEMORIES: UserDocument[] = [
-  {
-    id: 'mem-default-profile',
-    title: 'Personal & Professional Profile (About Me)',
-    type: 'markdown',
-    content: `# Personal & Professional Information
-
-## Contact Information
-- Full Name: Alex Mercer
-- First Name: Alex
-- Last Name: Mercer
-- Email: alex.mercer.work@example.com
-- Phone: +1 (555) 234-5678
-- Date of Birth: 1994-08-15
-- Gender: Male
-
-## Address
-- Street: 742 Evergreen Terrace
-- Apartment / Suite: Apt 4B
-- City: Seattle
-- State: Washington (WA)
-- Postal Code / Zip: 98101
-- Country: United States
-
-## Professional Details
-- Current Title: Senior Software Engineer
-- Company: HyperScale Systems
-- Years of Experience: 6
-- Primary Skills: TypeScript, React, Node.js, Python, Cloud Architecture, GraphQL
-- LinkedIn: https://linkedin.com/in/alex-mercer-dev
-- GitHub: https://github.com/alexmercer
-- Website / Portfolio: https://alexmercer.dev
-
-## Education
-- Degree: Bachelor of Science in Computer Science
-- University: University of Washington
-- Graduation Year: 2017
-- GPA: 3.8 / 4.0
-`,
-    summary: 'Alex Mercer - Senior Software Engineer, Seattle WA. Full personal and professional profile.',
-    createdAt: Date.now(),
-    sizeBytes: 950,
-    tags: ['profile', 'contact', 'resume', 'about-me'],
-    isActiveForContext: true,
-    isGlobal: true,
-  },
-];
+export const DEFAULT_GLOBAL_MEMORIES: UserDocument[] = [];
 
 // Helper to get tab key for scoped storage
 // Scoped by Chrome tab ID so navigating to a new site/page within the SAME tab maintains chat history forever!
@@ -170,7 +124,8 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
 // Global Memories (Consistent across all tabs)
 // ========================================================
 export async function loadGlobalMemories(): Promise<UserDocument[]> {
-  return await getStorageItem<UserDocument[]>(GLOBAL_MEMORY_KEY, DEFAULT_GLOBAL_MEMORIES);
+  const list = await getStorageItem<UserDocument[]>(GLOBAL_MEMORY_KEY, DEFAULT_GLOBAL_MEMORIES);
+  return list.filter((m) => m.id !== 'mem-default-profile');
 }
 
 export async function saveGlobalMemory(doc: UserDocument): Promise<void> {
