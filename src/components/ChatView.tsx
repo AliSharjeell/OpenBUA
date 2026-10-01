@@ -124,7 +124,7 @@ function formatTimestampWithSeconds(timestamp: number): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
-function formatSingleMessageAsText(msg: ChatMessage): string {
+export function formatSingleMessageAsText(msg: ChatMessage): string {
   const time = formatTimestampWithSeconds(msg.timestamp);
   const roleLabel = msg.role === 'user' ? 'User' : 'OpenBUA';
   const lines: string[] = [`[${time}] ${roleLabel}:`];
@@ -140,7 +140,7 @@ function formatSingleMessageAsText(msg: ChatMessage): string {
       if (tc.args && Object.keys(tc.args).length > 0) {
         lines.push(`Arguments:\n${JSON.stringify(tc.args, null, 2)}`);
       }
-      if (tc.result) {
+      if (tc.result !== undefined && tc.result !== null) {
         const res = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2);
         lines.push(`Result:\n${res}`);
       }
@@ -157,7 +157,7 @@ function formatSingleMessageAsText(msg: ChatMessage): string {
   return lines.join('\n\n');
 }
 
-function formatEntireChatAsText(messages: ChatMessage[]): string {
+export function formatEntireChatAsText(messages: ChatMessage[]): string {
   return messages.map((m) => formatSingleMessageAsText(m)).join('\n\n---\n\n');
 }
 

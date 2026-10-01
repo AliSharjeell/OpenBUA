@@ -26,7 +26,7 @@ import {
 } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
 import { FormAgentHarness } from '../agent/form-agent';
-import { ChatView } from '../components/ChatView';
+import { ChatView, formatEntireChatAsText } from '../components/ChatView';
 import { MemoryView } from '../components/MemoryView';
 import { SettingsView } from '../components/SettingsView';
 import {
@@ -38,6 +38,7 @@ import {
   Pencil,
   Trash2,
   Check,
+  Copy,
   ArrowLeft,
 } from 'lucide-react';
 
@@ -75,6 +76,7 @@ export function App() {
   const [editingTitle, setEditingTitle] = useState<string>('');
   const [isBusy, setIsBusy] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolCallState | null>(null);
+  const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
 
   const handleInputDraftChange = (draft: string) => {
@@ -461,6 +463,26 @@ export function App() {
     setEditingSessionId(null);
   };
 
+  const handleCopySessionChat = async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    try {
+      let msgsToCopy: ChatMessage[] = [];
+      if (sessionId === activeSessionId) {
+        msgsToCopy = messages;
+      } else {
+        msgsToCopy = await loadChatHistoryForTab(sessionId);
+      }
+      const fullTranscript = formatEntireChatAsText(msgsToCopy);
+      await navigator.clipboard.writeText(fullTranscript);
+      setCopiedSessionId(sessionId);
+      setTimeout(() => {
+        setCopiedSessionId((curr) => (curr === sessionId ? null : curr));
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy chat transcript:', err);
+    }
+  };
+
   // Keep harness synchronized with active memories and current settings
   useEffect(() => {
     if (!harnessRef.current) return;
@@ -738,6 +760,18 @@ export function App() {
                       </div>
 
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleCopySessionChat(e, sess.id)}
+                          title="Copy entire chat"
+                          className="p-1 rounded text-white/70 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                        >
+                          {copiedSessionId === sess.id ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
                         <button
                           type="button"
                           onClick={(e) => handleStartRename(e, sess)}
