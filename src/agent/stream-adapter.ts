@@ -162,6 +162,7 @@ async function streamOpenAI(
   // Detect Groq specifically by checking for the exact Groq API endpoint.
   // Standard providers (Mimo, DeepSeek, OpenAI, Claude, OpenRouter, MiniMax) are NEVER throttled or compacted.
   const isGroq = endpoint.includes('api.groq.com/openai/v1/chat/completions');
+  const isGemini = endpoint.includes('generativelanguage.googleapis.com') || (config.model || '').toLowerCase().includes('gemini');
 
   const flushPendingImages = (targetArray: any[]) => {
     if (pendingToolImages.length > 0 && !isGroq) {
@@ -206,7 +207,7 @@ async function streamOpenAI(
       let textParts = '';
       let toolCalls: any[] = [];
 
-      const isGoogle = endpoint.includes('generativelanguage.googleapis.com') || (config.model || '').toLowerCase().includes('gemini');
+      const isGoogle = isGemini;
 
       if (typeof m.content === 'string') {
         textParts = m.content;
