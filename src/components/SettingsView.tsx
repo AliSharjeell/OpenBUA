@@ -69,22 +69,6 @@ export const FREE_GEMINI_MODELS: FreeGeminiModelOption[] = [
     badge: 'Standard',
     description: '5 req/min, 20 req/day. Reliable baseline performance.',
   },
-  {
-    id: 'gemini-2.5-flash-lite',
-    name: 'Gemini 2.5 Flash Lite',
-    rpm: '10 RPM',
-    rpd: '20 RPD',
-    badge: 'Fast',
-    description: '10 req/min, 20 req/day. Small and cost-effective model.',
-  },
-  {
-    id: 'gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
-    rpm: '5 RPM',
-    rpd: '20 RPD',
-    badge: 'Standard',
-    description: '5 req/min, 20 req/day. Hybrid reasoning with large context window.',
-  },
 ];
 
 interface SettingsViewProps {
