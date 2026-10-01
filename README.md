@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" alt="OpenBUA Header" width="100%" />
+  <img src="assets/promo.png" alt="OpenBUA Header" width="100%" />
 </p>
 
 <p align="center">
