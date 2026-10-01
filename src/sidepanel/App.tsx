@@ -580,17 +580,8 @@ export function App() {
           </div>
         )}
 
-        {/* Right: Key setup or spacer */}
-        <div className="flex items-center justify-end min-w-[36px] pointer-events-auto">
-          {!hasKey && (
-            <button
-              onClick={() => handleSelectNavTab('settings')}
-              className="text-[10px] font-medium py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full transition-colors shadow-md"
-            >
-              Setup Key
-            </button>
-          )}
-        </div>
+        {/* Right: Balanced spacer matching hamburger button */}
+        <div className="w-9 pointer-events-none" />
       </header>
 
       {/* Backdrop Overlay (blurs background behind sidebar without dimming/lowering opacity) */}
