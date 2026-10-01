@@ -127,6 +127,29 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
+  // Browser Display Mode: 'sidepanel' vs 'floating' (for Arc Browser and fallback window)
+  const [panelMode, setPanelMode] = useState<'sidepanel' | 'floating'>('sidepanel');
+  const [isArcDetected, setIsArcDetected] = useState(false);
+
+  useEffect(() => {
+    chrome.storage?.local?.get(['isArcBrowser', 'panelDisplayMode'], (res) => {
+      if (res?.isArcBrowser) setIsArcDetected(true);
+      if (res?.panelDisplayMode) {
+        setPanelMode(res.panelDisplayMode);
+      } else if (res?.isArcBrowser) {
+        setPanelMode('floating');
+      }
+    });
+  }, []);
+
+  const handleTogglePanelMode = (mode: 'sidepanel' | 'floating') => {
+    setPanelMode(mode);
+    chrome.storage?.local?.set({
+      panelDisplayMode: mode,
+      isArcBrowser: mode === 'floating',
+    });
+  };
+
   const handleOpenAiStudio = () => {
     const url = 'https://aistudio.google.com/api-keys';
     if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
@@ -711,6 +734,46 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
           </div>
         </div>
       )}
+
+      {/* ======================================================== */}
+      {/* Universal Display Mode Selector (Arc Browser / Side Panel) */}
+      {/* ======================================================== */}
+      <div className="p-3 rounded-2xl bg-zinc-900/90 border border-zinc-800 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-xs text-zinc-100">Display Mode</h3>
+            <p className="text-[10px] text-zinc-400">
+              {panelMode === 'floating' || isArcDetected
+                ? 'Arc Browser / Floating Window (Docked Panel)'
+                : 'Native Chrome Side Panel'}
+            </p>
+          </div>
+          <div className="flex rounded-full bg-zinc-950 p-0.5 border border-zinc-800">
+            <button
+              type="button"
+              className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-all cursor-pointer ${
+                panelMode === 'sidepanel'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+              onClick={() => handleTogglePanelMode('sidepanel')}
+            >
+              Side Panel
+            </button>
+            <button
+              type="button"
+              className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-all cursor-pointer ${
+                panelMode === 'floating'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+              onClick={() => handleTogglePanelMode('floating')}
+            >
+              Floating (Arc)
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* ======================================================== */}
       {/* Bottom Action Buttons: Save Settings & Test API */}
