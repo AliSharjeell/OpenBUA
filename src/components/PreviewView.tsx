@@ -27,7 +27,7 @@ export function PreviewView({ content, isBusy = false }: PreviewViewProps) {
   return (
     <div className="flex-1 overflow-y-auto px-4 pt-16 pb-8 bg-zinc-950 text-zinc-100 flex flex-col font-sans select-text">
       {/* Top Meta & Action Bar */}
-      <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-800/80">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-zinc-200 tracking-tight">Live Research Preview</span>
           {isBusy && (
