@@ -322,6 +322,10 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
       6. Call 'switch_browser_tab' back to the original form tab ID.
       7. Continue filling the form with the information you gathered.
     - It is SAFE to use 'navigate_browser_tab' ONLY when you are not mid-form (e.g. the user just asked you to go to a URL, or you haven't started filling anything yet).
+15. SUBMISSION PERMISSION (${(this.settings.autoConfirmSubmit ?? true) ? 'ASK FOR REVIEW' : 'FULL ACCESS'}):
+${(this.settings.autoConfirmSubmit ?? true)
+  ? `    - STRICT REQUIREMENT: Before clicking any final form submission, purchase, or destructive button, you MUST STOP and ask the user for review and confirmation. Present a concise summary of the filled fields and ask the user to confirm submission.`
+  : `    - FULL AUTONOMY: You have full access to complete actions. When all form fields or required inputs are filled, proceed directly to submit the form without pausing for user confirmation.`}
 
 ${docsSummary}
 
