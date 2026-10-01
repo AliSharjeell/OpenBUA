@@ -126,7 +126,7 @@ export function MemoryView({
       {/* Header and Scope Selector */}
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-zinc-100 text-sm tracking-tight">Memory Store</h2>
+          <h2 className="font-semibold text-zinc-100 text-sm tracking-tight">Memory</h2>
 
           <Button
             size="sm"
