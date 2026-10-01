@@ -14,6 +14,8 @@ export interface ProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  isFreeMode?: boolean;
+  mode?: ModelMode;
 }
 
 export interface AppSettings {

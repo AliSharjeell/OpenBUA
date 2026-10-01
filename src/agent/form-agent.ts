@@ -339,6 +339,8 @@ ${this.settings.systemInstruction || ''}`.trim();
         baseUrl: this.settings.free?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/',
         apiKey: this.settings.free?.apiKey || '',
         model: this.settings.free?.model || 'gemini-3.8-flash',
+        isFreeMode: true,
+        mode: 'free',
       };
     }
     const isAnthropic = this.settings.activeProvider === 'anthropic';
@@ -348,6 +350,8 @@ ${this.settings.systemInstruction || ''}`.trim();
       baseUrl: cfg.baseUrl,
       apiKey: cfg.apiKey,
       model: cfg.model,
+      isFreeMode: false,
+      mode: 'byok',
     };
   }
 
