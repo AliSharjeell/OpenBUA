@@ -38,6 +38,7 @@ import {
   Pencil,
   Trash2,
   Check,
+  ArrowLeft,
 } from 'lucide-react';
 
 function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
@@ -515,16 +516,27 @@ export function App() {
 
       {/* Floating Top Header (Positioned absolute over viewport, zero solid strip) */}
       <header className="absolute top-2.5 left-0 right-0 z-30 px-3 flex items-center justify-between pointer-events-none">
-        {/* Left: Circle 2-Line Hamburger Button */}
+        {/* Left: Circle Back Button (in Settings) OR 2-Line Hamburger Button (in Chat/Memory) */}
         <div className="flex items-center pointer-events-auto">
-          <button
-            type="button"
-            onClick={() => setIsSidebarOpen(true)}
-            title="Open Menu"
-            className="w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
-          >
-            <TwoLineMenu className="w-4 h-4 text-white" />
-          </button>
+          {activeNavTab === 'settings' ? (
+            <button
+              type="button"
+              onClick={() => handleSelectNavTab('chat')}
+              title="Back to Chat"
+              className="w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
+            >
+              <ArrowLeft className="w-4 h-4 text-white" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(true)}
+              title="Open Menu"
+              className="w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border border-zinc-800/90 text-white flex items-center justify-center transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95"
+            >
+              <TwoLineMenu className="w-4 h-4 text-white" />
+            </button>
+          )}
         </div>
 
         {/* Center: Chat / Memory Floating Toggle OR Free / BYOK Toggle in Settings */}
