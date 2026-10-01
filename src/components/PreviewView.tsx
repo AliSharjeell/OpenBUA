@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { Copy, Check, Trash2, Eye, Loader2 } from 'lucide-react';
+import { Copy, Check, Eye, Loader2 } from 'lucide-react';
 
 interface PreviewViewProps {
   content: string;
@@ -8,7 +8,7 @@ interface PreviewViewProps {
   onClear?: () => void;
 }
 
-export function PreviewView({ content, isBusy = false, onClear }: PreviewViewProps) {
+export function PreviewView({ content, isBusy = false }: PreviewViewProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -23,8 +23,6 @@ export function PreviewView({ content, isBusy = false, onClear }: PreviewViewPro
   };
 
   const hasContent = Boolean(content && content.trim().length > 0);
-  const charCount = content ? content.length : 0;
-  const lineCount = content ? content.split('\n').filter(Boolean).length : 0;
 
   return (
     <div className="flex-1 overflow-y-auto px-4 pt-16 pb-8 bg-zinc-950 text-zinc-100 flex flex-col font-sans select-text">
@@ -42,9 +40,6 @@ export function PreviewView({ content, isBusy = false, onClear }: PreviewViewPro
 
         {hasContent && (
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-zinc-500 font-mono mr-1">
-              {lineCount} {lineCount === 1 ? 'line' : 'lines'} • {charCount} chars
-            </span>
             <button
               type="button"
               onClick={handleCopy}
@@ -63,16 +58,6 @@ export function PreviewView({ content, isBusy = false, onClear }: PreviewViewPro
                 </>
               )}
             </button>
-            {onClear && (
-              <button
-                type="button"
-                onClick={onClear}
-                title="Clear Preview"
-                className="p-1 rounded-full text-zinc-500 hover:text-red-400 hover:bg-zinc-900 transition-colors cursor-pointer"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-            )}
           </div>
         )}
       </div>
