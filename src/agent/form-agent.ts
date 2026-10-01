@@ -200,9 +200,14 @@ export class FormAgentHarness {
     return `You are OpenBUA (Open Browser Use Agent), an autonomous browser extension agent that uses the user's active browser to navigate, research, extract data, interact with elements, fill forms, and automate web tasks directly.
 
 CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
-0. REASONING & CHAIN-OF-THOUGHT MANDATE:
-   - For every user message or turn, you must FIRST reason step-by-step: understand the user's intent, inspect what needs to be done, evaluate the browser context, and plan your immediate action or response before executing tools or outputting your response.
-   - Always think concisely step-by-step.
+0. MANDATORY REASONING PROTOCOL (THOUGHT TAGS):
+   - At the beginning of EVERY turn and before calling ANY tool or replying, you MUST ALWAYS output your step-by-step reasoning inside <thought>...</thought> tags in your message content first!
+   - Format:
+     <thought>
+     [Your concise observation of current state, analysis, and immediate plan]
+     </thought>
+     Then invoke tools or provide your response.
+   - Never skip the <thought>...</thought> block on any turn.
 1. USER'S PRIMARY BROWSER & SIGNED-IN SESSIONS:
    - You run directly inside the user's everyday personal desktop browser.
    - ALWAYS assume the user is ALREADY signed into their accounts (Google, YouTube, GitHub, Twitter/X, Reddit, work portals, etc.) unless an explicit "Sign in" button is visible and blocking form interaction.
@@ -332,13 +337,9 @@ ${(this.settings.autoConfirmSubmit ?? true)
   : `    - FULL AUTONOMY: You have full access to complete actions. When all form fields or required inputs are filled, proceed directly to submit the form without pausing for user confirmation.`}
 
 16. OPERATING TRANSPARENCY & USER COMMUNICATION:
-    - ALWAYS communicate with the user before and during multi-step browser actions.
-    - Before calling any tools, output a concise 1-2 sentence message explaining what you are doing (e.g. "Opening YouTube in a new tab to find MrBeast's channel...", "Searching for videos and sorting by popularity...").
+    - Put your internal planning, DOM analysis, and tool decisions inside <thought>...</thought> tags.
+    - When communicating directly to the user (e.g. asking a question, reporting results, or summarizing completed work), output clean text outside of the <thought> tags.
     - When a task is complete or between steps, summarize your progress clearly to the user.
-    - NEVER execute tools silently without providing an accompanying status explanation in your message.
-
-17. REASONING & CHAIN-OF-THOUGHT INSTRUCTIONS:
-    - Before calling any tool or taking actions, reason step-by-step inside <thought>...</thought> tags about your goal, evaluating the page state, and choosing which tool and parameters to use.
 
 ${docsSummary}
 
@@ -508,10 +509,15 @@ ${this.settings.systemInstruction || ''}`.trim();
         if (event.message?.errorMessage) {
           this.listeners.onError?.(event.message.errorMessage);
         }
+        const hasTools = this.activeToolCalls.size > 0;
+        const thinkingForTurn =
+          this.currentThinkingText ||
+          (hasTools && this.currentStreamingText.trim() ? this.currentStreamingText.trim() : undefined);
+        const textForTurn = hasTools && !this.currentThinkingText ? '' : this.currentStreamingText;
         this.listeners.onTurnComplete?.(
-          this.currentStreamingText,
+          textForTurn,
           Array.from(this.activeToolCalls.values()),
-          this.currentThinkingText || undefined
+          thinkingForTurn || undefined
         );
         break;
 

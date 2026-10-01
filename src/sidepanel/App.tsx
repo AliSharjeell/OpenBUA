@@ -258,6 +258,17 @@ export function App() {
                 isStreaming: true,
               };
               return updated;
+            } else if (last && last.role === 'assistant' && last.isStreaming && last.content && !last.thinking) {
+              const calls = last.toolCalls || [];
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...last,
+                thinking: last.content,
+                content: '',
+                toolCalls: [...calls, toolCall],
+                isStreaming: true,
+              };
+              return updated;
             } else {
               return [
                 ...prev,
@@ -307,7 +318,7 @@ export function App() {
               updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
-                content: assistantText || last.content,
+                content: assistantText !== undefined ? assistantText : last.content,
                 toolCalls: toolCalls.length > 0 ? toolCalls : (last.toolCalls || []),
                 thinking: thinkingText || last.thinking,
                 thinkingDurationMs: duration ?? last.thinkingDurationMs,
