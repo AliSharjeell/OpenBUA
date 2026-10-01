@@ -44,12 +44,13 @@ export function PreviewView({ content, isBusy = false }: PreviewViewProps) {
               type="button"
               onClick={handleCopy}
               title="Copy Markdown"
-              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition-all cursor-pointer active:scale-95 shadow-xs"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium text-white transition-all cursor-pointer active:scale-95 shadow-xs"
+              style={{ backgroundColor: copied ? '#34C759' : '#007AFF' }}
             >
               {copied ? (
                 <>
-                  <Check className="w-3 h-3 text-emerald-400" />
-                  <span className="text-emerald-400 font-medium">Copied</span>
+                  <Check className="w-3 h-3 text-white" />
+                  <span className="font-medium">Copied</span>
                 </>
               ) : (
                 <>
