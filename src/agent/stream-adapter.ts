@@ -775,7 +775,27 @@ async function streamOpenAI(
         // Tool calls delta
         if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
           for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0;
+            // Determine a unique accumulator key:
+            // 1. If tc.index is explicitly specified (number), use String(tc.index)
+            // 2. Else if tc.id is provided, use tc.id
+            // 3. Else fallback to unique call id
+            let key: string;
+            if (typeof tc.index === 'number') {
+              key = `idx_${tc.index}`;
+            } else if (tc.id) {
+              key = `id_${tc.id}`;
+            } else if (tc.function?.name && toolCallAccumulators.size > 0) {
+              const lastKey = Array.from(toolCallAccumulators.keys()).pop()!;
+              const lastAcc = toolCallAccumulators.get(lastKey)!;
+              if (lastAcc.name === tc.function.name) {
+                key = lastKey;
+              } else {
+                key = `call_${toolCallAccumulators.size}`;
+              }
+            } else {
+              key = `call_${toolCallAccumulators.size}`;
+            }
+
             const extra = tc.extra_content || delta.extra_content || choice.extra_content || (json as any).extra_content;
             const thoughtSig =
               tc.thought_signature ||
@@ -783,18 +803,28 @@ async function streamOpenAI(
               extra?.google?.thought_signature ||
               tc.provider_specific_fields?.thought_signature;
 
-            if (!toolCallAccumulators.has(idx)) {
-              toolCallAccumulators.set(idx, {
-                id: tc.id || `call_${idx}_${Date.now()}`,
+            if (!toolCallAccumulators.has(key)) {
+              toolCallAccumulators.set(key, {
+                id: tc.id || `call_${toolCallAccumulators.size}_${Date.now()}`,
                 name: tc.function?.name || '',
                 argsStr: tc.function?.arguments || '',
                 extra_content: extra,
                 thought_signature: thoughtSig,
               });
             } else {
-              const acc = toolCallAccumulators.get(idx)!;
+              const acc = toolCallAccumulators.get(key)!;
               if (tc.id) acc.id = tc.id;
-              if (tc.function?.name) acc.name += tc.function.name;
+              if (tc.function?.name) {
+                if (!acc.name) {
+                  acc.name = tc.function.name;
+                } else if (acc.name === tc.function.name) {
+                  // Duplicate full name sent across chunks, do not append
+                } else if (tc.function.name.startsWith(acc.name)) {
+                  acc.name = tc.function.name;
+                } else if (!acc.name.includes(tc.function.name)) {
+                  acc.name += tc.function.name;
+                }
+              }
               if (tc.function?.arguments) acc.argsStr += tc.function.arguments;
               if (extra) acc.extra_content = extra;
               if (thoughtSig) acc.thought_signature = thoughtSig;
