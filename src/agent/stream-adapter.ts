@@ -345,16 +345,28 @@ async function streamOpenAI(
 
   // Request thoughts / reasoning traces for Gemini models via Google OpenAI-compatible endpoint
   if (isGemini) {
+    const isGemini3 =
+      (config.model || '').includes('3.') ||
+      (config.model || '').includes('3-') ||
+      (config.model || '').includes('3.5') ||
+      (config.model || '').includes('3.8') ||
+      (config.model || '').includes('3.1');
+
+    const thinkingConfig: any = {
+      include_thoughts: true,
+    };
+    if (isGemini3) {
+      thinkingConfig.thinking_level = 'low';
+    } else {
+      thinkingConfig.thinking_budget = 1024;
+    }
+
     payload.google = {
-      thinking_config: {
-        include_thoughts: true,
-      },
+      thinking_config: thinkingConfig,
     };
     payload.extra_body = {
       google: {
-        thinking_config: {
-          include_thoughts: true,
-        },
+        thinking_config: thinkingConfig,
       },
     };
   }
@@ -421,11 +433,18 @@ async function streamOpenAI(
 
     const errorBody = await response.text();
 
-    // If Gemini model rejected thinking_config with 400 Bad Request on attempt 0, strip thinking_config and retry cleanly
+    // If Gemini model rejected thinking_config with 400 Bad Request on attempt 0, try reasoning_effort fallback
     if (response && response.status === 400 && payload.google && attempt === 0) {
-      console.warn('[streamOpenAI] Model returned 400 with thinking_config. Retrying without thinking_config...');
+      console.warn('[streamOpenAI] Model returned 400 with thinking_config. Retrying with reasoning_effort...');
       delete payload.google;
       delete payload.extra_body;
+      payload.reasoning_effort = 'low';
+      continue;
+    }
+    // If reasoning_effort was also rejected with 400, strip reasoning controls completely
+    if (response && response.status === 400 && payload.reasoning_effort && attempt <= 1) {
+      console.warn('[streamOpenAI] Model returned 400 with reasoning_effort. Retrying without reasoning params...');
+      delete payload.reasoning_effort;
       continue;
     }
 
@@ -632,8 +651,7 @@ async function streamOpenAI(
         const choice = json.choices?.[0];
         if (!choice) continue;
 
-        const delta = choice.delta;
-        if (!delta) continue;
+        const delta = choice.delta || choice.message || {};
 
         // Reasoning / Thinking delta (Gemini reasoning_content/thought/parts, DeepSeek R1, OpenAI o1/o3-mini, Minimax)
         let reasoningDelta = '';
@@ -641,12 +659,20 @@ async function streamOpenAI(
           reasoningDelta = delta.reasoning_content;
         } else if (typeof delta.thought === 'string') {
           reasoningDelta = delta.thought;
+        } else if (typeof delta.thought_summary === 'string') {
+          reasoningDelta = delta.thought_summary;
         } else if (typeof delta.reasoning === 'string') {
           reasoningDelta = delta.reasoning;
+        } else if (typeof (choice as any).reasoning_content === 'string') {
+          reasoningDelta = (choice as any).reasoning_content;
+        } else if (typeof (choice as any).thought === 'string') {
+          reasoningDelta = (choice as any).thought;
         } else if (Array.isArray(delta.parts)) {
           for (const p of delta.parts) {
             if (p && p.thought && p.text) {
               reasoningDelta += p.text;
+            } else if (p && !p.thought && p.text && !delta.content) {
+              delta.content = (delta.content || '') + p.text;
             }
           }
         } else if (delta.extra_content?.google?.thought) {
