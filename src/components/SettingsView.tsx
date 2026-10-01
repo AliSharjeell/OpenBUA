@@ -11,6 +11,82 @@ import {
   Check,
 } from 'lucide-react';
 
+export interface FreeGeminiModelOption {
+  id: string;
+  name: string;
+  rpm: string;
+  rpd: string;
+  badge?: string;
+  description: string;
+}
+
+export const FREE_GEMINI_MODELS: FreeGeminiModelOption[] = [
+  {
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash Lite',
+    rpm: '15 RPM',
+    rpd: '500 RPD',
+    badge: 'Recommended Free',
+    description: '15 req/min, 500 req/day. Cost-efficient, high volume for agents.',
+  },
+  {
+    id: 'gemini-3.1-flash-lite',
+    name: 'Gemini 3.1 Flash Lite',
+    rpm: '15 RPM',
+    rpd: '500 RPD',
+    badge: 'High Limit',
+    description: '15 req/min, 500 req/day. Ultra-low latency, generous quota.',
+  },
+  {
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    rpm: '5 RPM',
+    rpd: '20 RPD',
+    badge: 'Flagship Flash',
+    description: '5 req/min, 20 req/day. Most intelligent Flash model for complex reasoning.',
+  },
+  {
+    id: 'gemini-3.7-flash',
+    name: 'Gemini 3.7 Flash',
+    rpm: '5 RPM',
+    rpd: '20 RPD',
+    badge: 'Hybrid Reasoning',
+    description: '5 req/min, 20 req/day. High-speed coding and multi-step execution.',
+  },
+  {
+    id: 'gemini-3.6-flash',
+    name: 'Gemini 3.6 Flash',
+    rpm: '5 RPM',
+    rpd: '20 RPD',
+    badge: 'General',
+    description: '5 req/min, 20 req/day. Balanced speed and multimodal capabilities.',
+  },
+  {
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash',
+    rpm: '5 RPM',
+    rpd: '20 RPD',
+    badge: 'Standard',
+    description: '5 req/min, 20 req/day. Reliable baseline performance.',
+  },
+  {
+    id: 'gemini-2.5-flash-lite',
+    name: 'Gemini 2.5 Flash Lite',
+    rpm: '10 RPM',
+    rpd: '20 RPD',
+    badge: 'Fast',
+    description: '10 req/min, 20 req/day. Small and cost-effective model.',
+  },
+  {
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    rpm: '5 RPM',
+    rpd: '20 RPD',
+    badge: 'Standard',
+    description: '5 req/min, 20 req/day. Hybrid reasoning with large context window.',
+  },
+];
+
 interface SettingsViewProps {
   settings: AppSettings;
   onSettingsSaved: (updated: AppSettings) => void;
@@ -36,7 +112,7 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
     settings.free?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/'
   );
   const [freeKey, setFreeKey] = useState(settings.free?.apiKey || '');
-  const [freeModel] = useState(settings.free?.model || 'gemini-3.8-flash');
+  const [freeModel, setFreeModel] = useState(settings.free?.model || 'gemini-3.5-flash-lite');
 
   // Gemini daily usage limits tracking (1,500 RPD)
   const [geminiUsage, setGeminiUsage] = useState<GeminiUsageInfo>({
@@ -191,7 +267,7 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
             Authorization: `Bearer ${key}`,
           },
           body: JSON.stringify({
-            model: model || (isFree ? 'gemini-3.8-flash' : 'gpt-6-astra'),
+            model: model || (isFree ? 'gemini-3.5-flash-lite' : 'gpt-6-astra'),
             max_tokens: 5,
             messages: [{ role: 'user', content: 'ping' }],
           }),
@@ -283,7 +359,38 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
             </div>
           </div>
 
-          {/* 3. Percentage / Quota Bar (No icon, white percentage text) */}
+          {/* 3. Gemini Model Selector with RPM/RPD Limits */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-medium text-zinc-300 block">
+                Free Gemini Model
+              </label>
+              {(() => {
+                const currentOpt = FREE_GEMINI_MODELS.find((m) => m.id === freeModel);
+                return currentOpt ? (
+                  <span className="text-[10px] text-emerald-400 font-medium">
+                    {currentOpt.rpm} • {currentOpt.rpd}
+                  </span>
+                ) : null;
+              })()}
+            </div>
+            <select
+              value={freeModel}
+              onChange={(e) => setFreeModel(e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-800 text-zinc-200 text-xs rounded-xl px-3 py-2.5 focus:border-zinc-600 focus:outline-none cursor-pointer"
+            >
+              {FREE_GEMINI_MODELS.map((m) => (
+                <option key={m.id} value={m.id} className="bg-zinc-900 text-zinc-200">
+                  {m.name} ({m.rpm}, {m.rpd}){m.badge ? ` — ${m.badge}` : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-zinc-400 leading-relaxed">
+              If one model's limit is reached, you may use another and resume.
+            </p>
+          </div>
+
+          {/* 4. Percentage / Quota Bar (No icon, white percentage text) */}
           <div className="p-3 rounded-xl bg-zinc-900/70 border border-zinc-800/80 space-y-2">
             <div className="flex items-center justify-between text-[11px]">
               <span className="font-medium text-zinc-300">Free Tier Daily Quota</span>

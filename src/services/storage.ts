@@ -13,7 +13,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   free: {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
     apiKey: '',
-    model: 'gemini-3.8-flash',
+    model: 'gemini-3.5-flash-lite',
   },
   openai: {
     baseUrl: 'https://api.openai.com/v1',
