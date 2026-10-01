@@ -4,6 +4,14 @@
 const SIDEPANEL_PATH = 'sidepanel.html';
 const FLOATING_WINDOW_WIDTH = 420;
 
+// Track Arc Browser environment to bypass non-rendering sidePanel API
+let isArcBrowser = false;
+try {
+  chrome.storage?.local?.get('isArcBrowser', (res) => {
+    if (res?.isArcBrowser) isArcBrowser = true;
+  });
+} catch {}
+
 // Helper to open or focus the OpenBUA interface across all browsers
 async function openOpenBUA(targetTab?: chrome.tabs.Tab) {
   let tab = targetTab;
@@ -14,17 +22,17 @@ async function openOpenBUA(targetTab?: chrome.tabs.Tab) {
     } catch {}
   }
 
-  // 1. First, attempt to open the native Chromium side panel if supported
-  if (chrome.sidePanel && typeof chrome.sidePanel.open === 'function' && tab?.windowId) {
+  // 1. In standard Chromium (Chrome, Brave, Edge), attempt native side panel if not detected as Arc
+  if (!isArcBrowser && chrome.sidePanel && typeof chrome.sidePanel.open === 'function' && tab?.windowId) {
     try {
       await chrome.sidePanel.open({ windowId: tab.windowId });
       return;
     } catch (err) {
-      console.log('[OpenBUA] Native sidePanel.open not supported on this browser (e.g. Arc). Falling back to floating window:', err);
+      console.log('[OpenBUA] Native sidePanel.open failed. Falling back to floating window:', err);
     }
   }
 
-  // 2. Fallback for Arc Browser, Brave, Edge, etc.:
+  // 2. Fallback for Arc Browser & browsers without native side panel:
   // Check if an existing OpenBUA floating window is already open
   const extUrl = chrome.runtime.getURL(SIDEPANEL_PATH);
   try {
@@ -57,7 +65,7 @@ async function openOpenBUA(targetTab?: chrome.tabs.Tab) {
   }
 
   try {
-    await chrome.windows.create({
+    const win = await chrome.windows.create({
       url: extUrl,
       type: 'popup',
       width,
@@ -66,6 +74,18 @@ async function openOpenBUA(targetTab?: chrome.tabs.Tab) {
       top,
       focused: true,
     });
+
+    // Arc ignores initial bounds given to windows.create for popups;
+    // applying them again via windows.update ensures it docks to the right edge!
+    if (win?.id !== undefined && left !== undefined && top !== undefined) {
+      for (const delay of [50, 300, 800]) {
+        setTimeout(() => {
+          if (win.id !== undefined) {
+            chrome.windows.update(win.id, { left, top, width, height }).catch(() => {});
+          }
+        }, delay);
+      }
+    }
   } catch (err) {
     // If popup window creation fails, fallback to opening a tab
     console.warn('[OpenBUA] Failed to create popup window, opening in tab:', err);
@@ -77,12 +97,14 @@ async function openOpenBUA(targetTab?: chrome.tabs.Tab) {
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[OpenBUA] Extension installed/updated.');
 
-  // Try configuring side panel behavior for Chrome
-  if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
-    chrome.sidePanel
-      .setPanelBehavior({ openPanelOnActionClick: true })
-      .catch((err) => console.log('[OpenBUA] sidePanel.setPanelBehavior not supported on this browser:', err));
-  }
+  // Check if Arc before configuring side panel behavior
+  chrome.storage?.local?.get('isArcBrowser', (res) => {
+    if (!res?.isArcBrowser && chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+      chrome.sidePanel
+        .setPanelBehavior({ openPanelOnActionClick: true })
+        .catch((err) => console.log('[OpenBUA] sidePanel.setPanelBehavior not supported on this browser:', err));
+    }
+  });
 
   // Create context menu item for quick access across all browsers (Arc, Brave, Chrome, etc.)
   if (chrome.contextMenus) {
@@ -121,6 +143,12 @@ if (chrome.commands) {
 
 // Relay messages between UI and tabs
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'ARC_BROWSER_DETECTED') {
+    isArcBrowser = true;
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (message.type === 'PING') {
     sendResponse({ status: 'PONG', timestamp: Date.now() });
     return true;
