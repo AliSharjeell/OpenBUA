@@ -57,12 +57,12 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
   // BYOK OpenAI Config
   const [openaiUrl, setOpenaiUrl] = useState(settings.openai?.baseUrl || 'https://api.openai.com/v1');
   const [openaiKey, setOpenaiKey] = useState(settings.openai?.apiKey || '');
-  const [openaiModel, setOpenaiModel] = useState(settings.openai?.model || '6 Astra');
+  const [openaiModel, setOpenaiModel] = useState(settings.openai?.model || 'gpt-6-astra');
 
   // BYOK Anthropic Config
   const [anthropicUrl, setAnthropicUrl] = useState(settings.anthropic?.baseUrl || 'https://api.anthropic.com/v1');
   const [anthropicKey, setAnthropicKey] = useState(settings.anthropic?.apiKey || '');
-  const [anthropicModel, setAnthropicModel] = useState(settings.anthropic?.model || 'Sonnet 5.5');
+  const [anthropicModel, setAnthropicModel] = useState(settings.anthropic?.model || 'claude-sonnet-5-5');
 
   // Permissions: Ask for review (true, default) vs Full access (false)
   const [autoConfirmSubmit, setAutoConfirmSubmit] = useState(settings.autoConfirmSubmit ?? true);
@@ -161,7 +161,7 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
             'anthropic-dangerous-direct-browser-access': 'true',
           },
           body: JSON.stringify({
-            model: model || 'Sonnet 5.5',
+            model: model || 'claude-sonnet-5-5',
             max_tokens: 5,
             messages: [{ role: 'user', content: 'ping' }],
           }),
@@ -191,7 +191,7 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
             Authorization: `Bearer ${key}`,
           },
           body: JSON.stringify({
-            model: model || (isFree ? 'gemini-3.8-flash' : '6 Astra'),
+            model: model || (isFree ? 'gemini-3.8-flash' : 'gpt-6-astra'),
             max_tokens: 5,
             messages: [{ role: 'user', content: 'ping' }],
           }),
@@ -470,7 +470,7 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
                     className="text-[9px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
                     onClick={() => {
                       setOpenaiUrl('https://api.groq.com/openai/v1/chat/completions');
-                      setOpenaiModel('6 Astra');
+                      setOpenaiModel('gpt-6-astra');
                     }}
                   >
                     Groq
@@ -508,18 +508,20 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
               <div>
                 <label className="text-[11px] font-medium text-zinc-300 block mb-1">Model ID</label>
                 <Input
-                  placeholder="6 Astra"
+                  placeholder="gpt-6-astra"
                   value={openaiModel}
                   onChange={(e) => setOpenaiModel(e.target.value)}
                   className="bg-zinc-900 border-zinc-800 font-mono text-[11px] rounded-xl focus:border-zinc-600"
                 />
                 <div className="flex gap-1.5 mt-1.5 flex-wrap">
                   <span className="text-[9px] text-zinc-500">Presets:</span>
-                  {['6 Astra', '6.1 Sol', '6 Luna'].map((m) => (
+                  {['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'].map((m) => (
                     <button
                       key={m}
                       type="button"
-                      className="text-[9px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
+                      className={`text-[9px] underline transition-colors cursor-pointer ${
+                        openaiModel === m ? 'text-blue-400 font-semibold' : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
                       onClick={() => setOpenaiModel(m)}
                     >
                       {m}
@@ -580,18 +582,20 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
               <div>
                 <label className="text-[11px] font-medium text-zinc-300 block mb-1">Model Name</label>
                 <Input
-                  placeholder="Sonnet 5.5"
+                  placeholder="claude-sonnet-5-5"
                   value={anthropicModel}
                   onChange={(e) => setAnthropicModel(e.target.value)}
                   className="bg-zinc-900 border-zinc-800 font-mono text-[11px] rounded-xl focus:border-zinc-600"
                 />
                 <div className="flex gap-1.5 mt-1.5 flex-wrap">
                   <span className="text-[9px] text-zinc-500">Presets:</span>
-                  {['Opus 5.5', 'Sonnet 5.5', 'Fable 5.1'].map((m) => (
+                  {['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1'].map((m) => (
                     <button
                       key={m}
                       type="button"
-                      className="text-[9px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
+                      className={`text-[9px] underline transition-colors cursor-pointer ${
+                        anthropicModel === m ? 'text-blue-400 font-semibold' : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
                       onClick={() => setAnthropicModel(m)}
                     >
                       {m}
