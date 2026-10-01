@@ -130,7 +130,7 @@ export function MemoryView({
 
           <Button
             size="sm"
-            className="h-7 px-3 text-[11px] gap-1.5 rounded-full bg-zinc-100 text-zinc-950 hover:bg-zinc-200 cursor-pointer"
+            className="h-7 px-3 text-[11px] gap-1.5 rounded-full bg-[#007AFF] text-white hover:bg-[#0071EB] font-medium shadow-xs transition-colors cursor-pointer"
             onClick={() => {
               if (isAddingNew && !isEditing) {
                 resetForm();
