@@ -751,6 +751,7 @@ export async function checkActiveTabCaptcha(tabId?: number): Promise<{ detected:
 // --- Human-in-the-Loop (HITL) 10-Second CAPTCHA Intercept Gate Manager ---
 export interface CaptchaState {
   isActive: boolean;
+  isManualSolving?: boolean;
   type: string;
   url: string;
   remainingSeconds: number;
@@ -761,6 +762,7 @@ type CaptchaListener = (state: CaptchaState) => void;
 class CaptchaGateManager {
   private activeState: CaptchaState = {
     isActive: false,
+    isManualSolving: false,
     type: '',
     url: '',
     remainingSeconds: 0,
@@ -788,6 +790,16 @@ class CaptchaGateManager {
     }
   }
 
+  public pauseForManualSolving() {
+    if (!this.activeState.isActive) return;
+    if (this.countdownTimer) {
+      clearInterval(this.countdownTimer);
+      this.countdownTimer = null;
+    }
+    this.activeState.isManualSolving = true;
+    this.notify();
+  }
+
   public resolveActiveGate(solved: boolean, customMessage?: string) {
     if (!this.activeState.isActive || !this.activeResolver) return;
 
@@ -804,6 +816,7 @@ class CaptchaGateManager {
     this.activeResolver = null;
     this.activeState = {
       isActive: false,
+      isManualSolving: false,
       type: '',
       url: '',
       remainingSeconds: 0,
@@ -829,6 +842,7 @@ class CaptchaGateManager {
 
     this.activeState = {
       isActive: true,
+      isManualSolving: false,
       type: type || 'bot_challenge',
       url,
       remainingSeconds: 10,

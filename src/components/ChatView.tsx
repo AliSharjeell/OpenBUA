@@ -24,7 +24,6 @@ import {
   Mail,
   Keyboard,
   Globe,
-  ShieldAlert,
   Wrench,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
@@ -271,6 +270,7 @@ export function ChatView({
 
   const [captchaState, setCaptchaState] = useState<CaptchaState>({
     isActive: false,
+    isManualSolving: false,
     type: '',
     url: '',
     remainingSeconds: 0,
@@ -283,12 +283,16 @@ export function ChatView({
     return () => unsubscribe();
   }, []);
 
-  const handleSolveCaptcha = () => {
-    captchaManager.resolveActiveGate(true, 'CAPTCHA marked as solved by user. Resuming automation.');
+  const handleManualSolvingCaptcha = () => {
+    captchaManager.pauseForManualSolving();
+  };
+
+  const handleContinueCaptcha = () => {
+    captchaManager.resolveActiveGate(true, 'CAPTCHA marked as resolved by user. Resuming automation.');
   };
 
   const handleSkipCaptcha = () => {
-    captchaManager.resolveActiveGate(false, 'CAPTCHA skipped by user. ABORT this domain immediately and pivot to an alternate source/query.');
+    captchaManager.resolveActiveGate(false, 'CAPTCHA challenge skipped by user. Pivoting to alternate source.');
   };
 
   const currentKey =
@@ -605,58 +609,53 @@ export function ChatView({
 
       {/* Floating Input Box (Positioned absolute over viewport, zero solid strip) */}
       <div className="absolute bottom-3 left-3 right-3 z-20 pointer-events-none space-y-2">
-        {/* Human-in-the-Loop (HITL) CAPTCHA Intercept Gate Banner */}
+        {/* Human-in-the-Loop (HITL) Minimal CAPTCHA Popup */}
         {captchaState.isActive && (
-          <div className="pointer-events-auto rounded-xl border border-amber-500/60 bg-zinc-900/95 backdrop-blur-md p-3 shadow-2xl shadow-black/80 space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-6 h-6 rounded-lg bg-amber-900/80 border border-amber-600/70 flex items-center justify-center shrink-0 text-amber-200">
-                  <ShieldAlert className="w-3.5 h-3.5 animate-pulse" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[11px] font-semibold text-amber-100">
-                      CAPTCHA / Bot Challenge Detected
-                    </span>
-                    <span className="font-sans text-[9px] px-1.5 py-0.2 bg-amber-900/60 border border-amber-700/60 rounded-full text-amber-300 uppercase font-medium">
-                      {captchaState.type}
-                    </span>
-                  </div>
-                  <p className="text-[10.5px] text-amber-200/80 truncate">
-                    Solve in your browser tab, or let OpenBUA auto-pivot in {captchaState.remainingSeconds}s.
-                  </p>
-                </div>
-              </div>
+          <div className="pointer-events-auto rounded-2xl border border-zinc-800 bg-zinc-900/95 backdrop-blur-md p-3 shadow-2xl space-y-2.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[13px] font-medium text-white tracking-tight pl-0.5">
+                Captcha Detected
+              </span>
 
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleSolveCaptcha}
-                  className="px-2.5 py-1 rounded-full text-[10.5px] font-medium bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 transition-all active:scale-95 shadow-sm"
-                  title="Confirm CAPTCHA is solved"
-                >
-                  <Check className="w-3 h-3" />
-                  <span>I Solved It</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSkipCaptcha}
-                  className="px-2 py-1 rounded-full text-[10.5px] font-medium bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-700/80 flex items-center gap-1 transition-all active:scale-95"
-                  title="Skip and activate automated workaround"
-                >
-                  <X className="w-3 h-3" />
-                  <span>Skip / Pivot</span>
-                </button>
-              </div>
+              {captchaState.isManualSolving ? (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleContinueCaptcha}
+                    className="px-3.5 py-1.5 rounded-full text-[11px] font-medium bg-[#007AFF] hover:bg-[#0071E3] text-white transition-all active:scale-95 shadow-sm"
+                  >
+                    Continue
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleManualSolvingCaptcha}
+                    className="px-3 py-1.5 rounded-full text-[11px] font-medium bg-[#007AFF] hover:bg-[#0071E3] text-white transition-all active:scale-95 shadow-sm"
+                  >
+                    Solving it manually
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSkipCaptcha}
+                    className="px-2.5 py-1.5 rounded-full text-[11px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700/60 transition-all active:scale-95"
+                  >
+                    Skip / Pivot
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Countdown Progress Bar */}
-            <div className="w-full bg-amber-950 rounded-full h-1.5 overflow-hidden border border-amber-900/60">
-              <div
-                className="bg-amber-400 h-full transition-all duration-1000 ease-linear rounded-full"
-                style={{ width: `${Math.max(0, (captchaState.remainingSeconds / 10) * 100)}%` }}
-              />
-            </div>
+            {/* Countdown Progress Bar (hidden during manual solving) */}
+            {!captchaState.isManualSolving && (
+              <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden">
+                <div
+                  className="bg-zinc-400 h-full transition-all duration-1000 ease-linear rounded-full"
+                  style={{ width: `${Math.max(0, (captchaState.remainingSeconds / 10) * 100)}%` }}
+                />
+              </div>
+            )}
           </div>
         )}
 
