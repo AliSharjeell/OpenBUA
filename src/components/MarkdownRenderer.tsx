@@ -93,6 +93,78 @@ function repairMarkdownTables(raw: string): string {
   // Even if immediately following bold text or list headers
   text = text.replace(/([^\n])\n(\|[^\n]+\|\n\|[\s\-:|]+\|)/g, '$1\n\n$2');
 
+  // 4. Collect isolated orphaned table rows (pipe rows with no adjacent pipe rows above/below)
+  //    that appear scattered between prose, and pull them into the primary table.
+  //    This happens when an agent writes both prose AND a pipe row for the same item.
+  const step4Lines = text.split('\n');
+
+  // Find the primary table: first block containing a header + separator row
+  let primStart = -1;
+  let primEnd = -1;
+  for (let i = 0; i < step4Lines.length - 1; i++) {
+    const curr = step4Lines[i].trim();
+    const next = step4Lines[i + 1].trim();
+    if (
+      curr.startsWith('|') && curr.endsWith('|') &&
+      /^\|[\s\-:|]+\|$/.test(next)
+    ) {
+      primStart = i;
+      let j = i;
+      while (
+        j < step4Lines.length &&
+        step4Lines[j].trim().startsWith('|') &&
+        step4Lines[j].trim().endsWith('|')
+      ) {
+        j++;
+      }
+      primEnd = j - 1;
+      break;
+    }
+  }
+
+  if (primStart !== -1) {
+    const orphanIndices = new Set<number>();
+    const orphanRows: string[] = [];
+
+    for (let i = 0; i < step4Lines.length; i++) {
+      // Skip anything already inside the primary table block
+      if (i >= primStart && i <= primEnd) continue;
+
+      const curr = step4Lines[i].trim();
+      if (!curr.startsWith('|') || !curr.endsWith('|')) continue;
+      // Skip separator-only lines
+      if (/^\|[\s\-:|]+\|$/.test(curr)) continue;
+
+      // An "isolated" row has no adjacent pipe rows directly above or below
+      const prevTrimmed = i > 0 ? step4Lines[i - 1].trim() : '';
+      const nextTrimmed = i < step4Lines.length - 1 ? step4Lines[i + 1].trim() : '';
+      const prevIsPipe = prevTrimmed.startsWith('|') && prevTrimmed.endsWith('|');
+      const nextIsPipe = nextTrimmed.startsWith('|') && nextTrimmed.endsWith('|');
+
+      if (!prevIsPipe && !nextIsPipe) {
+        orphanIndices.add(i);
+        orphanRows.push(step4Lines[i]);
+      }
+    }
+
+    if (orphanRows.length > 0) {
+      const out4: string[] = [];
+      for (let i = 0; i < step4Lines.length; i++) {
+        if (orphanIndices.has(i)) {
+          // Replace the orphan row in-place with a blank line so surrounding prose still flows
+          out4.push('');
+          continue;
+        }
+        out4.push(step4Lines[i]);
+        // Splice all orphaned rows right after the last row of the primary table
+        if (i === primEnd) {
+          out4.push(...orphanRows);
+        }
+      }
+      text = out4.join('\n');
+    }
+  }
+
   return text;
 }
 
