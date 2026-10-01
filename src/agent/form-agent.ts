@@ -145,6 +145,7 @@ export class FormAgentHarness {
   private activeToolCalls = new Map<string, ToolCallState>();
   private currentStreamingText = '';
   private currentThinkingText = '';
+  private sessionThinkingText = '';
   private chatHistory: ChatMessage[] = [];
   private sessionId: string = 'session_default';
 
@@ -409,6 +410,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         this.listeners.onStatusChange?.(true);
         this.currentStreamingText = '';
         this.currentThinkingText = '';
+        this.sessionThinkingText = '';
         this.activeToolCalls.clear();
         break;
 
@@ -425,7 +427,14 @@ ${this.settings.systemInstruction || ''}`.trim();
             this.listeners.onMessageDelta?.(this.currentStreamingText);
           } else if (ame.type === 'thinking_delta') {
             this.currentThinkingText += ame.delta;
-            this.listeners.onThinkingDelta?.(this.currentThinkingText);
+            if (!this.sessionThinkingText) {
+              this.sessionThinkingText = ame.delta;
+            } else if (this.currentThinkingText === ame.delta && !this.sessionThinkingText.endsWith('\n\n')) {
+              this.sessionThinkingText += `\n\n${ame.delta}`;
+            } else {
+              this.sessionThinkingText += ame.delta;
+            }
+            this.listeners.onThinkingDelta?.(this.sessionThinkingText);
           } else if (ame.type === 'toolcall_start') {
             const tc = ame.partial?.content?.[ame.contentIndex];
             if (tc && tc.type === 'toolCall') {
@@ -502,7 +511,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         this.listeners.onTurnComplete?.(
           this.currentStreamingText,
           Array.from(this.activeToolCalls.values()),
-          this.currentThinkingText || undefined
+          this.sessionThinkingText || this.currentThinkingText || undefined
         );
         break;
 
@@ -573,6 +582,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     this.activeToolCalls.clear();
     this.currentStreamingText = '';
     this.currentThinkingText = '';
+    this.sessionThinkingText = '';
     this.listeners.onStatusChange?.(false);
     this.setupAgent();
   }
