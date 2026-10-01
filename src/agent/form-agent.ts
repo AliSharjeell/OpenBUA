@@ -1,10 +1,10 @@
 // Form Filling Agent Harness powered by @earendil-works/pi-agent-core
 import { Agent, AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
 import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
-import { ALL_AGENT_TOOLS } from './tools';
+import { ALL_AGENT_TOOLS, createAgentTools } from './tools';
 import { createCustomModel, createStreamFn } from './stream-adapter';
 import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
-import { setActiveSessionIdState } from '../services/storage';
+import { setActiveSessionIdState, getScratchpad, appendToScratchpad, loadSuggestedMemories, saveSuggestedMemory } from '../services/storage';
 
 export interface AgentUpdateListeners {
   onMessageDelta?: (text: string) => void;
@@ -45,8 +45,13 @@ export function convertChatMessagesToAgentMessages(
         });
       }
     } else if (msg.role === 'assistant') {
-      // Filter out pure error alert notifications
-      if (msg.content?.startsWith('⚠️') && (!msg.toolCalls || msg.toolCalls.length === 0)) {
+      // Filter out pure error alert notifications and interruption notices
+      if (
+        (msg.content?.startsWith('⚠️') ||
+          msg.content?.startsWith('Error:') ||
+          msg.content?.startsWith('Agent interrupted.')) &&
+        (!msg.toolCalls || msg.toolCalls.length === 0)
+      ) {
         continue;
       }
 
@@ -137,6 +142,129 @@ export function convertChatMessagesToAgentMessages(
   return result;
 }
 
+/**
+ * Automatically detects user profile details, affiliations, and preferences
+ * from the user's prompt and queues them as Suggested Memories for 1-click review.
+ */
+export async function detectAndQueueMemorySuggestions(
+  input: string,
+  sessionId: string,
+  existingMemories: UserDocument[]
+): Promise<void> {
+  try {
+    const existingSugs = await loadSuggestedMemories(sessionId);
+    const existingTitles = new Set([
+      ...existingMemories.map((m) => m.title.toLowerCase()),
+      ...existingSugs.map((s) => s.title.toLowerCase()),
+    ]);
+    const existingContents = new Set([
+      ...existingMemories.map((m) => m.content.toLowerCase()),
+      ...existingSugs.map((s) => s.content.toLowerCase()),
+    ]);
+
+    const suggestionsToQueue: Array<{
+      title: string;
+      content: string;
+      category: 'profile' | 'preference' | 'workflow' | 'fact' | 'task';
+      reason: string;
+    }> = [];
+
+    // 1. Detect Email Addresses (e.g. k230904@nu.edu.pk, alex@gmail.com)
+    const emailMatches = input.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+    if (emailMatches) {
+      for (const email of emailMatches) {
+        const lowerEmail = email.toLowerCase();
+        if (!existingContents.has(lowerEmail)) {
+          const isStudent = lowerEmail.includes('.edu') || lowerEmail.includes('nu.edu.pk');
+          const title = isStudent ? 'Student Email' : 'Email Address';
+          if (!existingTitles.has(title.toLowerCase())) {
+            suggestionsToQueue.push({
+              title,
+              content: email,
+              category: 'profile',
+              reason: 'Identified email address provided in chat request',
+            });
+          }
+
+          // If FAST NUCES university email
+          if (lowerEmail.endsWith('@nu.edu.pk') || lowerEmail.includes('nu.edu.pk')) {
+            if (
+              !existingTitles.has('university') &&
+              !existingTitles.has('university affiliation') &&
+              !existingContents.has('national university of computer and emerging sciences (fast-nuces)')
+            ) {
+              suggestionsToQueue.push({
+                title: 'University Affiliation',
+                content: 'National University of Computer and Emerging Sciences (FAST-NUCES)',
+                category: 'profile',
+                reason: 'Inferred from @nu.edu.pk student email domain',
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Detect University / College Mentions (e.g. FAST, NUCES)
+    if (/\b(?:fast[\s-]*(?:nuces|university)?|nuces)\b/i.test(input)) {
+      if (
+        !existingTitles.has('university') &&
+        !existingTitles.has('university affiliation') &&
+        !existingContents.has('national university of computer and emerging sciences (fast-nuces)')
+      ) {
+        suggestionsToQueue.push({
+          title: 'University Affiliation',
+          content: 'National University of Computer and Emerging Sciences (FAST-NUCES)',
+          category: 'profile',
+          reason: 'Mentioned FAST University in chat prompt',
+        });
+      }
+    }
+
+    // 3. Detect Extracurricular / Society Interests
+    if (/(?:societ(?:y|ies)|induction|inductions|excom|club\s+recruitment)/i.test(input)) {
+      if (
+        !existingTitles.has('extracurricular interests') &&
+        !existingTitles.has('society interests')
+      ) {
+        suggestionsToQueue.push({
+          title: 'Extracurricular Interests',
+          content: 'Active interest in university student societies, club inductions, and executive committee roles',
+          category: 'preference',
+          reason: 'Inferred from request to discover university society inductions',
+        });
+      }
+    }
+
+    // 4. Detect Phone Numbers
+    const phoneMatch = input.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
+    if (phoneMatch && !existingContents.has(phoneMatch[0].trim())) {
+      if (!existingTitles.has('phone number') && !existingTitles.has('contact phone')) {
+        suggestionsToQueue.push({
+          title: 'Phone Number',
+          content: phoneMatch[0].trim(),
+          category: 'profile',
+          reason: 'Detected contact phone number in chat prompt',
+        });
+      }
+    }
+
+    for (const item of suggestionsToQueue) {
+      await saveSuggestedMemory({
+        id: `sug-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        title: item.title,
+        content: item.content,
+        category: item.category,
+        reason: item.reason,
+        createdAt: Date.now(),
+        sessionId,
+      });
+    }
+  } catch (err) {
+    console.warn('[FormAgentHarness] Proactive suggestion detection error:', err);
+  }
+}
+
 export class FormAgentHarness {
   private agent: Agent | null = null;
   private settings: AppSettings;
@@ -200,9 +328,77 @@ export class FormAgentHarness {
     return `You are OpenBUA (Open Browser Use Agent), an autonomous browser extension agent that uses the user's active browser to navigate, research, extract data, interact with elements, fill forms, and automate web tasks directly.
 
 CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
-0. REASONING & CHAIN-OF-THOUGHT MANDATE:
-   - For every user message or turn, you must FIRST reason step-by-step: understand the user's intent, inspect what needs to be done, evaluate the browser context, and plan your immediate action or response before executing tools or outputting your response.
-   - Always think concisely step-by-step.
+0. MANDATORY REASONING PROTOCOL (THOUGHT TAGS):
+   - At the beginning of EVERY turn and before calling ANY tool or replying, you MUST ALWAYS output your step-by-step reasoning inside <thought>...</thought> tags in your message content first!
+   - Format:
+     <thought>
+     [Your concise observation of current state, analysis, and immediate plan]
+     </thought>
+     Then invoke tools or provide your response.
+   - Never skip the <thought>...</thought> block on any turn.
+
+0.5. CRITICAL PROTOCOL: INCREMENTAL REPORTING & 1-ITEM CYCLE ('append_to_preview'):
+   - LIVE PREVIEW IS A CUSTOMER-FACING REPORT AREA:
+     * ONLY append clean, finalized findings (e.g. markdown table rows or clean summary sections).
+     * NEVER write internal reasoning, thoughts, searching status, or meta-planning into 'append_to_preview'. Put all thoughts strictly inside <thought>...</thought> tags!
+   - WORKING MEMORY PERSISTENCE:
+     * Your internal reasoning context gets compressed and pruned over long tasks.
+     * You MUST treat 'append_to_preview' as your persistent external data record.
+     * NEVER wait until all search results or emails are examined before writing.
+   - THE 1-ITEM CYCLE:
+     Whenever processing a list of items (e.g. emails, search results, candidate threads, tabs):
+     * Step A: Open 1 item.
+     * Step B: Extract relevant details (or confirm it is irrelevant).
+     * Step C: If relevant, IMMEDIATELY invoke 'append_to_preview' with a clean markdown table row for that item.
+     * Step D: Only after the tool returns success, navigate to the next item.
+   - ATOMIC TABLE PATTERN:
+     In your very first research action, initialize the table header once:
+     append_to_preview({ content: "# Societies with Inductions — 2nd October Onwards\n\n| # | Society | Induction Date | Venue / Time | Notes |\n|---|---|---|---|---|\n" })
+     Then for each item discovered, emit ONE atomic table row:
+     append_to_preview({ content: "| 1 | FAST Entrepreneurship Society (FES) | Date not specified (email sent Oct 1) | Library Discussion Room (12:30–1:30 PM) | ExCom 2026–27 |\n" })
+
+0.6. MANDATORY PROACTIVE MEMORY SUGGESTIONS ('suggest_memory'):
+   - DETECT USER DETAILS IMMEDIATELY ON TURN 1 AND THROUGHOUT RUN:
+     * Proactively inspect the user's prompt and active browsing data for personal facts, contact details, affiliations, or preferences:
+       - Student / Contact Email (e.g. k230904@nu.edu.pk) -> suggest_memory({ title: "Student Email", content: "k230904@nu.edu.pk", category: "profile", reason: "Identified student email in request" })
+       - University Affiliation (e.g. FAST-NUCES from @nu.edu.pk) -> suggest_memory({ title: "University Affiliation", content: "National University of Computer and Emerging Sciences (FAST-NUCES)", category: "profile", reason: "Inferred from @nu.edu.pk student domain" })
+       - Extracurricular Interests (e.g. university societies) -> suggest_memory({ title: "Extracurricular Interests", content: "Active interest in university student societies and executive committee inductions", category: "preference", reason: "Inferred from society induction research inquiry" })
+       - Full Name, Phone numbers, Major/Degree, Graduation Year, Career Roles.
+     * Always call 'suggest_memory' proactively whenever you see such facts! The user will see a badge on their top-right Suggested Memories button and can approve them with 1 click.
+
+   - FEW-SHOT REASONING TRAJECTORY (FOLLOW THIS EXACT PATTERN):
+     User: "i want you to access my gmail (k230904@nu.edu.pk) and find me the societies that have their inductions opened 2nd october onwards for all societies."
+     Turn 1:
+     <thought>
+     The user provided their student email k230904@nu.edu.pk and university context. I should proactively suggest saving this email, university affiliation, and society interests to memories, and initialize the preview table.
+     </thought>
+     Tool Call: suggest_memory({ title: "Student Email", content: "k230904@nu.edu.pk", category: "profile", reason: "Student email provided in prompt" })
+     Tool Call: suggest_memory({ title: "University Affiliation", content: "National University of Computer and Emerging Sciences (FAST-NUCES)", category: "profile", reason: "Identified from @nu.edu.pk domain" })
+     Tool Call: suggest_memory({ title: "Extracurricular Interests", content: "Active interest in university student societies and executive committee inductions", category: "preference", reason: "Inferred from society induction research task" })
+     Tool Call: append_to_preview({ content: "# Societies with Inductions — 2nd October Onwards\n\n| # | Society | Induction Date | Venue / Time | Notes |\n|---|---|---|---|---|\n" })
+     Observation: Suggested memories queued & Table initialized in Live Preview.
+
+     Turn 2:
+     <thought>
+     Now navigating directly to Gmail search results URL to inspect induction emails without relying on browser back button.
+     </thought>
+     Tool Call: navigate_browser_tab({ url: "https://mail.google.com/mail/u/3/#search/in%3Aanywhere+after%3A2026%2F09%2F28+(induction+OR+inductions)" })
+     Observation: Email list loaded with relevant society threads.
+
+     Turn 3:
+     <thought>
+     Opening thread 1: TLC Inductions.
+     </thought>
+     Tool Call: click_element({ text: "The Literary Club" })
+     Observation: TLC dates: Day 1 Oct 1, Day 2 Oct 2 (10:00am–3:30pm). Matches Oct 2 onwards.
+
+     Turn 4:
+     <thought>
+     Appending row 1 for TLC to live preview immediately.
+     </thought>
+     Tool Call: append_to_preview({ content: "| 1 | The Literary Club (TLC) | Thu Oct 1 & Fri Oct 2 (10:00am–3:30pm) | Day 1: LLC; Day 2: S2, AB1 | Apply online + interview |\n" })
+     Observation: Appended row to Live Preview successfully.
+
 1. USER'S PRIMARY BROWSER & SIGNED-IN SESSIONS:
    - You run directly inside the user's everyday personal desktop browser.
    - ALWAYS assume the user is ALREADY signed into their accounts (Google, YouTube, GitHub, Twitter/X, Reddit, work portals, etc.) unless an explicit "Sign in" button is visible and blocking form interaction.
@@ -233,18 +429,31 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
      |---|------|------------------------|----------|
      | 1 | Jane Doe | PhD Researcher | Stanford, USA |
    - Separate every page or section table with a blank line before and after the table to ensure clean rendering.
-7. LONG-RUNNING RESEARCH & DATA ACCUMULATION ('scratchpad'):
-   - When the user gives you a long-running research or extraction goal (e.g. "find me 100 world model researchers", "find 50 tech leads", "extract all products"):
-   - Use the 'scratchpad' tool with action 'append' as you find each item or batch of items across pages.
-   - Example: scratchpad({ action: 'append', content: '1. Yann LeCun - Meta AI / NYU - World models architecture\n2. David Ha - Sakana AI...' })
-   - This ensures you never lose collected data as you navigate across multiple tabs or pages.
-   - Use 'scratchpad' action 'read' to review your progress, verify your count, and format your final response to the user.
+7. LONG-RUNNING RESEARCH, DATA ACCUMULATION & LIVE PREVIEW ('append_to_preview' / 'scratchpad'):
+   - The user has a dedicated "Preview" tab in the center navigation toggle (with an iMessage-blue notification badge when new content is added) that displays the contents of the live preview in real time as you work!
+   - When the user asks you to find, search, compare, or extract items (e.g. "find events/inductions from Gmail", "find cheapest return flights", "find 50 tech leads", "extract products", "summarize unread emails"):
+   - Call 'append_to_preview' AS YOU FIND EACH ITEM or batch of items, formatted cleanly in Markdown (tables, bullet points, headers).
+   - This lets the user watch your findings accumulate live in real time in their Preview tab without having to wait until your entire run finishes!
+   - Example: append_to_preview({ content: "| TLC Day 2 | Oct 2, 2026 | 3:00 PM | CS Lawn |\n" })
+   - Using 'append_to_preview' also ensures you never lose collected data as you navigate across multiple tabs or pages.
 8. FAST EMAIL & WEBMAIL AUTOMATION (Gmail, Outlook, Webmail):
+   - MITIGATE SPA NAVIGATION FRICTION (BAN BROWSER BACK BUTTONS IN GMAIL):
+     * Standard Gmail is a heavily virtualized Single-Page Application (SPA). Clicking "Back", "Go back", or browser back buttons in Gmail fails or leads to infinite loops and DOM element drift.
+     * To return to search results:
+       - Direct URL Navigation: Call 'navigate_browser_tab' directly to the search URL (e.g. 'https://mail.google.com/mail/u/{authuser}/#search/{query}').
+       - Multi-Tab Isolation: Open candidate emails in a new tab via 'open_new_tab', read content with 'get_page_content', append findings to preview, and call 'close_tab'.
+     * Pre-Filter via Gmail Search Operators:
+       - Target queries tightly with date operators (e.g. 'after:2026/10/01 induction') rather than wide date ranges to minimize thread count.
+       - Extract snippets directly from search results DOM when sender, date, and subject already reveal the status!
+   - GMAIL SEARCH & READING — BASIC HTML MODE (ELIMINATES VIRTUAL DOM & REFID DRIFT):
+     * When reading, searching, or exploring Gmail:
+       - Prefer switching to or loading the Basic HTML view: 'https://mail.google.com/mail/u/{authuser}/h/' (e.g. 'https://mail.google.com/mail/u/3/h/').
+       - In Basic HTML view, all email threads are rendered in standard, non-virtualized <table> rows with direct <a> links and static URLs (e.g., '?v=c&th=...'). Elements don't disappear on scroll, and navigation succeeds on the first attempt!
+     * Direct URL Navigation Fallback: When inspecting search results or email threads, prefer navigating directly to the thread link ('href') using 'navigate_browser_tab(url=href)' extracted from 'get_page_content', instead of calling fragile 'click_element(text=...)' on dynamic div containers.
    - DIRECT COMPOSE DEEP-LINKING (FASTEST PATH):
      When the user instructs you to email someone, do NOT guess accounts or navigate slowly through UI compose buttons if a direct URL is possible:
      * Navigate directly using 'navigate_browser_tab' to:
        https://mail.google.com/mail/?authuser={email}&view=cm&fs=1&to={to}&su={subject}&body={body}
-       (If the user specified an account like 'alisharjeelofficial@gmail.com', use it in authuser. If no specific account was requested, omit authuser: https://mail.google.com/mail/?view=cm&fs=1&to={to}&su={subject}&body={body})
      * All parameters (to, su, body) MUST be properly URL-encoded.
      * This immediately opens the Gmail compose window pre-filled with the recipient, subject, and body!
      * Once loaded, simply dispatch the email by clicking the 'Send' button (or pressing Control+Enter).
@@ -258,7 +467,22 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - Do NOT attempt to close, clean up, or inspect background template elements. Do NOT enter an overthinking loop verifying already submitted actions.
    - BAN POST-ACTION SCREENSHOTS: Taking screenshots to verify form typing and sending consumes high model inference time (vision token processing). Never call 'capture_tab_screenshot' after routine form submissions, fills, or email sends. Screenshots are strictly reserved for unhandled errors or when visually blocked.
 
-10. LINKEDIN DISCOVERY & GOOGLE X-RAY SEARCH DIRECTIVE (CRITICAL):
+10. ANTI-LOOP STATE CHECKLIST & SATURATION CRITERIA (EXPLORATION BUDGET):
+    - Prevent the "State-Drift & Unbounded Exploration Loop" when inspecting lists, search results, or candidate threads:
+    - DISCOVERED VS VISITED LISTS (WORKING MEMORY PERSISTENCE):
+      * On initial search or page listing, extract the candidate items/threads into a 'Discovered' list in your scratchpad or thoughts.
+      * Maintain an explicit 'Visited' list. NEVER re-open, re-read, or re-click any thread, lead, or link already marked as 'Visited'.
+    - SINGLE-PASS PROCESSING & IMMEDIATE PREVIEW STREAMING:
+      * Process each thread or item strictly ONCE:
+        Open thread/item -> Extract required fields (dates, times, venues, contacts, status) -> If it matches or qualifies, IMMEDIATELY call 'scratchpad' so user sees it in live preview -> Mark as 'Visited'.
+      * Never navigate back to re-inspect an already visited item or second-guess extracted data.
+    - EXPLORATION BUDGET & BAN ON QUERY-MUTATION CYCLING:
+      * Maximum 1 Search Query: Execute a single well-targeted search query (at most 2 only if the first returns 0 results).
+      * NEVER enter a query-tweaking rabbit hole: Do NOT modify date filters, keywords, or operators (e.g. cycling 'after:09/28' -> 'after:09/30' -> 'after:10/01') when minor uncertainty arises. Work strictly with the initial retrieved list.
+      * Saturation / Stopping Criterion: Inspect up to a maximum budget of the top 8–10 most relevant items. Once inspected or when sufficient answers are found, STOP IMMEDIATELY, synthesize findings into a clean Markdown table, and answer the user.
+      * Graceful Ambiguity Handling: If a date or detail is past, ambiguous, or unstated, record the best estimate and note any minor uncertainty in the final output rather than re-searching indefinitely.
+
+11. LINKEDIN DISCOVERY & GOOGLE X-RAY SEARCH DIRECTIVE (CRITICAL):
    - HARD ROUTING RULE FOR LINKEDIN PROSPECTING:
      IF the user task mentions finding leads, students, researchers, or prospects "on LinkedIn" or "via LinkedIn" with emails:
      * NEVER NAVIGATE TO linkedin.com/search OR linkedin.com/in/*. NEVER click LinkedIn location modals or filter buttons!
@@ -276,13 +500,13 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
      * World Model / AI Researchers:
        https://www.google.com/search?q=site:linkedin.com/in+OR+site:github.io+("world+models"+OR+"robotics"+OR+"AI")+("PhD"+OR+"professor"+OR+"researcher")+("@gmail.com"+OR+"@*.edu")
 
-11. ZERO-CLICK SERP SNIPPET EXTRACTION & ELIMINATING REDUNDANT VERIFICATION:
+12. ZERO-CLICK SERP SNIPPET EXTRACTION & ELIMINATING REDUNDANT VERIFICATION:
    - Google SERP snippets ALREADY contain the prospect's full name, academic institution/role, and unmasked email address (e.g., "Alex Yang — A-Level Student at Aquinas College ... 25alex.yang@gmail.com", "Ece Yalın — Student at University of Warwick ... eceyalin.tc@gmail.com").
    - EXTRACT NAME, INSTITUTION, AND EMAIL DIRECTLY FROM THE GOOGLE SERP SNIPPET IN A SINGLE TURN!
    - STRICT EXTRACTION GUARD: NEVER navigate to the target profile URL (uk.linkedin.com/in/*, github.io) solely to "verify" what is already visible in the search snippet. Navigating to external sites adds 45+ seconds of redundant page loads and DOM trees without new information.
    - LOOSE PERSONA MATCHING: Treat any lead listing a degree expected within ±2 years of the current year (or recent graduates/alumni) as an active match. Do not execute additional verification searches or debate graduation months/semesters.
 
-12. PRODUCT KNOWLEDGE PERSISTENCE & ATOMIC 3-STEP DAG ARCHITECTURE:
+13. PRODUCT KNOWLEDGE PERSISTENCE & ATOMIC 3-STEP DAG ARCHITECTURE:
    - PERSIST PRODUCT KNOWLEDGE ON TURN 1 (NEVER RE-VISIT TARGET APP):
      When an outreach task involves pitching a product, app, or website (e.g. "pitching petedoro.com"):
      * Turn 1: Inspect the product site ONCE ('get_page_content'). Extract 3 core product bullets (problem solved, key feature/hook, and CTA).
@@ -299,7 +523,7 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - BATCH PARALLEL TOOL CALLING POLICY:
      When multiple staged leads are ready for outreach, ALWAYS call 'send_web_email' concurrently in a single turn for all recipients rather than splitting into sequential turns.
 
-13. HUMAN-IN-THE-LOOP (HITL) 10-SECOND CAPTCHA INTERCEPT GATE & AUTOMATED PIVOT:
+14. HUMAN-IN-THE-LOOP (HITL) 10-SECOND CAPTCHA INTERCEPT GATE & AUTOMATED PIVOT:
    - When encountering a bot challenge or CAPTCHA (Cloudflare Turnstile, reCAPTCHA, hCaptcha, Bing verification, Arkose Labs):
      * OpenBUA automatically fires an audio/visual Human-in-the-Loop alert with a strict 10-second countdown for the user to solve it in their browser.
      * If the human solves it within 10 seconds, the gate clears and page automation resumes uninterrupted.
@@ -311,7 +535,7 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
        - If blocked on DuckDuckGo, Bing, or Yahoo -> PIVOT IMMEDIATELY TO GOOGLE X-RAY SEARCH ('https://www.google.com/search?q=...').
        - If blocked on a prospect website/profile -> EXTRACT DATA DIRECTLY FROM THE GOOGLE SERP SNIPPET or switch to another candidate from the search results without navigating to the blocked website.
        - If blocked while checking a portfolio -> Treat the candidate as unverified and move directly to the next lead.
-14. MULTI-TAB MANAGEMENT — NEVER NAVIGATE AWAY FROM A PARTIALLY-FILLED FORM:
+15. MULTI-TAB MANAGEMENT — NEVER NAVIGATE AWAY FROM A PARTIALLY-FILLED FORM:
     - CRITICAL: When you are in the middle of filling a form and need to look up information from another website (e.g. checking a company's address, verifying a URL, researching a question's answer):
       * NEVER use 'navigate_browser_tab' on the current tab — this will DESTROY all form progress and you will lose every field you already filled!
       * ALWAYS use 'open_new_tab' to open the lookup URL in a separate tab.
@@ -326,16 +550,15 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
       6. Call 'switch_browser_tab' back to the original form tab ID.
       7. Continue filling the form with the information you gathered.
     - It is SAFE to use 'navigate_browser_tab' ONLY when you are not mid-form (e.g. the user just asked you to go to a URL, or you haven't started filling anything yet).
-15. SUBMISSION PERMISSION (${(this.settings.autoConfirmSubmit ?? true) ? 'ASK FOR REVIEW' : 'FULL ACCESS'}):
+16. SUBMISSION PERMISSION (${(this.settings.autoConfirmSubmit ?? true) ? 'ASK FOR REVIEW' : 'FULL ACCESS'}):
 ${(this.settings.autoConfirmSubmit ?? true)
   ? `    - STRICT REQUIREMENT: Before clicking any final form submission, purchase, or destructive button, you MUST STOP and ask the user for review and confirmation. Present a concise summary of the filled fields and ask the user to confirm submission.`
   : `    - FULL AUTONOMY: You have full access to complete actions. When all form fields or required inputs are filled, proceed directly to submit the form without pausing for user confirmation.`}
 
-16. OPERATING TRANSPARENCY & USER COMMUNICATION:
-    - ALWAYS communicate with the user before and during multi-step browser actions.
-    - Before calling any tools, output a concise 1-2 sentence message explaining what you are doing (e.g. "Opening YouTube in a new tab to find MrBeast's channel...", "Searching for videos and sorting by popularity...").
+17. OPERATING TRANSPARENCY & USER COMMUNICATION:
+    - Put your internal planning, DOM analysis, and tool decisions inside <thought>...</thought> tags.
+    - When communicating directly to the user (e.g. asking a question, reporting results, or summarizing completed work), output clean text outside of the <thought> tags.
     - When a task is complete or between steps, summarize your progress clearly to the user.
-    - NEVER execute tools silently without providing an accompanying status explanation in your message.
 
 ${docsSummary}
 
@@ -394,7 +617,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       initialState: {
         model,
         systemPrompt,
-        tools: ALL_AGENT_TOOLS,
+        tools: createAgentTools(this.sessionId),
         messages: agentMessages.length > 0 ? agentMessages : undefined,
       },
       streamFn: (m, ctx, opts) => createStreamFn(config, m, ctx, opts?.signal),
@@ -407,7 +630,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     });
   }
 
-  private handleAgentEvent(event: any) {
+  private async handleAgentEvent(event: any) {
     switch (event.type) {
       case 'agent_start':
         this.listeners.onStatusChange?.(true);
@@ -420,6 +643,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       case 'turn_start':
         this.currentStreamingText = '';
         this.currentThinkingText = '';
+        this.activeToolCalls.clear();
         break;
 
       case 'message_update':
@@ -430,14 +654,7 @@ ${this.settings.systemInstruction || ''}`.trim();
             this.listeners.onMessageDelta?.(this.currentStreamingText);
           } else if (ame.type === 'thinking_delta') {
             this.currentThinkingText += ame.delta;
-            if (!this.sessionThinkingText) {
-              this.sessionThinkingText = ame.delta;
-            } else if (this.currentThinkingText === ame.delta && !this.sessionThinkingText.endsWith('\n\n')) {
-              this.sessionThinkingText += `\n\n${ame.delta}`;
-            } else {
-              this.sessionThinkingText += ame.delta;
-            }
-            this.listeners.onThinkingDelta?.(this.sessionThinkingText);
+            this.listeners.onThinkingDelta?.(this.currentThinkingText);
           } else if (ame.type === 'toolcall_start') {
             const tc = ame.partial?.content?.[ame.contentIndex];
             if (tc && tc.type === 'toolCall') {
@@ -507,16 +724,23 @@ ${this.settings.systemInstruction || ''}`.trim();
         break;
       }
 
-      case 'turn_end':
+      case 'turn_end': {
         if (event.message?.errorMessage) {
           this.listeners.onError?.(event.message.errorMessage);
         }
+        const hasTools = this.activeToolCalls.size > 0;
+        const thinkingForTurn =
+          this.currentThinkingText ||
+          (hasTools && this.currentStreamingText.trim() ? this.currentStreamingText.trim() : undefined);
+        const textForTurn = hasTools && !this.currentThinkingText ? '' : this.currentStreamingText;
+
         this.listeners.onTurnComplete?.(
-          this.currentStreamingText,
+          textForTurn,
           Array.from(this.activeToolCalls.values()),
-          this.sessionThinkingText || this.currentThinkingText || undefined
+          thinkingForTurn || undefined
         );
         break;
+      }
 
       case 'agent_end':
         this.listeners.onStatusChange?.(false);
@@ -534,6 +758,9 @@ ${this.settings.systemInstruction || ''}`.trim();
       this.listeners.onStatusChange?.(false);
       throw new Error(err);
     }
+
+    // Proactively scan user input for personal details, student email, university, or interests
+    await detectAndQueueMemorySuggestions(input, this.sessionId, this.documents);
 
     if (!this.agent) {
       this.setupAgent();

@@ -24,42 +24,72 @@ function repairMarkdownTables(raw: string): string {
 
   // 1. Convert tab-separated rows into proper Markdown tables if header has tabs
   const lines = raw.split('\n');
-  const result: string[] = [];
+  const normalizedLines: string[] = [];
   let inTsvBlock = false;
   let tsvColCount = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const trimmed = line.trim();
 
     // If line has multiple tabs and looks like a table row without pipes
-    if (line.includes('\t') && !line.trim().startsWith('|')) {
-      const parts = line.split('\t').map(p => p.trim());
+    if (line.includes('\t') && !trimmed.startsWith('|')) {
+      const parts = line.split('\t').map((p) => p.trim());
       if (parts.length >= 2) {
         if (!inTsvBlock) {
           // This is the header of a tab-separated table
           inTsvBlock = true;
           tsvColCount = parts.length;
-          result.push(`| ${parts.join(' | ')} |`);
-          result.push(`| ${parts.map(() => '---').join(' | ')} |`);
+          normalizedLines.push(`| ${parts.join(' | ')} |`);
+          normalizedLines.push(`| ${parts.map(() => '---').join(' | ')} |`);
           continue;
         } else {
           // Body row of TSV table
-          // Pad or trim columns to match header
           while (parts.length < tsvColCount) parts.push('');
-          result.push(`| ${parts.slice(0, tsvColCount).join(' | ')} |`);
+          normalizedLines.push(`| ${parts.slice(0, tsvColCount).join(' | ')} |`);
           continue;
         }
       }
     } else {
-      inTsvBlock = false;
+      if (trimmed.length > 0 && !trimmed.startsWith('|')) {
+        inTsvBlock = false;
+      }
     }
 
-    result.push(line);
+    normalizedLines.push(line);
   }
 
-  let text = result.join('\n');
+  // 2. Stitch together broken table rows that have empty lines between them
+  // e.g. "| 1 | ... |\n\n| 2 | ... |" -> "| 1 | ... |\n| 2 | ... |"
+  const repairedLines: string[] = [];
+  for (let i = 0; i < normalizedLines.length; i++) {
+    const curr = normalizedLines[i];
+    const currTrimmed = curr.trim();
 
-  // 2. Ensure empty lines around markdown tables so GFM parser always detects them
+    // Check if curr is an empty line between two pipe-delimited table rows
+    if (currTrimmed === '' && repairedLines.length > 0) {
+      const prevTrimmed = repairedLines[repairedLines.length - 1].trim();
+      let nextRowIdx = i + 1;
+      while (nextRowIdx < normalizedLines.length && normalizedLines[nextRowIdx].trim() === '') {
+        nextRowIdx++;
+      }
+      if (nextRowIdx < normalizedLines.length) {
+        const nextTrimmed = normalizedLines[nextRowIdx].trim();
+        const prevIsTableRow = prevTrimmed.startsWith('|') && prevTrimmed.endsWith('|');
+        const nextIsTableRow = nextTrimmed.startsWith('|') && nextTrimmed.endsWith('|');
+        if (prevIsTableRow && nextIsTableRow) {
+          // Skip the blank line to keep table rows contiguous
+          continue;
+        }
+      }
+    }
+
+    repairedLines.push(curr);
+  }
+
+  let text = repairedLines.join('\n');
+
+  // 3. Ensure empty lines around markdown tables so GFM parser always detects them
   // Even if immediately following bold text or list headers
   text = text.replace(/([^\n])\n(\|[^\n]+\|\n\|[\s\-:|]+\|)/g, '$1\n\n$2');
 

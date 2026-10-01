@@ -6,12 +6,14 @@ import {
   ToolCallState,
   ChatSession,
   ModelMode,
+  SuggestedMemory,
 } from '../types';
 import {
   loadSettings,
   loadGlobalMemories,
   loadTabMemories,
   saveTabMemory,
+  saveGlobalMemory,
   loadChatHistoryForTab,
   saveChatHistoryForTab,
   loadChatSessions,
@@ -22,13 +24,20 @@ import {
   setActiveSessionIdState,
   saveLastActiveState,
   loadLastActiveState,
+  getScratchpad,
+  clearScratchpad,
+  loadSuggestedMemories,
+  deleteSuggestedMemory,
+  clearSuggestedMemories,
   DEFAULT_SETTINGS,
 } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
 import { FormAgentHarness } from '../agent/form-agent';
-import { ChatView } from '../components/ChatView';
+import { ChatView, formatEntireChatAsText } from '../components/ChatView';
 import { MemoryView } from '../components/MemoryView';
 import { SettingsView } from '../components/SettingsView';
+import { PreviewView } from '../components/PreviewView';
+import { SuggestedMemoriesView } from '../components/SuggestedMemoriesView';
 import {
   MessageSquare,
   Layers,
@@ -38,7 +47,10 @@ import {
   Pencil,
   Trash2,
   Check,
+  Copy,
   ArrowLeft,
+  Eye,
+  Brain,
 } from 'lucide-react';
 
 function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
@@ -61,7 +73,7 @@ function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
 }
 
 export function App() {
-  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings'>('chat');
+  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings' | 'preview' | 'suggestions'>('chat');
   const [settingsTab, setSettingsTab] = useState<ModelMode>(DEFAULT_SETTINGS.selectedMode || 'free');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [globalMemories, setGlobalMemories] = useState<UserDocument[]>([]);
@@ -70,11 +82,16 @@ export function App() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('session_default');
   const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
+  const [previewMarkdown, setPreviewMarkdown] = useState<string>('');
+  const [unseenPreviews, setUnseenPreviews] = useState<Record<string, boolean>>({});
+  const hasUnseenPreview = Boolean(unseenPreviews[activeSessionId]);
+  const [suggestedMemories, setSuggestedMemories] = useState<SuggestedMemory[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
   const [isBusy, setIsBusy] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolCallState | null>(null);
+  const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
 
   const handleInputDraftChange = (draft: string) => {
@@ -86,13 +103,56 @@ export function App() {
 
   const harnessRef = useRef<FormAgentHarness | null>(null);
   const currentTabKeyRef = useRef<string>('session_default');
+  const activeNavTabRef = useRef<'chat' | 'memory' | 'settings' | 'preview' | 'suggestions'>('chat');
   const thinkingStartTimeRef = useRef<number | null>(null);
   const thinkingDurationMsRef = useRef<number | null>(null);
 
-  // Keep currentTabKeyRef synchronized with activeSessionId
+  // Keep activeNavTabRef and currentTabKeyRef synchronized
+  useEffect(() => {
+    activeNavTabRef.current = activeNavTab;
+    if (activeNavTab === 'preview') {
+      setUnseenPreviews((prev) => ({ ...prev, [activeSessionId]: false }));
+    }
+  }, [activeNavTab, activeSessionId]);
+
   useEffect(() => {
     currentTabKeyRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  // Listen for real-time scratchpad / live preview document updates from agent
+  useEffect(() => {
+    const handleScratchpadUpdate = (e: Event) => {
+      const customEvt = e as CustomEvent<{ content: string; sessionId?: string }>;
+      if (customEvt.detail) {
+        const { content, sessionId } = customEvt.detail;
+        const targetSid = sessionId || currentTabKeyRef.current;
+        if (targetSid === currentTabKeyRef.current) {
+          setPreviewMarkdown(content || '');
+        }
+        if (content && content.trim().length > 0) {
+          if (targetSid !== currentTabKeyRef.current || activeNavTabRef.current !== 'preview') {
+            setUnseenPreviews((prev) => ({ ...prev, [targetSid]: true }));
+          }
+        }
+      }
+    };
+    window.addEventListener('openbua_scratchpad_updated', handleScratchpadUpdate);
+    return () => {
+      window.removeEventListener('openbua_scratchpad_updated', handleScratchpadUpdate);
+    };
+  }, []);
+
+  // Listen for real-time suggested memories updates from agent
+  useEffect(() => {
+    const handleSuggestedMemoriesUpdate = async () => {
+      const sugs = await loadSuggestedMemories(currentTabKeyRef.current);
+      setSuggestedMemories(sugs);
+    };
+    window.addEventListener('openbua_suggested_memories_updated', handleSuggestedMemoriesUpdate);
+    return () => {
+      window.removeEventListener('openbua_suggested_memories_updated', handleSuggestedMemoriesUpdate);
+    };
+  }, []);
 
   // Close sidebar drawer smoothly on Escape key
   useEffect(() => {
@@ -122,9 +182,11 @@ export function App() {
       currentTabKeyRef.current = targetSessionId;
       setActiveSessionIdState(targetSessionId);
 
-      const [loadedTabMems, loadedChat] = await Promise.all([
+      const [loadedTabMems, loadedChat, loadedScratch, loadedSugs] = await Promise.all([
         loadTabMemories(targetSessionId),
         loadChatHistoryForTab(targetSessionId),
+        getScratchpad(targetSessionId),
+        loadSuggestedMemories(targetSessionId),
       ]);
 
       setSettings(loadedSettings);
@@ -135,6 +197,8 @@ export function App() {
       setActiveSessionId(targetSessionId);
       setTabMemories(loadedTabMems);
       setMessages(loadedChat);
+      setPreviewMarkdown(loadedScratch || '');
+      setSuggestedMemories(loadedSugs);
 
       const activeDocs = [
         ...loadedGlobal.filter((m) => m.isActiveForContext),
@@ -157,6 +221,13 @@ export function App() {
             setActiveTool(null);
             thinkingStartTimeRef.current = null;
             thinkingDurationMsRef.current = null;
+            setMessages((prev) => {
+              const hasStreaming = prev.some((m) => m.isStreaming);
+              if (!hasStreaming) return prev;
+              const updated = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
+              saveChatHistoryForTab(currentTabKeyRef.current, updated);
+              return updated;
+            });
           }
         },
         onMessageDelta: (deltaText) => {
@@ -166,7 +237,7 @@ export function App() {
           const duration = thinkingDurationMsRef.current ?? undefined;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant') {
+            if (last && last.role === 'assistant' && last.isStreaming) {
               const updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
@@ -197,7 +268,12 @@ export function App() {
           }
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant') {
+            if (
+              last &&
+              last.role === 'assistant' &&
+              last.isStreaming &&
+              (!last.content || last.content.trim().length === 0)
+            ) {
               const updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
@@ -225,7 +301,12 @@ export function App() {
           setActiveTool(toolCall);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant') {
+            if (
+              last &&
+              last.role === 'assistant' &&
+              last.isStreaming &&
+              (!last.content || last.content.trim().length === 0)
+            ) {
               const calls = last.toolCalls || [];
               const index = calls.findIndex((c) => c.id === toolCall.id);
               const updatedCalls = [...calls];
@@ -238,6 +319,18 @@ export function App() {
               updated[updated.length - 1] = {
                 ...last,
                 toolCalls: updatedCalls,
+                isStreaming: true,
+              };
+              return updated;
+            } else if (last && last.role === 'assistant' && last.isStreaming && last.content && !last.thinking) {
+              const calls = last.toolCalls || [];
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...last,
+                thinking: last.content,
+                content: '',
+                toolCalls: [...calls, toolCall],
+                isStreaming: true,
               };
               return updated;
             } else {
@@ -258,22 +351,18 @@ export function App() {
         onToolCallEnd: (toolCall) => {
           setActiveTool((curr) => (curr?.id === toolCall.id ? null : curr));
           setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant') {
-              const calls = last.toolCalls || [];
-              const index = calls.findIndex((c) => c.id === toolCall.id);
-              const updatedCalls = [...calls];
-              if (index >= 0) {
-                updatedCalls[index] = toolCall;
-              } else {
-                updatedCalls.push(toolCall);
+            const updated = [...prev];
+            for (let i = updated.length - 1; i >= 0; i--) {
+              const m = updated[i];
+              if (m.role === 'assistant' && m.toolCalls) {
+                const idx = m.toolCalls.findIndex((c) => c.id === toolCall.id);
+                if (idx >= 0) {
+                  const calls = [...m.toolCalls];
+                  calls[idx] = toolCall;
+                  updated[i] = { ...m, toolCalls: calls };
+                  return updated;
+                }
               }
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                ...last,
-                toolCalls: updatedCalls,
-              };
-              return updated;
             }
             return prev;
           });
@@ -289,12 +378,12 @@ export function App() {
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             let updated: ChatMessage[];
-            if (last && last.role === 'assistant') {
+            if (last && last.role === 'assistant' && last.isStreaming) {
               updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
-                content: assistantText || last.content,
-                toolCalls: toolCalls.length > 0 ? toolCalls : last.toolCalls,
+                content: assistantText !== undefined ? assistantText : last.content,
+                toolCalls: toolCalls.length > 0 ? toolCalls : (last.toolCalls || []),
                 thinking: thinkingText || last.thinking,
                 thinkingDurationMs: duration ?? last.thinkingDurationMs,
                 isStreaming: false,
@@ -318,21 +407,55 @@ export function App() {
             return updated;
           });
         },
-        onError: (err) => {
+        onError: (err: any) => {
           setActiveTool(null);
+          const errStr = typeof err === 'string' ? err : err?.message || String(err);
+          const isInterrupted =
+            errStr.toLowerCase().includes('cancel') ||
+            errStr.toLowerCase().includes('abort') ||
+            errStr.toLowerCase().includes('interrupt');
+          const displayContent = isInterrupted
+            ? 'Agent interrupted. Type continue to resume.'
+            : `Error: ${errStr.replace(/^⚠️\s*/, '')}`;
+
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant' && last.content.includes(err)) {
+            if (
+              last &&
+              last.role === 'assistant' &&
+              (last.content === displayContent || last.content.includes(displayContent))
+            ) {
               return prev;
             }
+            let updated = [...prev];
+            if (last && last.role === 'assistant' && last.isStreaming) {
+              if (!last.content || !last.content.trim()) {
+                updated[updated.length - 1] = {
+                  ...last,
+                  content: displayContent,
+                  isStreaming: false,
+                };
+                saveChatHistoryForTab(currentTabKeyRef.current, updated);
+                if (harnessRef.current) {
+                  harnessRef.current.setConversationHistory(updated);
+                }
+                return updated;
+              } else {
+                updated[updated.length - 1] = {
+                  ...last,
+                  isStreaming: false,
+                };
+              }
+            }
+
             const errorMsg: ChatMessage = {
               id: `err-${Date.now()}`,
               role: 'assistant',
-              content: `⚠️ Error: ${err}`,
+              content: displayContent,
               timestamp: Date.now(),
               isStreaming: false,
             };
-            const updated = [...prev, errorMsg];
+            updated = [...updated, errorMsg];
             saveChatHistoryForTab(currentTabKeyRef.current, updated);
             if (harnessRef.current) {
               harnessRef.current.setConversationHistory(updated);
@@ -367,9 +490,21 @@ export function App() {
     init();
   }, []);
 
-  const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings') => {
+  const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings' | 'preview' | 'suggestions') => {
+    if (tab === 'preview') {
+      setUnseenPreviews((prev) => ({ ...prev, [activeSessionId]: false }));
+    }
     setActiveNavTab(tab);
     saveLastActiveState(tab, currentTabKeyRef.current);
+  };
+
+  const handleTogglePreview = () => {
+    if (activeNavTab === 'preview') {
+      handleSelectNavTab('chat');
+    } else {
+      setUnseenPreviews((prev) => ({ ...prev, [activeSessionId]: false }));
+      handleSelectNavTab('preview');
+    }
   };
 
   // When active session changes, load its scoped chat history and tab memories
@@ -379,16 +514,88 @@ export function App() {
     currentTabKeyRef.current = sessionId;
     setActiveSessionIdState(sessionId);
     saveLastActiveState(activeNavTab, sessionId);
-    const [tMems, msgs] = await Promise.all([
+    const [tMems, msgs, loadedScratch, loadedSugs] = await Promise.all([
       loadTabMemories(sessionId),
       loadChatHistoryForTab(sessionId),
+      getScratchpad(sessionId),
+      loadSuggestedMemories(sessionId),
     ]);
     setTabMemories(tMems);
     setMessages(msgs);
+    setPreviewMarkdown(loadedScratch || '');
+    setSuggestedMemories(loadedSugs);
+    if (activeNavTabRef.current === 'preview') {
+      setUnseenPreviews((prev) => ({ ...prev, [sessionId]: false }));
+    }
     if (harnessRef.current) {
       harnessRef.current.setSessionId(sessionId);
       harnessRef.current.setConversationHistory(msgs);
     }
+  };
+
+  const handleApproveAsTabMemory = async (sug: SuggestedMemory) => {
+    const newDoc: UserDocument = {
+      id: `mem-${Date.now()}`,
+      title: sug.title,
+      type: 'markdown',
+      content: sug.content,
+      summary: `${sug.title} (${sug.content.slice(0, 80)}...)`,
+      createdAt: Date.now(),
+      sizeBytes: new Blob([sug.content]).size,
+      tags: [sug.category || 'fact', 'suggested'],
+      isActiveForContext: true,
+      isGlobal: false,
+      tabUrlPattern: activeSessionId,
+    };
+    await saveTabMemory(activeSessionId, newDoc);
+    const updatedSugs = await deleteSuggestedMemory(sug.id);
+    const updatedTabMems = [newDoc, ...tabMemories];
+    setTabMemories(updatedTabMems);
+    setSuggestedMemories(updatedSugs.filter((s) => !s.sessionId || s.sessionId === activeSessionId));
+    if (harnessRef.current) {
+      const activeDocs = [
+        ...globalMemories.filter((m) => m.isActiveForContext),
+        ...updatedTabMems.filter((m) => m.isActiveForContext),
+      ];
+      harnessRef.current.updateConfig(settings, activeDocs);
+    }
+  };
+
+  const handleApproveAsGlobalMemory = async (sug: SuggestedMemory) => {
+    const newDoc: UserDocument = {
+      id: `mem-${Date.now()}`,
+      title: sug.title,
+      type: 'markdown',
+      content: sug.content,
+      summary: `${sug.title} (${sug.content.slice(0, 80)}...)`,
+      createdAt: Date.now(),
+      sizeBytes: new Blob([sug.content]).size,
+      tags: [sug.category || 'fact', 'suggested'],
+      isActiveForContext: true,
+      isGlobal: true,
+    };
+    await saveGlobalMemory(newDoc);
+    const updatedSugs = await deleteSuggestedMemory(sug.id);
+    const updatedGlobal = [newDoc, ...globalMemories];
+    setGlobalMemories(updatedGlobal);
+    setSuggestedMemories(updatedSugs.filter((s) => !s.sessionId || s.sessionId === activeSessionId));
+    if (harnessRef.current) {
+      const activeDocs = [
+        ...updatedGlobal.filter((m) => m.isActiveForContext),
+        ...tabMemories.filter((m) => m.isActiveForContext),
+      ];
+      harnessRef.current.updateConfig(settings, activeDocs);
+    }
+  };
+
+  const handleDiscardSuggestion = async (id: string) => {
+    const updatedSugs = await deleteSuggestedMemory(id);
+    setSuggestedMemories(updatedSugs.filter((s) => !s.sessionId || s.sessionId === activeSessionId));
+  };
+
+  const handleClearAllSuggestions = async () => {
+    await clearSuggestedMemories(activeSessionId);
+    setSuggestedMemories([]);
   };
 
   const handleCreateSession = async () => {
@@ -434,6 +641,26 @@ export function App() {
 
   const handleCancelRename = () => {
     setEditingSessionId(null);
+  };
+
+  const handleCopySessionChat = async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    try {
+      let msgsToCopy: ChatMessage[] = [];
+      if (sessionId === activeSessionId) {
+        msgsToCopy = messages;
+      } else {
+        msgsToCopy = await loadChatHistoryForTab(sessionId);
+      }
+      const fullTranscript = formatEntireChatAsText(msgsToCopy);
+      await navigator.clipboard.writeText(fullTranscript);
+      setCopiedSessionId(sessionId);
+      setTimeout(() => {
+        setCopiedSessionId((curr) => (curr === sessionId ? null : curr));
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy chat transcript:', err);
+    }
   };
 
   // Keep harness synchronized with active memories and current settings
@@ -522,9 +749,9 @@ export function App() {
 
       {/* Floating Top Header (Positioned absolute over viewport, zero solid strip) */}
       <header className="absolute top-2.5 left-0 right-0 z-30 px-3 flex items-center justify-between pointer-events-none">
-        {/* Left: Circle Back Button (in Settings) OR 2-Line Hamburger Button (in Chat/Memory) */}
+        {/* Left: Circle Back Button (in Settings / Suggestions) OR 2-Line Hamburger Button (in Chat/Memory/Preview) */}
         <div className="flex items-center pointer-events-auto">
-          {activeNavTab === 'settings' ? (
+          {activeNavTab === 'settings' || activeNavTab === 'suggestions' ? (
             <button
               type="button"
               onClick={() => handleSelectNavTab('chat')}
@@ -545,7 +772,7 @@ export function App() {
           )}
         </div>
 
-        {/* Center: Chat / Memory Floating Toggle OR Free / BYOK Toggle in Settings */}
+        {/* Center: Chat / Memory / Preview Floating Toggle OR Free / BYOK Toggle in Settings OR Suggested memory Pill */}
         {activeNavTab === 'settings' ? (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
             <button
@@ -571,12 +798,26 @@ export function App() {
               BYOK
             </button>
           </div>
+        ) : activeNavTab === 'suggestions' ? (
+          <div className="absolute inset-x-0 flex justify-center pointer-events-none">
+            <div className="flex items-center gap-1.5 h-8 px-4 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+              <span className="text-xs font-semibold text-zinc-100 tracking-tight">Suggested memory</span>
+              {suggestedMemories.length > 0 && (
+                <span
+                  className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white leading-none"
+                  style={{ backgroundColor: '#007AFF' }}
+                >
+                  {suggestedMemories.length}
+                </span>
+              )}
+            </div>
+          </div>
         ) : (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
             <button
               type="button"
               onClick={() => handleSelectNavTab('chat')}
-              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+              className={`h-7 px-3 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
                 activeNavTab === 'chat'
                   ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -587,7 +828,7 @@ export function App() {
             <button
               type="button"
               onClick={() => handleSelectNavTab('memory')}
-              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+              className={`h-7 px-3 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
                 activeNavTab === 'memory'
                   ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -595,11 +836,51 @@ export function App() {
             >
               Memory
             </button>
+            <button
+              type="button"
+              onClick={() => handleSelectNavTab('preview')}
+              className={`relative h-7 px-3 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeNavTab === 'preview'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span>Preview</span>
+              {hasUnseenPreview && activeNavTab !== 'preview' && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0"
+                  style={{ backgroundColor: '#007AFF' }}
+                />
+              )}
+            </button>
           </div>
         )}
 
-        {/* Right: Balanced spacer matching hamburger button */}
-        <div className="w-9 pointer-events-none" />
+        {/* Right: Circle Suggested Memories Button with Notification Dot (hidden on suggestions page, replaced by spacer to keep pill centered) */}
+        {activeNavTab === 'suggestions' ? (
+          <div className="w-9 h-9 shrink-0" aria-hidden="true" />
+        ) : (
+        <div className="flex items-center pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => handleSelectNavTab(activeNavTab === 'suggestions' ? 'chat' : 'suggestions')}
+            title={`Suggested Memories${suggestedMemories.length > 0 ? ` (${suggestedMemories.length} pending)` : ''}`}
+            className={`relative w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95 flex items-center justify-center ${
+              activeNavTab === 'suggestions'
+                ? 'border-zinc-700 bg-zinc-800 text-white'
+                : 'border-zinc-800/90 text-zinc-300 hover:text-white'
+            }`}
+          >
+            <Brain className="w-4 h-4 text-white" />
+            {suggestedMemories.length > 0 && activeNavTab !== 'suggestions' && (
+              <span
+                className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full ring-2 ring-zinc-950 animate-pulse"
+                style={{ backgroundColor: '#007AFF' }}
+              />
+            )}
+          </button>
+        </div>
+        )}
       </header>
 
       {/* Backdrop Overlay (blurs background behind sidebar without dimming/lowering opacity) */}
@@ -715,6 +996,18 @@ export function App() {
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                         <button
                           type="button"
+                          onClick={(e) => handleCopySessionChat(e, sess.id)}
+                          title="Copy entire chat"
+                          className="p-1 rounded text-white/70 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                        >
+                          {copiedSessionId === sess.id ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
                           onClick={(e) => handleStartRename(e, sess)}
                           title="Rename tab"
                           className="p-1 rounded text-white/70 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
@@ -796,6 +1089,28 @@ export function App() {
             onSettingsSaved={handleSettingsSaved}
             activeTab={settingsTab}
             onTabChange={setSettingsTab}
+          />
+        )}
+
+        {activeNavTab === 'preview' && (
+          <PreviewView
+            content={previewMarkdown}
+            isBusy={isBusy}
+            onClear={async () => {
+              await clearScratchpad(activeSessionId);
+              setPreviewMarkdown('');
+            }}
+          />
+        )}
+
+        {activeNavTab === 'suggestions' && (
+          <SuggestedMemoriesView
+            suggestions={suggestedMemories}
+            currentTabTitle={sessions.find((s) => s.id === activeSessionId)?.title || 'Current Chat'}
+            onApproveAsTab={handleApproveAsTabMemory}
+            onApproveAsGlobal={handleApproveAsGlobalMemory}
+            onDiscard={handleDiscardSuggestion}
+            onClearAll={handleClearAllSuggestions}
           />
         )}
       </main>

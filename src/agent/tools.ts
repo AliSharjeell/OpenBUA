@@ -23,6 +23,7 @@ import {
   saveScratchpad,
   appendToScratchpad,
   clearScratchpad,
+  saveSuggestedMemory,
 } from '../services/storage';
 
 // 1. Inspect Form Elements on Current Tab
@@ -384,62 +385,162 @@ const ScratchpadSchema = Type.Object({
   content: Type.Optional(Type.String({ description: 'Text to append or write to the scratchpad (required for "append" and "write")' })),
 });
 
-export const scratchpadTool: AgentTool<typeof ScratchpadSchema> = {
-  name: 'scratchpad',
-  label: 'Research Scratchpad / Notepad',
-  description: 'A persistent session notepad for storing, appending, and organizing research findings, lists of people/leads/papers, URLs, or multi-step notes across long tasks. Use "append" as you find each item so you never forget or lose data across page navigations. Use "read" to view all collected findings.',
-  parameters: ScratchpadSchema,
-  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
-    try {
-      const action = params.action;
-      if (action === 'append') {
+export function createScratchpadTool(sessionId?: string): AgentTool<typeof ScratchpadSchema> {
+  return {
+    name: 'scratchpad',
+    label: 'Live Preview & Research Scratchpad',
+    description: 'MANDATORY REAL-TIME PREVIEW & RESEARCH SCRATCHPAD. Content appended here is displayed immediately in real time to the user in their dedicated "Preview" tab as you work! Whenever you discover ANY matching item, qualifying society induction date, event, flight, lead, or research note, you MUST IMMEDIATELY call scratchpad with action="append" and clean Markdown so the user watches discoveries appear live without waiting.',
+    parameters: ScratchpadSchema,
+    execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+      try {
+        const action = params.action;
+        if (action === 'append') {
+          const textToAppend = params.content || '';
+          if (!textToAppend.trim()) {
+            return {
+              content: [{ type: 'text', text: 'Error: content is required for append action.' }],
+              details: { success: false },
+            };
+          }
+          const updated = await appendToScratchpad(textToAppend, sessionId);
+          const lineCount = updated.split('\n').filter(Boolean).length;
+          return {
+            content: [{ type: 'text', text: `Added to scratchpad successfully. Current scratchpad contains ${lineCount} items (${updated.length} chars).\n\nLatest entry added:\n${textToAppend}` }],
+            details: { success: true, action: 'append', totalChars: updated.length, lineCount },
+          };
+        } else if (action === 'read') {
+          const current = await getScratchpad(sessionId);
+          const lineCount = current.split('\n').filter(Boolean).length;
+          return {
+            content: [{ type: 'text', text: current ? `Current Scratchpad Content (${lineCount} items / ${current.length} chars):\n\n${current}` : 'Scratchpad is currently empty.' }],
+            details: { success: true, action: 'read', content: current, lineCount },
+          };
+        } else if (action === 'write') {
+          const newContent = params.content || '';
+          await saveScratchpad(newContent, sessionId);
+          return {
+            content: [{ type: 'text', text: `Scratchpad updated (${newContent.length} chars).` }],
+            details: { success: true, action: 'write', totalChars: newContent.length },
+          };
+        } else if (action === 'clear') {
+          await clearScratchpad(sessionId);
+          return {
+            content: [{ type: 'text', text: 'Scratchpad cleared.' }],
+            details: { success: true, action: 'clear' },
+          };
+        }
+
+        return {
+          content: [{ type: 'text', text: 'Unknown action' }],
+          details: { success: false },
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: 'text', text: `Scratchpad error: ${err?.message || err}` }],
+          details: { error: String(err) },
+        };
+      }
+    },
+  };
+}
+
+export const scratchpadTool: AgentTool<typeof ScratchpadSchema> = createScratchpadTool();
+
+// 11b. Atomic Append to Preview Tool
+const AppendToPreviewSchema = Type.Object({
+  content: Type.String({
+    description: 'Markdown snippet to append to the live preview buffer (e.g. table header, table row, bullet point, or section heading). Call this immediately when any single society, date, flight, or candidate is discovered.',
+  }),
+});
+
+export function createAppendToPreviewTool(sessionId?: string): AgentTool<typeof AppendToPreviewSchema> {
+  return {
+    name: 'append_to_preview',
+    label: 'Append to Live Preview',
+    description: 'Appends a markdown chunk, table row, or section to the live preview buffer. Call this IMMEDIATELY when any single item, society, induction date, or result is discovered so the user sees real-time progress in their Preview tab.',
+    parameters: AppendToPreviewSchema,
+    execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+      try {
         const textToAppend = params.content || '';
         if (!textToAppend.trim()) {
           return {
-            content: [{ type: 'text', text: 'Error: content is required for append action.' }],
+            content: [{ type: 'text', text: 'Error: content is required.' }],
             details: { success: false },
           };
         }
-        const updated = await appendToScratchpad(textToAppend);
+        const updated = await appendToScratchpad(textToAppend, sessionId);
         const lineCount = updated.split('\n').filter(Boolean).length;
         return {
-          content: [{ type: 'text', text: `Added to scratchpad successfully. Current scratchpad contains ${lineCount} items (${updated.length} chars).\n\nLatest entry added:\n${textToAppend}` }],
-          details: { success: true, action: 'append', totalChars: updated.length, lineCount },
+          content: [{ type: 'text', text: `Appended to Live Preview successfully. Current preview contains ${lineCount} lines (${updated.length} chars).\n\nAppended:\n${textToAppend}` }],
+          details: { success: true, totalChars: updated.length, lineCount },
         };
-      } else if (action === 'read') {
-        const current = await getScratchpad();
-        const lineCount = current.split('\n').filter(Boolean).length;
+      } catch (err: any) {
         return {
-          content: [{ type: 'text', text: current ? `Current Scratchpad Content (${lineCount} items / ${current.length} chars):\n\n${current}` : 'Scratchpad is currently empty.' }],
-          details: { success: true, action: 'read', content: current, lineCount },
-        };
-      } else if (action === 'write') {
-        const newContent = params.content || '';
-        await saveScratchpad(newContent);
-        return {
-          content: [{ type: 'text', text: `Scratchpad updated (${newContent.length} chars).` }],
-          details: { success: true, action: 'write', totalChars: newContent.length },
-        };
-      } else if (action === 'clear') {
-        await clearScratchpad();
-        return {
-          content: [{ type: 'text', text: 'Scratchpad cleared.' }],
-          details: { success: true, action: 'clear' },
+          content: [{ type: 'text', text: `Append to preview error: ${err?.message || err}` }],
+          details: { error: String(err) },
         };
       }
+    },
+  };
+}
 
-      return {
-        content: [{ type: 'text', text: 'Unknown action' }],
-        details: { success: false },
-      };
-    } catch (err: any) {
-      return {
-        content: [{ type: 'text', text: `Scratchpad error: ${err?.message || err}` }],
-        details: { error: String(err) },
-      };
-    }
-  },
-};
+export const appendToPreviewTool: AgentTool<typeof AppendToPreviewSchema> = createAppendToPreviewTool();
+
+// 12. Suggest Memory Tool
+const SuggestMemorySchema = Type.Object({
+  title: Type.String({ description: 'Short descriptive title of the memory (e.g. "User Contact Phone", "Preferred Airline", "LinkedIn Easy Apply Routine")' }),
+  content: Type.String({ description: 'The exact fact, personal detail, user preference, or repeatable task instruction to remember' }),
+  category: Type.Optional(Type.Union([
+    Type.Literal('profile'),
+    Type.Literal('preference'),
+    Type.Literal('workflow'),
+    Type.Literal('fact'),
+    Type.Literal('task'),
+  ], { description: 'Category: "profile" for user identity/contact, "preference" for user choices, "workflow" or "task" for repeatable task instructions, "fact" for general facts' })),
+  reason: Type.Optional(Type.String({ description: 'Why this memory is suggested (e.g. "Extracted from LinkedIn job form", "User specified in chat")' })),
+});
+
+export function createSuggestMemoryTool(sessionId?: string): AgentTool<typeof SuggestMemorySchema> {
+  return {
+    name: 'suggest_memory',
+    label: 'Suggest New Memory',
+    description: 'Suggests personal information, preferences, repeatable task steps, or facts discovered during your execution to be remembered. The user sees a badge on their top-right Suggested Memories button and can approve it with 1 click as Global Memory or Tab Memory, or discard it.',
+    parameters: SuggestMemorySchema,
+    execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+      try {
+        const title = params.title.trim();
+        const content = params.content.trim();
+        if (!title || !content) {
+          return {
+            content: [{ type: 'text', text: 'Error: title and content are required.' }],
+            details: { success: false },
+          };
+        }
+        const sug = {
+          id: `sug-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          title,
+          content,
+          category: params.category || 'fact',
+          reason: params.reason?.trim(),
+          createdAt: Date.now(),
+          sessionId,
+        };
+        await saveSuggestedMemory(sug);
+        return {
+          content: [{ type: 'text', text: `Suggested memory "${title}" queued for user review. The user will review it in their Suggested Memories panel to approve as Global, Tab Memory, or discard it.` }],
+          details: { success: true, suggestion: sug },
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: 'text', text: `Failed to record suggested memory: ${err?.message || err}` }],
+          details: { error: String(err) },
+        };
+      }
+    },
+  };
+}
+
+export const suggestMemoryTool: AgentTool<typeof SuggestMemorySchema> = createSuggestMemoryTool();
 
 // 12. Keyboard Shortcut / Key Press Dispatcher
 const PressKeySchema = Type.Object({
@@ -595,22 +696,29 @@ export const closeTabTool: AgentTool<typeof CloseTabSchema> = {
   },
 };
 
-// All available tools for the OpenBUA Agent
-export const ALL_AGENT_TOOLS: AgentTool<any>[] = [
-  getActiveTabFormTool,
-  fillFormFieldsTool,
-  clickElementTool,
-  scrollPageTool,
-  getUserDocumentsTool,
-  captureTabScreenshotTool,
-  listBrowserTabsTool,
-  switchBrowserTabTool,
-  navigateBrowserTabTool,
-  getPageContentTool,
-  scratchpadTool,
-  pressKeyCombinationTool,
-  sendWebEmailTool,
-  quickUrlCheckTool,
-  openNewTabTool,
-  closeTabTool,
-];
+// Factory to create session-bound tools for the OpenBUA Agent
+export function createAgentTools(sessionId?: string): AgentTool<any>[] {
+  return [
+    getActiveTabFormTool,
+    fillFormFieldsTool,
+    clickElementTool,
+    scrollPageTool,
+    getUserDocumentsTool,
+    captureTabScreenshotTool,
+    listBrowserTabsTool,
+    switchBrowserTabTool,
+    navigateBrowserTabTool,
+    getPageContentTool,
+    createAppendToPreviewTool(sessionId),
+    createScratchpadTool(sessionId),
+    createSuggestMemoryTool(sessionId),
+    pressKeyCombinationTool,
+    sendWebEmailTool,
+    quickUrlCheckTool,
+    openNewTabTool,
+    closeTabTool,
+  ];
+}
+
+// All available tools for the OpenBUA Agent (default session fallback)
+export const ALL_AGENT_TOOLS: AgentTool<any>[] = createAgentTools('session_default');

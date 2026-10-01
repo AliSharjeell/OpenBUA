@@ -240,7 +240,7 @@ export function VaultView({ documents, onDocumentsChange }: VaultViewProps) {
               <Textarea
                 rows={8}
                 className="font-mono text-[11px]"
-                placeholder="# Resume / Personal Information&#10;- Full Name: Alex Mercer&#10;- Email: alex@example.com&#10;- Phone: (555) 123-4567..."
+                placeholder="# Resume / Personal Information&#10;- Full Name: Jane Doe&#10;- Email: jane@example.com&#10;- Phone: (555) 123-4567..."
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
               />

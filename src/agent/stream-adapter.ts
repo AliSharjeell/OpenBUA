@@ -52,16 +52,16 @@ export async function createStreamFn(
       if (signal?.aborted) {
         const abortedMsg: AssistantMessage = {
           role: 'assistant',
-          content: [{ type: 'text', text: 'Request was cancelled.' }],
+          content: [{ type: 'text', text: 'Agent interrupted. Type continue to resume.' }],
           stopReason: 'aborted',
-          errorMessage: 'Request was cancelled',
+          errorMessage: 'Agent interrupted. Type continue to resume.',
         };
         stream.push({ type: 'error', reason: 'aborted', error: abortedMsg });
         stream.end(abortedMsg);
       } else {
         const errorMsg: AssistantMessage = {
           role: 'assistant',
-          content: [{ type: 'text', text: `⚠️ API Error: ${err?.message || String(err)}` }],
+          content: [{ type: 'text', text: `API Error: ${err?.message || String(err)}` }],
           stopReason: 'error',
           errorMessage: err?.message || String(err),
         };
@@ -266,7 +266,7 @@ async function streamOpenAI(
     } else if (m.role === 'toolResult') {
       const isOlderTurn = olderToolCallIds.has(m.toolCallId);
       const toolName = (m as any).toolName || toolCallIdToName.get(m.toolCallId) || '';
-      const isScratchpad = toolName === 'scratchpad';
+      const isScratchpad = toolName === 'scratchpad' || toolName === 'append_to_preview';
 
       let text = Array.isArray(m.content)
         ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('\n')
@@ -345,25 +345,11 @@ async function streamOpenAI(
 
   // Request thoughts / reasoning traces for Gemini models via Google OpenAI-compatible endpoint
   if (isGemini) {
-    const isGemini3 =
-      (config.model || '').includes('3.') ||
-      (config.model || '').includes('3-') ||
-      (config.model || '').includes('3.5') ||
-      (config.model || '').includes('3.8') ||
-      (config.model || '').includes('3.1');
-
     const thinkingConfig: any = {
       include_thoughts: true,
+      thinking_budget: 1024,
     };
-    if (isGemini3) {
-      thinkingConfig.thinking_level = 'low';
-    } else {
-      thinkingConfig.thinking_budget = 1024;
-    }
 
-    payload.google = {
-      thinking_config: thinkingConfig,
-    };
     payload.extra_body = {
       google: {
         thinking_config: thinkingConfig,
@@ -475,7 +461,7 @@ async function streamOpenAI(
 
       for (let s = waitSeconds; s > 0; s--) {
         if (signal?.aborted) {
-          throw new Error('Request cancelled during rate limit wait');
+          throw new Error('Agent interrupted. Type continue to resume.');
         }
         await new Promise((r) => setTimeout(r, 1000));
       }
@@ -568,7 +554,7 @@ async function streamOpenAI(
       }
 
       if (signal?.aborted) {
-        throw new Error('Request cancelled during rate limit wait');
+        throw new Error('Agent interrupted. Type continue to resume.');
       }
       continue;
     }
@@ -675,9 +661,19 @@ async function streamOpenAI(
               delta.content = (delta.content || '') + p.text;
             }
           }
-        } else if (delta.extra_content?.google?.thought) {
+        } else if (delta.extra_content?.google?.thought !== undefined) {
           const gThought = delta.extra_content.google.thought;
-          reasoningDelta = typeof gThought === 'string' ? gThought : (gThought?.text || '');
+          if (typeof gThought === 'string') {
+            reasoningDelta = gThought;
+          } else if (gThought && typeof gThought === 'object' && gThought.text) {
+            reasoningDelta = gThought.text;
+          } else if (gThought === true && delta.content) {
+            // Google flagged this entire delta's content as thought / reasoning
+            let thoughtStr = delta.content;
+            thoughtStr = thoughtStr.replace(/^<thought>/i, '').replace(/<\/thought>$/i, '');
+            reasoningDelta = thoughtStr;
+            delta.content = '';
+          }
         } else if (delta.thought && typeof delta.thought === 'object') {
           reasoningDelta = delta.thought.text || delta.thought.content || '';
         } else if (delta.reasoning_content && typeof delta.reasoning_content === 'object') {
@@ -692,107 +688,114 @@ async function streamOpenAI(
         if (delta.content) {
           let textToEmit = delta.content;
 
-          if (isInsideInlineThink) {
-            const endIdx =
-              textToEmit.indexOf(activeThinkClosingTag) !== -1
-                ? textToEmit.indexOf(activeThinkClosingTag)
-                : textToEmit.indexOf('</think>') !== -1
-                ? textToEmit.indexOf('</think>')
-                : textToEmit.indexOf('</thought>');
+          while (textToEmit.length > 0) {
+            if (isInsideInlineThink) {
+              const endIdx =
+                textToEmit.indexOf(activeThinkClosingTag) !== -1
+                  ? textToEmit.indexOf(activeThinkClosingTag)
+                  : textToEmit.indexOf('</think>') !== -1
+                  ? textToEmit.indexOf('</think>')
+                  : textToEmit.indexOf('</thought>');
 
-            if (endIdx !== -1) {
-              const matchedCloseTag = textToEmit.slice(endIdx).startsWith('</thought>')
-                ? '</thought>'
-                : '</think>';
-              const thinkPart = textToEmit.slice(0, endIdx);
-              if (thinkPart) {
-                emitThinkingDelta(thinkPart);
+              if (endIdx !== -1) {
+                const matchedCloseTag = textToEmit.slice(endIdx).startsWith('</thought>')
+                  ? '</thought>'
+                  : '</think>';
+                const thinkPart = textToEmit.slice(0, endIdx);
+                if (thinkPart) {
+                  emitThinkingDelta(thinkPart);
+                }
+                isInsideInlineThink = false;
+                textToEmit = textToEmit.slice(endIdx + matchedCloseTag.length);
+              } else {
+                emitThinkingDelta(textToEmit);
+                textToEmit = '';
               }
-              isInsideInlineThink = false;
-              textToEmit = textToEmit.slice(endIdx + matchedCloseTag.length);
             } else {
-              emitThinkingDelta(textToEmit);
-              textToEmit = '';
-            }
-          } else {
-            const thinkIdx = textToEmit.indexOf('<think>');
-            const thoughtIdx = textToEmit.indexOf('<thought>');
-            let startIdx = -1;
-            let tagLen = 0;
-            let closingTag = '</think>';
+              const thinkIdx = textToEmit.indexOf('<think>');
+              const thoughtIdx = textToEmit.indexOf('<thought>');
+              let startIdx = -1;
+              let tagLen = 0;
+              let closingTag = '</think>';
 
-            if (thinkIdx !== -1 && (thoughtIdx === -1 || thinkIdx < thoughtIdx)) {
-              startIdx = thinkIdx;
-              tagLen = 7; // '<think>'.length
-              closingTag = '</think>';
-            } else if (thoughtIdx !== -1) {
-              startIdx = thoughtIdx;
-              tagLen = 9; // '<thought>'.length
-              closingTag = '</thought>';
-            }
+              if (thinkIdx !== -1 && (thoughtIdx === -1 || thinkIdx < thoughtIdx)) {
+                startIdx = thinkIdx;
+                tagLen = 7; // '<think>'.length
+                closingTag = '</think>';
+              } else if (thoughtIdx !== -1) {
+                startIdx = thoughtIdx;
+                tagLen = 9; // '<thought>'.length
+                closingTag = '</thought>';
+              }
 
-            if (startIdx !== -1) {
-              activeThinkClosingTag = closingTag;
-              const beforeThink = textToEmit.slice(0, startIdx);
-              const afterThink = textToEmit.slice(startIdx + tagLen);
+              if (startIdx !== -1) {
+                activeThinkClosingTag = closingTag;
+                const beforeThink = textToEmit.slice(0, startIdx);
+                textToEmit = textToEmit.slice(startIdx + tagLen);
 
-              if (beforeThink) {
+                if (beforeThink) {
+                  if (!textContentBlock) {
+                    textContentBlock = { type: 'text', text: '' };
+                    assistantMessage.content.push(textContentBlock);
+                    const contentIndex = assistantMessage.content.length - 1;
+                    stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
+                  }
+                  textContentBlock.text += beforeThink;
+                  const contentIndex = assistantMessage.content.indexOf(textContentBlock);
+                  stream.push({
+                    type: 'text_delta',
+                    contentIndex,
+                    delta: beforeThink,
+                    partial: assistantMessage,
+                  });
+                }
+
+                isInsideInlineThink = true;
+              } else {
                 if (!textContentBlock) {
                   textContentBlock = { type: 'text', text: '' };
                   assistantMessage.content.push(textContentBlock);
                   const contentIndex = assistantMessage.content.length - 1;
                   stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
                 }
-                textContentBlock.text += beforeThink;
+                textContentBlock.text += textToEmit;
                 const contentIndex = assistantMessage.content.indexOf(textContentBlock);
                 stream.push({
                   type: 'text_delta',
                   contentIndex,
-                  delta: beforeThink,
+                  delta: textToEmit,
                   partial: assistantMessage,
                 });
-              }
-
-              const endIdx = afterThink.indexOf(closingTag);
-              if (endIdx !== -1) {
-                const thinkPart = afterThink.slice(0, endIdx);
-                if (thinkPart) {
-                  emitThinkingDelta(thinkPart);
-                }
-                isInsideInlineThink = false;
-                textToEmit = afterThink.slice(endIdx + closingTag.length);
-              } else {
-                isInsideInlineThink = true;
-                if (afterThink) {
-                  emitThinkingDelta(afterThink);
-                }
                 textToEmit = '';
               }
             }
-          }
-
-          if (textToEmit) {
-            if (!textContentBlock) {
-              textContentBlock = { type: 'text', text: '' };
-              assistantMessage.content.push(textContentBlock);
-              const contentIndex = assistantMessage.content.length - 1;
-              stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
-            }
-            textContentBlock.text += textToEmit;
-            const contentIndex = assistantMessage.content.indexOf(textContentBlock);
-            stream.push({
-              type: 'text_delta',
-              contentIndex,
-              delta: textToEmit,
-              partial: assistantMessage,
-            });
           }
         }
 
         // Tool calls delta
         if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
           for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0;
+            // Determine a unique accumulator key:
+            // 1. If tc.index is explicitly specified (number), use String(tc.index)
+            // 2. Else if tc.id is provided, use tc.id
+            // 3. Else fallback to unique call id
+            let key: string;
+            if (typeof tc.index === 'number') {
+              key = `idx_${tc.index}`;
+            } else if (tc.id) {
+              key = `id_${tc.id}`;
+            } else if (tc.function?.name && toolCallAccumulators.size > 0) {
+              const lastKey = Array.from(toolCallAccumulators.keys()).pop()!;
+              const lastAcc = toolCallAccumulators.get(lastKey)!;
+              if (lastAcc.name === tc.function.name) {
+                key = lastKey;
+              } else {
+                key = `call_${toolCallAccumulators.size}`;
+              }
+            } else {
+              key = `call_${toolCallAccumulators.size}`;
+            }
+
             const extra = tc.extra_content || delta.extra_content || choice.extra_content || (json as any).extra_content;
             const thoughtSig =
               tc.thought_signature ||
@@ -800,18 +803,28 @@ async function streamOpenAI(
               extra?.google?.thought_signature ||
               tc.provider_specific_fields?.thought_signature;
 
-            if (!toolCallAccumulators.has(idx)) {
-              toolCallAccumulators.set(idx, {
-                id: tc.id || `call_${idx}_${Date.now()}`,
+            if (!toolCallAccumulators.has(key)) {
+              toolCallAccumulators.set(key, {
+                id: tc.id || `call_${toolCallAccumulators.size}_${Date.now()}`,
                 name: tc.function?.name || '',
                 argsStr: tc.function?.arguments || '',
                 extra_content: extra,
                 thought_signature: thoughtSig,
               });
             } else {
-              const acc = toolCallAccumulators.get(idx)!;
+              const acc = toolCallAccumulators.get(key)!;
               if (tc.id) acc.id = tc.id;
-              if (tc.function?.name) acc.name += tc.function.name;
+              if (tc.function?.name) {
+                if (!acc.name) {
+                  acc.name = tc.function.name;
+                } else if (acc.name === tc.function.name) {
+                  // Duplicate full name sent across chunks, do not append
+                } else if (tc.function.name.startsWith(acc.name)) {
+                  acc.name = tc.function.name;
+                } else if (!acc.name.includes(tc.function.name)) {
+                  acc.name += tc.function.name;
+                }
+              }
               if (tc.function?.arguments) acc.argsStr += tc.function.arguments;
               if (extra) acc.extra_content = extra;
               if (thoughtSig) acc.thought_signature = thoughtSig;
@@ -991,7 +1004,7 @@ async function streamAnthropic(
     } else if (m.role === 'toolResult') {
       const isOlderTurn = olderToolCallIds.has(m.toolCallId);
       const toolName = (m as any).toolName || toolCallIdToName.get(m.toolCallId) || '';
-      const isScratchpad = toolName === 'scratchpad';
+      const isScratchpad = toolName === 'scratchpad' || toolName === 'append_to_preview';
 
       let textParts = Array.isArray(m.content)
         ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('\n')

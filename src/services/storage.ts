@@ -1,6 +1,6 @@
 // Local storage service using chrome.storage.local with browser fallback for dev/testing
 
-import { AppSettings, UserDocument, ChatMessage, ChatSession } from '../types';
+import { AppSettings, UserDocument, ChatMessage, ChatSession, SuggestedMemory } from '../types';
 
 const SETTINGS_KEY = 'autoform_settings';
 const GLOBAL_MEMORY_KEY = 'autoform_global_memory';
@@ -29,53 +29,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   systemInstruction: 'You are OpenBUA, an autonomous browser use assistant that helps users navigate, research, interact, and fill forms accurately using their active browser and stored documents.',
 };
 
-export const DEFAULT_GLOBAL_MEMORIES: UserDocument[] = [
-  {
-    id: 'mem-default-profile',
-    title: 'Personal & Professional Profile (About Me)',
-    type: 'markdown',
-    content: `# Personal & Professional Information
-
-## Contact Information
-- Full Name: Alex Mercer
-- First Name: Alex
-- Last Name: Mercer
-- Email: alex.mercer.work@example.com
-- Phone: +1 (555) 234-5678
-- Date of Birth: 1994-08-15
-- Gender: Male
-
-## Address
-- Street: 742 Evergreen Terrace
-- Apartment / Suite: Apt 4B
-- City: Seattle
-- State: Washington (WA)
-- Postal Code / Zip: 98101
-- Country: United States
-
-## Professional Details
-- Current Title: Senior Software Engineer
-- Company: HyperScale Systems
-- Years of Experience: 6
-- Primary Skills: TypeScript, React, Node.js, Python, Cloud Architecture, GraphQL
-- LinkedIn: https://linkedin.com/in/alex-mercer-dev
-- GitHub: https://github.com/alexmercer
-- Website / Portfolio: https://alexmercer.dev
-
-## Education
-- Degree: Bachelor of Science in Computer Science
-- University: University of Washington
-- Graduation Year: 2017
-- GPA: 3.8 / 4.0
-`,
-    summary: 'Alex Mercer - Senior Software Engineer, Seattle WA. Full personal and professional profile.',
-    createdAt: Date.now(),
-    sizeBytes: 950,
-    tags: ['profile', 'contact', 'resume', 'about-me'],
-    isActiveForContext: true,
-    isGlobal: true,
-  },
-];
+export const DEFAULT_GLOBAL_MEMORIES: UserDocument[] = [];
 
 // Helper to get tab key for scoped storage
 // Scoped by Chrome tab ID so navigating to a new site/page within the SAME tab maintains chat history forever!
@@ -170,7 +124,8 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
 // Global Memories (Consistent across all tabs)
 // ========================================================
 export async function loadGlobalMemories(): Promise<UserDocument[]> {
-  return await getStorageItem<UserDocument[]>(GLOBAL_MEMORY_KEY, DEFAULT_GLOBAL_MEMORIES);
+  const list = await getStorageItem<UserDocument[]>(GLOBAL_MEMORY_KEY, DEFAULT_GLOBAL_MEMORIES);
+  return list.filter((m) => m.id !== 'mem-default-profile');
 }
 
 export async function saveGlobalMemory(doc: UserDocument): Promise<void> {
@@ -334,9 +289,10 @@ export async function deleteChatSession(sessionId: string): Promise<ChatSession[
     },
   ];
   await saveChatSessions(finalSessions);
-  // Also clear messages, tab memories, and scratchpad associated with deleted session
+  // Also clear messages, tab memories, scratchpad, and suggested memories associated with deleted session
   await clearChatHistoryForTab(sessionId);
   await clearScratchpad(sessionId);
+  await clearSuggestedMemories(sessionId);
   return finalSessions;
 }
 
@@ -358,7 +314,7 @@ const LAST_ACTIVE_NAV_TAB_KEY = 'openbua_last_active_nav_tab';
 const LAST_ACTIVE_SESSION_ID_KEY = 'openbua_last_active_session_id';
 
 export async function saveLastActiveState(
-  navTab: 'chat' | 'memory' | 'settings',
+  navTab: 'chat' | 'memory' | 'settings' | 'preview' | 'suggestions',
   sessionId?: string
 ): Promise<void> {
   const ops: Promise<void>[] = [setStorageItem(LAST_ACTIVE_NAV_TAB_KEY, navTab)];
@@ -369,11 +325,11 @@ export async function saveLastActiveState(
 }
 
 export async function loadLastActiveState(): Promise<{
-  navTab: 'chat' | 'memory' | 'settings';
+  navTab: 'chat' | 'memory' | 'settings' | 'preview' | 'suggestions';
   sessionId?: string;
 }> {
   const [navTab, sessionId] = await Promise.all([
-    getStorageItem<'chat' | 'memory' | 'settings'>(LAST_ACTIVE_NAV_TAB_KEY, 'chat'),
+    getStorageItem<'chat' | 'memory' | 'settings' | 'preview' | 'suggestions'>(LAST_ACTIVE_NAV_TAB_KEY, 'chat'),
     getStorageItem<string | undefined>(LAST_ACTIVE_SESSION_ID_KEY, undefined),
   ]);
   return { navTab, sessionId };
@@ -452,7 +408,14 @@ export async function appendToScratchpad(entry: string, sessionId?: string): Pro
   const sid = sessionId || currentActiveSessionId || 'session_default';
   const current = await getScratchpad(sid);
   const trimmed = entry.trim();
-  const updated = current ? `${current}\n\n${trimmed}` : trimmed;
+  if (!current) {
+    await saveScratchpad(trimmed, sid);
+    return trimmed;
+  }
+  const isTableRow = trimmed.startsWith('|') && trimmed.includes('|');
+  const lastLineIsTableRow = current.trimEnd().endsWith('|');
+  const separator = isTableRow && lastLineIsTableRow ? '\n' : '\n\n';
+  const updated = `${current.trimEnd()}${separator}${trimmed}`;
   await saveScratchpad(updated, sid);
   return updated;
 }
@@ -531,5 +494,65 @@ export async function incrementGeminiDailyUsage(): Promise<GeminiUsageInfo> {
   return { count: nextCount, limit: GEMINI_DAILY_LIMIT, remaining, remainingPercent, date: today };
 }
 
+// ========================================================
+// Suggested Memories Storage
+// ========================================================
+const SUGGESTED_MEMORIES_KEY = 'openbua_suggested_memories';
 
+export async function loadSuggestedMemories(sessionId?: string): Promise<SuggestedMemory[]> {
+  const all = await getStorageItem<SuggestedMemory[]>(SUGGESTED_MEMORIES_KEY, []);
+  if (!sessionId) return all;
+  return all.filter((s) => !s.sessionId || s.sessionId === sessionId);
+}
 
+export async function saveSuggestedMemory(suggestion: SuggestedMemory): Promise<SuggestedMemory[]> {
+  const all = await getStorageItem<SuggestedMemory[]>(SUGGESTED_MEMORIES_KEY, []);
+  const existingIdx = all.findIndex((s) => s.id === suggestion.id);
+  let updated: SuggestedMemory[];
+  if (existingIdx >= 0) {
+    updated = [...all];
+    updated[existingIdx] = suggestion;
+  } else {
+    updated = [suggestion, ...all];
+  }
+  await setStorageItem(SUGGESTED_MEMORIES_KEY, updated);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('openbua_suggested_memories_updated', {
+        detail: { suggestion, sessionId: suggestion.sessionId },
+      })
+    );
+  }
+  return updated;
+}
+
+export async function deleteSuggestedMemory(id: string): Promise<SuggestedMemory[]> {
+  const all = await getStorageItem<SuggestedMemory[]>(SUGGESTED_MEMORIES_KEY, []);
+  const updated = all.filter((s) => s.id !== id);
+  await setStorageItem(SUGGESTED_MEMORIES_KEY, updated);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('openbua_suggested_memories_updated', {
+        detail: { deletedId: id },
+      })
+    );
+  }
+  return updated;
+}
+
+export async function clearSuggestedMemories(sessionId?: string): Promise<void> {
+  if (sessionId) {
+    const all = await getStorageItem<SuggestedMemory[]>(SUGGESTED_MEMORIES_KEY, []);
+    const remaining = all.filter((s) => s.sessionId && s.sessionId !== sessionId);
+    await setStorageItem(SUGGESTED_MEMORIES_KEY, remaining);
+  } else {
+    await setStorageItem(SUGGESTED_MEMORIES_KEY, []);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('openbua_suggested_memories_updated', {
+        detail: { clearedSessionId: sessionId },
+      })
+    );
+  }
+}

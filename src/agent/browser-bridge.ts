@@ -591,80 +591,110 @@ export function playCaptchaSuccessSound() {
 
 // In-page fallback CAPTCHA detection for direct script execution
 function inPageCheckCaptcha(): { detected: boolean; type?: string; selector?: string } {
+  const isElementVisible = (el: Element | null): boolean => {
+    if (!el) return false;
+    if (!(el instanceof HTMLElement)) return true;
+    const style = window.getComputedStyle(el);
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.opacity === '0' ||
+      style.visibility === 'collapse'
+    ) {
+      return false;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 5 || rect.height <= 5) return false;
+    return true;
+  };
+
+  const isInvisibleBadge = (el: Element | null): boolean => {
+    if (!el) return false;
+    if (el.closest('.grecaptcha-badge, [data-size="invisible"]')) return true;
+    if (el.getAttribute('data-size') === 'invisible') return true;
+    return false;
+  };
+
   const title = (document.title || '').trim().toLowerCase();
   const bodyText = (document.body ? document.body.innerText || '' : '').toLowerCase().slice(0, 3000);
 
   // 1. Cloudflare Turnstile & Interactive Challenge
+  const cfChallengeRunning = document.querySelector('#challenge-running, #challenge-stage');
+  const cfTurnstileFrame = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
   if (
-    document.querySelector('iframe[src*="challenges.cloudflare.com"]') ||
-    document.querySelector('#cf-turnstile, .cf-turnstile, #challenge-running, #challenge-form, #challenge-stage, .ray-id') ||
     title.includes('just a moment...') ||
     title.includes('attention required! | cloudflare') ||
-    (bodyText.includes('checking your browser') && bodyText.includes('cloudflare'))
+    (cfChallengeRunning && isElementVisible(cfChallengeRunning)) ||
+    (cfTurnstileFrame && isElementVisible(cfTurnstileFrame)) ||
+    (bodyText.includes('checking your browser') && bodyText.includes('cloudflare') && bodyText.length < 1000)
   ) {
     return {
       detected: true,
       type: 'cloudflare',
-      selector: '#challenge-form, #cf-turnstile, iframe[src*="challenges.cloudflare.com"]',
+      selector: '#challenge-form, #challenge-stage, iframe[src*="challenges.cloudflare.com"]',
     };
   }
 
-  // 2. Google reCAPTCHA
+  // 2. Google reCAPTCHA (only active challenge bframe or visible checkbox, never invisible v3 badges)
+  const recaptchaBframe = document.querySelector('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"]');
+  const recaptchaAnchor = document.querySelector('iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"]');
   if (
-    document.querySelector('iframe[src*="recaptcha"], iframe[title*="recaptcha" i]') ||
-    document.querySelector('.g-recaptcha, #recaptcha, .recaptcha-checkbox')
+    (recaptchaBframe && isElementVisible(recaptchaBframe)) ||
+    (recaptchaAnchor && isElementVisible(recaptchaAnchor) && !isInvisibleBadge(recaptchaAnchor))
   ) {
     return {
       detected: true,
       type: 'recaptcha',
-      selector: 'iframe[src*="recaptcha"], .g-recaptcha',
+      selector: 'iframe[src*="recaptcha"]',
     };
   }
 
   // 3. hCaptcha
+  const hcaptchaBox = document.querySelector('iframe[src*="hcaptcha.com/box"], iframe[src*="hcaptcha.com"][title*="challenge" i]');
+  const hcaptchaAnchor = document.querySelector('iframe[src*="hcaptcha.com"]');
   if (
-    document.querySelector('iframe[src*="hcaptcha.com"]') ||
-    document.querySelector('.h-captcha, div[data-sitekey]')
+    (hcaptchaBox && isElementVisible(hcaptchaBox)) ||
+    (hcaptchaAnchor && isElementVisible(hcaptchaAnchor) && !isInvisibleBadge(hcaptchaAnchor))
   ) {
     return {
       detected: true,
       type: 'hcaptcha',
-      selector: 'iframe[src*="hcaptcha.com"], .h-captcha',
+      selector: 'iframe[src*="hcaptcha.com"]',
     };
   }
 
-  // 4. Arkose Labs
-  if (
-    document.querySelector('#fc-iframe-wrap, iframe[src*="arkoselabs"], #arkose')
-  ) {
+  // 4. Arkose Labs / FunCaptcha
+  const arkoseFrame = document.querySelector('#fc-iframe-wrap iframe, iframe[src*="arkoselabs"]');
+  if (arkoseFrame && isElementVisible(arkoseFrame)) {
     return {
       detected: true,
       type: 'arkose',
-      selector: '#fc-iframe-wrap, iframe[src*="arkoselabs"]',
+      selector: '#fc-iframe-wrap iframe, iframe[src*="arkoselabs"]',
     };
   }
 
-  // 5. Bing Bot Challenge
+  // 5. Bing Bot Challenge (visible challenge only, no generic challenge form actions)
+  const bingCaptcha = document.querySelector('#b_captcha');
   if (
-    document.querySelector('#b_captcha, form[action*="challenge"]') ||
-    (bodyText.includes('please solve this puzzle') && bodyText.includes('person')) ||
-    (bodyText.includes('verify that you are human') && (bodyText.includes('bing') || title.includes('bing')))
+    (bingCaptcha && isElementVisible(bingCaptcha)) ||
+    (bodyText.includes('please solve this puzzle') && bodyText.includes('person') && bodyText.length < 800) ||
+    (bodyText.includes('verify that you are human') && (bodyText.includes('bing') || title.includes('bing')) && bodyText.length < 800)
   ) {
     return {
       detected: true,
       type: 'bing_bot',
-      selector: '#b_captcha, form[action*="challenge"]',
+      selector: '#b_captcha',
     };
   }
 
-  // 6. Generic Anti-Bot Challenge
+  // 6. Generic Anti-Bot Challenge (must be dedicated interstitial page with short content)
   if (
+    title === 'robot check' ||
     title.includes('robot check') ||
-    title.includes('security check') ||
-    title.includes('human verification') ||
-    title.includes('bot verification') ||
-    (bodyText.includes('verify you are human') && bodyText.length < 500) ||
-    (bodyText.includes('confirm you are not a robot') && bodyText.length < 500)
+    title === 'security check' ||
+    title === 'human verification' ||
+    title === 'bot verification' ||
+    ((bodyText.includes('verify you are human') || bodyText.includes('confirm you are not a robot')) && bodyText.length < 500 && !document.querySelector('main, article'))
   ) {
     return {
       detected: true,
@@ -721,6 +751,7 @@ export async function checkActiveTabCaptcha(tabId?: number): Promise<{ detected:
 // --- Human-in-the-Loop (HITL) 10-Second CAPTCHA Intercept Gate Manager ---
 export interface CaptchaState {
   isActive: boolean;
+  isManualSolving?: boolean;
   type: string;
   url: string;
   remainingSeconds: number;
@@ -731,6 +762,7 @@ type CaptchaListener = (state: CaptchaState) => void;
 class CaptchaGateManager {
   private activeState: CaptchaState = {
     isActive: false,
+    isManualSolving: false,
     type: '',
     url: '',
     remainingSeconds: 0,
@@ -758,6 +790,16 @@ class CaptchaGateManager {
     }
   }
 
+  public pauseForManualSolving() {
+    if (!this.activeState.isActive) return;
+    if (this.countdownTimer) {
+      clearInterval(this.countdownTimer);
+      this.countdownTimer = null;
+    }
+    this.activeState.isManualSolving = true;
+    this.notify();
+  }
+
   public resolveActiveGate(solved: boolean, customMessage?: string) {
     if (!this.activeState.isActive || !this.activeResolver) return;
 
@@ -774,6 +816,7 @@ class CaptchaGateManager {
     this.activeResolver = null;
     this.activeState = {
       isActive: false,
+      isManualSolving: false,
       type: '',
       url: '',
       remainingSeconds: 0,
@@ -799,6 +842,7 @@ class CaptchaGateManager {
 
     this.activeState = {
       isActive: true,
+      isManualSolving: false,
       type: type || 'bot_challenge',
       url,
       remainingSeconds: 10,
@@ -1248,32 +1292,46 @@ export async function captureTabScreenshot(): Promise<string> {
   const activeTab = await getActiveTab();
   const windowId = activeTab?.windowId;
 
-  return new Promise((resolve, reject) => {
-    // Use JPEG format with quality 80 for lightweight, fast screenshots (~150KB instead of 4MB PNG)
-    const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'jpeg', quality: 80 };
-    
-    // When called from a side panel, passing the active tab's windowId ensures capturing the browser window rather than side panel
-    const captureCallback = (dataUrl?: string) => {
-      if (chrome.runtime.lastError || !dataUrl) {
-        // Fallback without windowId if window-specific call failed
-        chrome.tabs.captureVisibleTab(options, (fallbackDataUrl) => {
-          if (chrome.runtime.lastError || !fallbackDataUrl) {
-            reject(new Error(chrome.runtime.lastError?.message || 'Failed to capture tab screenshot'));
-          } else {
-            resolve(fallbackDataUrl);
-          }
-        });
-      } else {
-        resolve(dataUrl);
-      }
-    };
+  const tryCapture = (): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      // Use JPEG format with quality 80 for lightweight, fast screenshots (~150KB instead of 4MB PNG)
+      const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'jpeg', quality: 80 };
+      
+      // When called from a side panel, passing the active tab's windowId ensures capturing the browser window rather than side panel
+      const captureCallback = (dataUrl?: string) => {
+        if (chrome.runtime.lastError || !dataUrl) {
+          // Fallback without windowId if window-specific call failed
+          chrome.tabs.captureVisibleTab(options, (fallbackDataUrl) => {
+            if (chrome.runtime.lastError || !fallbackDataUrl) {
+              reject(new Error(chrome.runtime.lastError?.message || 'Failed to capture tab screenshot'));
+            } else {
+              resolve(fallbackDataUrl);
+            }
+          });
+        } else {
+          resolve(dataUrl);
+        }
+      };
 
-    if (typeof windowId === 'number') {
-      chrome.tabs.captureVisibleTab(windowId, options, captureCallback);
-    } else {
-      chrome.tabs.captureVisibleTab(options, captureCallback);
+      if (typeof windowId === 'number') {
+        chrome.tabs.captureVisibleTab(windowId, options, captureCallback);
+      } else {
+        chrome.tabs.captureVisibleTab(options, captureCallback);
+      }
+    });
+  };
+
+  try {
+    return await tryCapture();
+  } catch (err: any) {
+    // If image readback failed (e.g. active tab mid-scroll, rendering frame, or GPU memory swapping), retry once after a short delay
+    const msg = err?.message || String(err);
+    if (msg.toLowerCase().includes('readback') || msg.toLowerCase().includes('internal error')) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return await tryCapture();
     }
-  });
+    throw err;
+  }
 }
 
 // Development mock data
