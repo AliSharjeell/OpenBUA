@@ -12,6 +12,7 @@ import {
 } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS } from './tools';
 import { ProviderConfig } from '../types';
+import { incrementGeminiDailyUsage } from '../services/storage';
 
 export function createCustomModel(config: ProviderConfig): Model<any> {
   return {
@@ -376,6 +377,9 @@ async function streamOpenAI(
     }
 
     if (response && response.ok) {
+      if (isGemini || endpoint.includes('generativelanguage.googleapis.com')) {
+        incrementGeminiDailyUsage().catch(() => {});
+      }
       break;
     }
 
