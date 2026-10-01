@@ -337,6 +337,9 @@ ${(this.settings.autoConfirmSubmit ?? true)
     - When a task is complete or between steps, summarize your progress clearly to the user.
     - NEVER execute tools silently without providing an accompanying status explanation in your message.
 
+17. REASONING & CHAIN-OF-THOUGHT INSTRUCTIONS:
+    - Before calling any tool or taking actions, reason step-by-step inside <thought>...</thought> tags about your goal, evaluating the page state, and choosing which tool and parameters to use.
+
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();

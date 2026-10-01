@@ -345,25 +345,11 @@ async function streamOpenAI(
 
   // Request thoughts / reasoning traces for Gemini models via Google OpenAI-compatible endpoint
   if (isGemini) {
-    const isGemini3 =
-      (config.model || '').includes('3.') ||
-      (config.model || '').includes('3-') ||
-      (config.model || '').includes('3.5') ||
-      (config.model || '').includes('3.8') ||
-      (config.model || '').includes('3.1');
-
     const thinkingConfig: any = {
       include_thoughts: true,
+      thinking_budget: 1024,
     };
-    if (isGemini3) {
-      thinkingConfig.thinking_level = 'low';
-    } else {
-      thinkingConfig.thinking_budget = 1024;
-    }
 
-    payload.google = {
-      thinking_config: thinkingConfig,
-    };
     payload.extra_body = {
       google: {
         thinking_config: thinkingConfig,
@@ -675,9 +661,19 @@ async function streamOpenAI(
               delta.content = (delta.content || '') + p.text;
             }
           }
-        } else if (delta.extra_content?.google?.thought) {
+        } else if (delta.extra_content?.google?.thought !== undefined) {
           const gThought = delta.extra_content.google.thought;
-          reasoningDelta = typeof gThought === 'string' ? gThought : (gThought?.text || '');
+          if (typeof gThought === 'string') {
+            reasoningDelta = gThought;
+          } else if (gThought && typeof gThought === 'object' && gThought.text) {
+            reasoningDelta = gThought.text;
+          } else if (gThought === true && delta.content) {
+            // Google flagged this entire delta's content as thought / reasoning
+            let thoughtStr = delta.content;
+            thoughtStr = thoughtStr.replace(/^<thought>/i, '').replace(/<\/thought>$/i, '');
+            reasoningDelta = thoughtStr;
+            delta.content = '';
+          }
         } else if (delta.thought && typeof delta.thought === 'object') {
           reasoningDelta = delta.thought.text || delta.thought.content || '';
         } else if (delta.reasoning_content && typeof delta.reasoning_content === 'object') {
@@ -692,100 +688,87 @@ async function streamOpenAI(
         if (delta.content) {
           let textToEmit = delta.content;
 
-          if (isInsideInlineThink) {
-            const endIdx =
-              textToEmit.indexOf(activeThinkClosingTag) !== -1
-                ? textToEmit.indexOf(activeThinkClosingTag)
-                : textToEmit.indexOf('</think>') !== -1
-                ? textToEmit.indexOf('</think>')
-                : textToEmit.indexOf('</thought>');
+          while (textToEmit.length > 0) {
+            if (isInsideInlineThink) {
+              const endIdx =
+                textToEmit.indexOf(activeThinkClosingTag) !== -1
+                  ? textToEmit.indexOf(activeThinkClosingTag)
+                  : textToEmit.indexOf('</think>') !== -1
+                  ? textToEmit.indexOf('</think>')
+                  : textToEmit.indexOf('</thought>');
 
-            if (endIdx !== -1) {
-              const matchedCloseTag = textToEmit.slice(endIdx).startsWith('</thought>')
-                ? '</thought>'
-                : '</think>';
-              const thinkPart = textToEmit.slice(0, endIdx);
-              if (thinkPart) {
-                emitThinkingDelta(thinkPart);
+              if (endIdx !== -1) {
+                const matchedCloseTag = textToEmit.slice(endIdx).startsWith('</thought>')
+                  ? '</thought>'
+                  : '</think>';
+                const thinkPart = textToEmit.slice(0, endIdx);
+                if (thinkPart) {
+                  emitThinkingDelta(thinkPart);
+                }
+                isInsideInlineThink = false;
+                textToEmit = textToEmit.slice(endIdx + matchedCloseTag.length);
+              } else {
+                emitThinkingDelta(textToEmit);
+                textToEmit = '';
               }
-              isInsideInlineThink = false;
-              textToEmit = textToEmit.slice(endIdx + matchedCloseTag.length);
             } else {
-              emitThinkingDelta(textToEmit);
-              textToEmit = '';
-            }
-          } else {
-            const thinkIdx = textToEmit.indexOf('<think>');
-            const thoughtIdx = textToEmit.indexOf('<thought>');
-            let startIdx = -1;
-            let tagLen = 0;
-            let closingTag = '</think>';
+              const thinkIdx = textToEmit.indexOf('<think>');
+              const thoughtIdx = textToEmit.indexOf('<thought>');
+              let startIdx = -1;
+              let tagLen = 0;
+              let closingTag = '</think>';
 
-            if (thinkIdx !== -1 && (thoughtIdx === -1 || thinkIdx < thoughtIdx)) {
-              startIdx = thinkIdx;
-              tagLen = 7; // '<think>'.length
-              closingTag = '</think>';
-            } else if (thoughtIdx !== -1) {
-              startIdx = thoughtIdx;
-              tagLen = 9; // '<thought>'.length
-              closingTag = '</thought>';
-            }
+              if (thinkIdx !== -1 && (thoughtIdx === -1 || thinkIdx < thoughtIdx)) {
+                startIdx = thinkIdx;
+                tagLen = 7; // '<think>'.length
+                closingTag = '</think>';
+              } else if (thoughtIdx !== -1) {
+                startIdx = thoughtIdx;
+                tagLen = 9; // '<thought>'.length
+                closingTag = '</thought>';
+              }
 
-            if (startIdx !== -1) {
-              activeThinkClosingTag = closingTag;
-              const beforeThink = textToEmit.slice(0, startIdx);
-              const afterThink = textToEmit.slice(startIdx + tagLen);
+              if (startIdx !== -1) {
+                activeThinkClosingTag = closingTag;
+                const beforeThink = textToEmit.slice(0, startIdx);
+                textToEmit = textToEmit.slice(startIdx + tagLen);
 
-              if (beforeThink) {
+                if (beforeThink) {
+                  if (!textContentBlock) {
+                    textContentBlock = { type: 'text', text: '' };
+                    assistantMessage.content.push(textContentBlock);
+                    const contentIndex = assistantMessage.content.length - 1;
+                    stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
+                  }
+                  textContentBlock.text += beforeThink;
+                  const contentIndex = assistantMessage.content.indexOf(textContentBlock);
+                  stream.push({
+                    type: 'text_delta',
+                    contentIndex,
+                    delta: beforeThink,
+                    partial: assistantMessage,
+                  });
+                }
+
+                isInsideInlineThink = true;
+              } else {
                 if (!textContentBlock) {
                   textContentBlock = { type: 'text', text: '' };
                   assistantMessage.content.push(textContentBlock);
                   const contentIndex = assistantMessage.content.length - 1;
                   stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
                 }
-                textContentBlock.text += beforeThink;
+                textContentBlock.text += textToEmit;
                 const contentIndex = assistantMessage.content.indexOf(textContentBlock);
                 stream.push({
                   type: 'text_delta',
                   contentIndex,
-                  delta: beforeThink,
+                  delta: textToEmit,
                   partial: assistantMessage,
                 });
-              }
-
-              const endIdx = afterThink.indexOf(closingTag);
-              if (endIdx !== -1) {
-                const thinkPart = afterThink.slice(0, endIdx);
-                if (thinkPart) {
-                  emitThinkingDelta(thinkPart);
-                }
-                isInsideInlineThink = false;
-                textToEmit = afterThink.slice(endIdx + closingTag.length);
-              } else {
-                isInsideInlineThink = true;
-                if (afterThink) {
-                  emitThinkingDelta(afterThink);
-                }
                 textToEmit = '';
               }
             }
-          }
-
-          if (textToEmit) {
-            if (!textContentBlock) {
-              textContentBlock = { type: 'text', text: '' };
-              assistantMessage.content.push(textContentBlock);
-              const contentIndex = assistantMessage.content.length - 1;
-              stream.push({ type: 'text_start', contentIndex, partial: assistantMessage });
-            }
-            textContentBlock.text += textToEmit;
-            const contentIndex = assistantMessage.content.indexOf(textContentBlock);
-            stream.push({
-              type: 'text_delta',
-              contentIndex,
-              delta: textToEmit,
-              partial: assistantMessage,
-            });
           }
         }
 
