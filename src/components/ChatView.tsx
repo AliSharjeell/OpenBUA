@@ -90,6 +90,12 @@ function getToolMeta(toolName: string) {
         desc: 'Recording research data and notes in active session notepad...',
         icon: BookOpen,
       };
+    case 'append_to_preview':
+      return {
+        label: 'Updating Live Preview',
+        desc: 'Appending discovered finding or table row to Live Preview...',
+        icon: BookOpen,
+      };
     case 'send_web_email':
       return {
         label: 'Sending Direct Email',

@@ -266,7 +266,7 @@ async function streamOpenAI(
     } else if (m.role === 'toolResult') {
       const isOlderTurn = olderToolCallIds.has(m.toolCallId);
       const toolName = (m as any).toolName || toolCallIdToName.get(m.toolCallId) || '';
-      const isScratchpad = toolName === 'scratchpad';
+      const isScratchpad = toolName === 'scratchpad' || toolName === 'append_to_preview';
 
       let text = Array.isArray(m.content)
         ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('\n')
@@ -1004,7 +1004,7 @@ async function streamAnthropic(
     } else if (m.role === 'toolResult') {
       const isOlderTurn = olderToolCallIds.has(m.toolCallId);
       const toolName = (m as any).toolName || toolCallIdToName.get(m.toolCallId) || '';
-      const isScratchpad = toolName === 'scratchpad';
+      const isScratchpad = toolName === 'scratchpad' || toolName === 'append_to_preview';
 
       let textParts = Array.isArray(m.content)
         ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('\n')

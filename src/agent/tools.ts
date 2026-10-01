@@ -446,6 +446,46 @@ export function createScratchpadTool(sessionId?: string): AgentTool<typeof Scrat
 
 export const scratchpadTool: AgentTool<typeof ScratchpadSchema> = createScratchpadTool();
 
+// 11b. Atomic Append to Preview Tool
+const AppendToPreviewSchema = Type.Object({
+  content: Type.String({
+    description: 'Markdown snippet to append to the live preview buffer (e.g. table header, table row, bullet point, or section heading). Call this immediately when any single society, date, flight, or candidate is discovered.',
+  }),
+});
+
+export function createAppendToPreviewTool(sessionId?: string): AgentTool<typeof AppendToPreviewSchema> {
+  return {
+    name: 'append_to_preview',
+    label: 'Append to Live Preview',
+    description: 'Appends a markdown chunk, table row, or section to the live preview buffer. Call this IMMEDIATELY when any single item, society, induction date, or result is discovered so the user sees real-time progress in their Preview tab.',
+    parameters: AppendToPreviewSchema,
+    execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+      try {
+        const textToAppend = params.content || '';
+        if (!textToAppend.trim()) {
+          return {
+            content: [{ type: 'text', text: 'Error: content is required.' }],
+            details: { success: false },
+          };
+        }
+        const updated = await appendToScratchpad(textToAppend, sessionId);
+        const lineCount = updated.split('\n').filter(Boolean).length;
+        return {
+          content: [{ type: 'text', text: `Appended to Live Preview successfully. Current preview contains ${lineCount} lines (${updated.length} chars).\n\nAppended:\n${textToAppend}` }],
+          details: { success: true, totalChars: updated.length, lineCount },
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: 'text', text: `Append to preview error: ${err?.message || err}` }],
+          details: { error: String(err) },
+        };
+      }
+    },
+  };
+}
+
+export const appendToPreviewTool: AgentTool<typeof AppendToPreviewSchema> = createAppendToPreviewTool();
+
 // 12. Suggest Memory Tool
 const SuggestMemorySchema = Type.Object({
   title: Type.String({ description: 'Short descriptive title of the memory (e.g. "User Contact Phone", "Preferred Airline", "LinkedIn Easy Apply Routine")' }),
@@ -669,6 +709,7 @@ export function createAgentTools(sessionId?: string): AgentTool<any>[] {
     switchBrowserTabTool,
     navigateBrowserTabTool,
     getPageContentTool,
+    createAppendToPreviewTool(sessionId),
     createScratchpadTool(sessionId),
     createSuggestMemoryTool(sessionId),
     pressKeyCombinationTool,
