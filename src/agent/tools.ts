@@ -389,7 +389,7 @@ export function createScratchpadTool(sessionId?: string): AgentTool<typeof Scrat
   return {
     name: 'scratchpad',
     label: 'Live Preview & Research Scratchpad',
-    description: 'A persistent session notepad and LIVE Markdown preview document. Content appended here is displayed in real time to the user in their dedicated "Preview" tab while you work! Whenever you find events, emails, flight options, leads, job listings, tables, or research notes, immediately call scratchpad with action="append" and clean markdown so the user can watch findings accumulate live without waiting.',
+    description: 'MANDATORY REAL-TIME PREVIEW & RESEARCH SCRATCHPAD. Content appended here is displayed immediately in real time to the user in their dedicated "Preview" tab as you work! Whenever you discover ANY matching item, qualifying society induction date, event, flight, lead, or research note, you MUST IMMEDIATELY call scratchpad with action="append" and clean Markdown so the user watches discoveries appear live without waiting.',
     parameters: ScratchpadSchema,
     execute: async (_toolCallId, params): Promise<AgentToolResult> => {
       try {

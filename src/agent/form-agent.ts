@@ -4,7 +4,7 @@ import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS, createAgentTools } from './tools';
 import { createCustomModel, createStreamFn } from './stream-adapter';
 import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
-import { setActiveSessionIdState } from '../services/storage';
+import { setActiveSessionIdState, getScratchpad, appendToScratchpad } from '../services/storage';
 
 export interface AgentUpdateListeners {
   onMessageDelta?: (text: string) => void;
@@ -142,6 +142,60 @@ export function convertChatMessagesToAgentMessages(
   return result;
 }
 
+/**
+ * Automatically extracts research discoveries and qualifying candidates (e.g. society inductions,
+ * event dates, flight options, job criteria) from turn thinking and response text.
+ */
+export function extractResearchFindings(thinking?: string, text?: string): string[] {
+  const combined = [thinking || '', text || ''].join('\n');
+  if (!combined.trim()) return [];
+
+  // Split by newlines, bullet points, or sentence boundaries (. followed by space/capital letter)
+  const segments = combined
+    .split(/\n+|(?<=[.!?])\s+(?=[A-Z])/)
+    .map((s) => s.trim().replace(/^[-*•#\d.]+\s*/, '').trim())
+    .filter((s) => s.length >= 15 && s.length <= 350);
+
+  const findings: string[] = [];
+
+  for (const seg of segments) {
+    // Exclude meta-planning / intent / instructions
+    if (
+      /^(now\s+let\s+me|let'?s\s+|i\s+will\s+|i\s+should\s+|need\s+to\s+|first,\s+|next,\s+|let\s+me\s+|i'll\s+|we\s+need\s+to|checking\s+if)/i.test(
+        seg
+      )
+    ) {
+      continue;
+    }
+    // Exclude explicit negatives
+    if (
+      /(?:does\s+not\s+qualify|doesn'?t\s+qualify|not\s+qualifying|not\s+eligible|excluded|before\s+oct|prior\s+to\s+oct)/i.test(
+        seg
+      )
+    ) {
+      continue;
+    }
+
+    // Must match discovery / qualification patterns
+    const hasQualifySignal = /(?:qualif(?:ies|ied|y|ying)?|match(?:es|ed)?|meets?\s+criteria|eligible)/i.test(
+      seg
+    );
+    const hasDateSignal = /(?:oct(?:ober)?|\b\d{1,2}(?:st|nd|rd|th)?\b|day\s*\d|interview|induction|deadline|venue)/i.test(
+      seg
+    );
+    const hasInductionSignal = /(?:induction|inductions?|registration|audition|orientation)\s+(?:open|opened|start|starts|scheduled|held|is|are|on)/i.test(
+      seg
+    );
+
+    if ((hasQualifySignal && hasDateSignal) || hasInductionSignal) {
+      const clean = seg.replace(/[.]+$/, '');
+      findings.push(clean);
+    }
+  }
+
+  return findings;
+}
+
 export class FormAgentHarness {
   private agent: Agent | null = null;
   private settings: AppSettings;
@@ -213,6 +267,18 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
      </thought>
      Then invoke tools or provide your response.
    - Never skip the <thought>...</thought> block on any turn.
+
+0.5. MANDATORY REAL-TIME RESEARCH DISCOVERY STREAMING ('scratchpad' TOOL):
+   - ABSOLUTE HIGHEST PRIORITY FOR DISCOVERY & RESEARCH TASKS:
+     Whenever the user asks you to find, search, list, or collect items (for example: "find societies with inductions opened 2nd october onwards", "find flights", "find jobs", "extract contacts"):
+     THE INSTANT YOU DISCOVER ANY MATCHING ITEM, SOCIETY, DATE, OR QUALIFYING RESULT:
+     YOU MUST IMMEDIATELY CALL THE 'scratchpad' TOOL (action: 'append') TO RECORD IT IN CLEAN MARKDOWN!
+   - NEVER WAIT UNTIL THE END OF YOUR ENTIRE RUN. The user is actively watching the dedicated "Preview" tab in the center toggle to see real-time updates as you discover each item!
+   - DO NOT MERELY MENTION QUALIFYING FINDINGS INSIDE YOUR <thought> BLOCK:
+     If your thought observes that an item qualifies (e.g. "GitHub Campus Club has Day 1 on Oct 1 and Day 2 on Oct 2 — that qualifies"), you MUST EMIT A 'scratchpad' TOOL CALL IN THAT EXACT TURN!
+     Example call:
+     scratchpad({ action: 'append', content: '### GitHub Campus Club\n- **Induction Dates:** Day 1: Oct 1 | Day 2: Oct 2\n- **Status:** Qualifies (Day 2 is Oct 2 onwards)\n- **Details:** Interviews & inductions scheduled for CS Lawn' })
+   - NEVER navigate to the next email, thread, or page without first saving any qualifying discovery from the current page to the 'scratchpad'!
 1. USER'S PRIMARY BROWSER & SIGNED-IN SESSIONS:
    - You run directly inside the user's everyday personal desktop browser.
    - ALWAYS assume the user is ALREADY signed into their accounts (Google, YouTube, GitHub, Twitter/X, Reddit, work portals, etc.) unless an explicit "Sign in" button is visible and blocking form interaction.
@@ -244,12 +310,12 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
      | 1 | Jane Doe | PhD Researcher | Stanford, USA |
    - Separate every page or section table with a blank line before and after the table to ensure clean rendering.
 7. LONG-RUNNING RESEARCH, DATA ACCUMULATION & LIVE PREVIEW ('scratchpad'):
-   - The user has a dedicated full-screen "Live Preview" tab (top-right Eye icon with an iMessage-blue notification dot) that displays the contents of the 'scratchpad' in live Markdown as you work!
+   - The user has a dedicated "Preview" tab in the center navigation toggle (with an iMessage-blue notification badge when new content is added) that displays the contents of the 'scratchpad' in live Markdown in real time as you work!
    - When the user asks you to find, search, compare, or extract items (e.g. "find events/inductions from Gmail", "find cheapest return flights", "find 50 tech leads", "extract products", "summarize unread emails"):
    - Call 'scratchpad' with action 'append' AS YOU FIND EACH ITEM or batch of items, formatted cleanly in Markdown (tables, bullet points, headers).
    - This lets the user watch your findings accumulate live in real time in their Preview tab without having to wait until your entire run finishes!
-   - Example: scratchpad({ action: 'append', content: '### ✈️ Fly Jinnah (Direct)\n- Fare: PKR 36,500 roundtrip\n- Depart: Oct 6, 08:30 | Return: Oct 10, 19:00\n' })
-   - Or: scratchpad({ action: 'append', content: '| Event | Date | Time | Venue |\n|---|---|---|---|\n| TLC Day 2 | Oct 2, 2026 | 3:00 PM | CS Lawn |\n' })
+   - Example: scratchpad({ action: 'append', content: '### Fly Jinnah (Direct)\n- Fare: PKR 36,500 roundtrip\n- Depart: Oct 6, 08:30 | Return: Oct 10, 19:00\n' })
+   - Or: scratchpad({ action: 'append', content: '| Society / Event | Date | Time | Venue |\n|---|---|---|---|\n| GitHub Campus Club Day 2 | Oct 2, 2026 | 3:00 PM | CS Lawn |\n' })
    - Using 'scratchpad' also ensures you never lose collected data as you navigate across multiple tabs or pages.
    - Use 'scratchpad' action 'read' if you ever need to review your progress, verify your count, and format your final response to the user.
 8. FAST EMAIL & WEBMAIL AUTOMATION (Gmail, Outlook, Webmail):
@@ -282,9 +348,9 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
     - DISCOVERED VS VISITED LISTS (WORKING MEMORY PERSISTENCE):
       * On initial search or page listing, extract the candidate items/threads into a 'Discovered' list in your scratchpad or thoughts.
       * Maintain an explicit 'Visited' list. NEVER re-open, re-read, or re-click any thread, lead, or link already marked as 'Visited'.
-    - SINGLE-PASS PROCESSING:
+    - SINGLE-PASS PROCESSING & IMMEDIATE PREVIEW STREAMING:
       * Process each thread or item strictly ONCE:
-        Open thread/item -> Extract required fields (dates, times, venues, contacts, status) -> Immediately append to 'scratchpad' so user sees it in live preview -> Mark as 'Visited'.
+        Open thread/item -> Extract required fields (dates, times, venues, contacts, status) -> If it matches or qualifies, IMMEDIATELY call 'scratchpad' so user sees it in live preview -> Mark as 'Visited'.
       * Never navigate back to re-inspect an already visited item or second-guess extracted data.
     - EXPLORATION BUDGET & BAN ON QUERY-MUTATION CYCLING:
       * Maximum 1 Search Query: Execute a single well-targeted search query (at most 2 only if the first returns 0 results).
@@ -449,7 +515,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     });
   }
 
-  private handleAgentEvent(event: any) {
+  private async handleAgentEvent(event: any) {
     switch (event.type) {
       case 'agent_start':
         this.listeners.onStatusChange?.(true);
@@ -543,7 +609,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         break;
       }
 
-      case 'turn_end':
+      case 'turn_end': {
         if (event.message?.errorMessage) {
           this.listeners.onError?.(event.message.errorMessage);
         }
@@ -552,12 +618,50 @@ ${this.settings.systemInstruction || ''}`.trim();
           this.currentThinkingText ||
           (hasTools && this.currentStreamingText.trim() ? this.currentStreamingText.trim() : undefined);
         const textForTurn = hasTools && !this.currentThinkingText ? '' : this.currentStreamingText;
+
+        // Safety fallback: If agent detected qualifying findings in its reasoning or turn text
+        // but omitted calling the 'scratchpad' tool, automatically sync to scratchpad & record tool call
+        const hasScratchpadCall = Array.from(this.activeToolCalls.values()).some(
+          (tc) => tc.toolName === 'scratchpad'
+        );
+        if (!hasScratchpadCall) {
+          const findings = extractResearchFindings(thinkingForTurn, textForTurn);
+          if (findings.length > 0) {
+            try {
+              const currentPad = await getScratchpad(this.sessionId);
+              const newFindings = findings.filter(
+                (f) => !currentPad.toLowerCase().includes(f.toLowerCase().slice(0, 30))
+              );
+              if (newFindings.length > 0) {
+                const formatted = newFindings.map((f) => `- ${f}`).join('\n');
+                const appendText = `### Discovered Finding\n${formatted}`;
+                await appendToScratchpad(appendText, this.sessionId);
+                const tcId = `tc_auto_scratchpad_${Date.now()}`;
+                const autoTc: ToolCallState = {
+                  id: tcId,
+                  toolName: 'scratchpad',
+                  args: { action: 'append', content: appendText },
+                  status: 'success',
+                  result: `Added to Live Preview:\n${appendText}`,
+                  timestamp: Date.now(),
+                };
+                this.activeToolCalls.set(tcId, autoTc);
+                this.listeners.onToolCallStart?.(autoTc);
+                this.listeners.onToolCallEnd?.(autoTc);
+              }
+            } catch (err) {
+              console.error('[FormAgentHarness] Auto scratchpad sync error:', err);
+            }
+          }
+        }
+
         this.listeners.onTurnComplete?.(
           textForTurn,
           Array.from(this.activeToolCalls.values()),
           thinkingForTurn || undefined
         );
         break;
+      }
 
       case 'agent_end':
         this.listeners.onStatusChange?.(false);
