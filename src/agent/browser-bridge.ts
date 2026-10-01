@@ -1292,32 +1292,46 @@ export async function captureTabScreenshot(): Promise<string> {
   const activeTab = await getActiveTab();
   const windowId = activeTab?.windowId;
 
-  return new Promise((resolve, reject) => {
-    // Use JPEG format with quality 80 for lightweight, fast screenshots (~150KB instead of 4MB PNG)
-    const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'jpeg', quality: 80 };
-    
-    // When called from a side panel, passing the active tab's windowId ensures capturing the browser window rather than side panel
-    const captureCallback = (dataUrl?: string) => {
-      if (chrome.runtime.lastError || !dataUrl) {
-        // Fallback without windowId if window-specific call failed
-        chrome.tabs.captureVisibleTab(options, (fallbackDataUrl) => {
-          if (chrome.runtime.lastError || !fallbackDataUrl) {
-            reject(new Error(chrome.runtime.lastError?.message || 'Failed to capture tab screenshot'));
-          } else {
-            resolve(fallbackDataUrl);
-          }
-        });
-      } else {
-        resolve(dataUrl);
-      }
-    };
+  const tryCapture = (): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      // Use JPEG format with quality 80 for lightweight, fast screenshots (~150KB instead of 4MB PNG)
+      const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'jpeg', quality: 80 };
+      
+      // When called from a side panel, passing the active tab's windowId ensures capturing the browser window rather than side panel
+      const captureCallback = (dataUrl?: string) => {
+        if (chrome.runtime.lastError || !dataUrl) {
+          // Fallback without windowId if window-specific call failed
+          chrome.tabs.captureVisibleTab(options, (fallbackDataUrl) => {
+            if (chrome.runtime.lastError || !fallbackDataUrl) {
+              reject(new Error(chrome.runtime.lastError?.message || 'Failed to capture tab screenshot'));
+            } else {
+              resolve(fallbackDataUrl);
+            }
+          });
+        } else {
+          resolve(dataUrl);
+        }
+      };
 
-    if (typeof windowId === 'number') {
-      chrome.tabs.captureVisibleTab(windowId, options, captureCallback);
-    } else {
-      chrome.tabs.captureVisibleTab(options, captureCallback);
+      if (typeof windowId === 'number') {
+        chrome.tabs.captureVisibleTab(windowId, options, captureCallback);
+      } else {
+        chrome.tabs.captureVisibleTab(options, captureCallback);
+      }
+    });
+  };
+
+  try {
+    return await tryCapture();
+  } catch (err: any) {
+    // If image readback failed (e.g. active tab mid-scroll, rendering frame, or GPU memory swapping), retry once after a short delay
+    const msg = err?.message || String(err);
+    if (msg.toLowerCase().includes('readback') || msg.toLowerCase().includes('internal error')) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return await tryCapture();
     }
-  });
+    throw err;
+  }
 }
 
 // Development mock data
