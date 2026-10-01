@@ -7,6 +7,7 @@ import {
   createAssistantMessageEventStream,
   Model,
   TextContent,
+  ThinkingContent,
   ToolCall,
   TranscriptContext,
 } from '@earendil-works/pi-ai';
@@ -17,11 +18,15 @@ import { incrementGeminiDailyUsage } from '../services/storage';
 let lastFreeRequestTimestamp = 0;
 
 export function createCustomModel(config: ProviderConfig): Model<any> {
+  const isGemini =
+    (config.model || '').toLowerCase().includes('gemini') ||
+    (config.baseUrl || '').includes('generativelanguage.googleapis.com');
   return {
     id: config.model,
     name: config.model,
     provider: config.provider,
     api: config.provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+    reasoning: isGemini || false,
     capabilities: ['tools', 'streaming', 'image'],
   } as unknown as Model<any>;
 }
@@ -338,6 +343,22 @@ async function streamOpenAI(
     payload.tool_choice = 'auto';
   }
 
+  // Request thoughts / reasoning traces for Gemini models via Google OpenAI-compatible endpoint
+  if (isGemini) {
+    payload.google = {
+      thinking_config: {
+        include_thoughts: true,
+      },
+    };
+    payload.extra_body = {
+      google: {
+        thinking_config: {
+          include_thoughts: true,
+        },
+      },
+    };
+  }
+
   // If using Groq, clamp max_tokens to prevent OTPM (output tokens per minute) errors on Groq's free tier.
   // Standard models (Mimo, Claude, OpenAI, DeepSeek) are NEVER clamped.
   if (isGroq) {
@@ -399,6 +420,14 @@ async function streamOpenAI(
     }
 
     const errorBody = await response.text();
+
+    // If Gemini model rejected thinking_config with 400 Bad Request on attempt 0, strip thinking_config and retry cleanly
+    if (response && response.status === 400 && payload.google && attempt === 0) {
+      console.warn('[streamOpenAI] Model returned 400 with thinking_config. Retrying without thinking_config...');
+      delete payload.google;
+      delete payload.extra_body;
+      continue;
+    }
 
     // Free Mode (Gemini Free Tier) 429 Rate Limit Interception & Auto-Waiting
     if (response && response.status === 429 && isFreeMode && attempt < maxRetries) {
@@ -556,12 +585,31 @@ async function streamOpenAI(
   stream.push({ type: 'start', partial: assistantMessage });
 
   let textContentBlock: TextContent | null = null;
+  let thinkingContentBlock: ThinkingContent | null = null;
   const toolCallAccumulators = new Map<
     number,
     { id: string; name: string; argsStr: string; extra_content?: any; thought_signature?: string }
   >();
   let isInsideInlineThink = false;
   let activeThinkClosingTag = '</think>';
+
+  const emitThinkingDelta = (chunk: string) => {
+    if (!chunk) return;
+    if (!thinkingContentBlock) {
+      thinkingContentBlock = { type: 'thinking', thinking: '' };
+      assistantMessage.content.push(thinkingContentBlock);
+      const contentIndex = assistantMessage.content.length - 1;
+      stream.push({ type: 'thinking_start' as any, contentIndex, partial: assistantMessage });
+    }
+    thinkingContentBlock.thinking += chunk;
+    const contentIndex = assistantMessage.content.indexOf(thinkingContentBlock);
+    stream.push({
+      type: 'thinking_delta' as any,
+      contentIndex,
+      delta: chunk,
+      partial: assistantMessage,
+    });
+  };
 
   let buffer = '';
 
@@ -587,21 +635,31 @@ async function streamOpenAI(
         const delta = choice.delta;
         if (!delta) continue;
 
-        // Reasoning / Thinking delta (Gemini reasoning_content/thought, DeepSeek R1, OpenAI o1/o3-mini, Minimax)
-        const rawReasoning = delta.reasoning_content ?? delta.reasoning ?? delta.thought ?? '';
+        // Reasoning / Thinking delta (Gemini reasoning_content/thought/parts, DeepSeek R1, OpenAI o1/o3-mini, Minimax)
         let reasoningDelta = '';
-        if (typeof rawReasoning === 'string') {
-          reasoningDelta = rawReasoning;
-        } else if (typeof rawReasoning === 'object' && rawReasoning !== null) {
-          reasoningDelta = (rawReasoning as any).text || (rawReasoning as any).content || (rawReasoning as any).thought || '';
+        if (typeof delta.reasoning_content === 'string') {
+          reasoningDelta = delta.reasoning_content;
+        } else if (typeof delta.thought === 'string') {
+          reasoningDelta = delta.thought;
+        } else if (typeof delta.reasoning === 'string') {
+          reasoningDelta = delta.reasoning;
+        } else if (Array.isArray(delta.parts)) {
+          for (const p of delta.parts) {
+            if (p && p.thought && p.text) {
+              reasoningDelta += p.text;
+            }
+          }
+        } else if (delta.extra_content?.google?.thought) {
+          const gThought = delta.extra_content.google.thought;
+          reasoningDelta = typeof gThought === 'string' ? gThought : (gThought?.text || '');
+        } else if (delta.thought && typeof delta.thought === 'object') {
+          reasoningDelta = delta.thought.text || delta.thought.content || '';
+        } else if (delta.reasoning_content && typeof delta.reasoning_content === 'object') {
+          reasoningDelta = (delta.reasoning_content as any).text || '';
         }
 
         if (reasoningDelta) {
-          stream.push({
-            type: 'thinking_delta' as any,
-            delta: reasoningDelta,
-            partial: assistantMessage,
-          });
+          emitThinkingDelta(reasoningDelta);
         }
 
         // Text delta (with inline <think>...</think> and <thought>...</thought> tag interception)
@@ -622,20 +680,12 @@ async function streamOpenAI(
                 : '</think>';
               const thinkPart = textToEmit.slice(0, endIdx);
               if (thinkPart) {
-                stream.push({
-                  type: 'thinking_delta' as any,
-                  delta: thinkPart,
-                  partial: assistantMessage,
-                });
+                emitThinkingDelta(thinkPart);
               }
               isInsideInlineThink = false;
               textToEmit = textToEmit.slice(endIdx + matchedCloseTag.length);
             } else {
-              stream.push({
-                type: 'thinking_delta' as any,
-                delta: textToEmit,
-                partial: assistantMessage,
-              });
+              emitThinkingDelta(textToEmit);
               textToEmit = '';
             }
           } else {
@@ -681,22 +731,14 @@ async function streamOpenAI(
               if (endIdx !== -1) {
                 const thinkPart = afterThink.slice(0, endIdx);
                 if (thinkPart) {
-                  stream.push({
-                    type: 'thinking_delta' as any,
-                    delta: thinkPart,
-                    partial: assistantMessage,
-                  });
+                  emitThinkingDelta(thinkPart);
                 }
                 isInsideInlineThink = false;
                 textToEmit = afterThink.slice(endIdx + closingTag.length);
               } else {
                 isInsideInlineThink = true;
                 if (afterThink) {
-                  stream.push({
-                    type: 'thinking_delta' as any,
-                    delta: afterThink,
-                    partial: assistantMessage,
-                  });
+                  emitThinkingDelta(afterThink);
                 }
                 textToEmit = '';
               }
@@ -760,6 +802,17 @@ async function streamOpenAI(
         // Skip malformed SSE lines
       }
     }
+  }
+
+  // Finalize thinking block
+  if (thinkingContentBlock) {
+    const contentIndex = assistantMessage.content.indexOf(thinkingContentBlock);
+    stream.push({
+      type: 'thinking_end' as any,
+      contentIndex,
+      content: thinkingContentBlock.thinking,
+      partial: assistantMessage,
+    });
   }
 
   // Finalize text block
