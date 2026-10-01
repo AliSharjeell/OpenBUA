@@ -855,6 +855,7 @@ export function App() {
         )}
 
         {/* Right: Circle Suggested Memories Button with Notification Dot */}
+        {activeNavTab !== 'suggestions' && (
         <div className="flex items-center pointer-events-auto">
           <button
             type="button"
@@ -875,6 +876,7 @@ export function App() {
             )}
           </button>
         </div>
+        )}
       </header>
 
       {/* Backdrop Overlay (blurs background behind sidebar without dimming/lowering opacity) */}
