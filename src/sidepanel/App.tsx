@@ -149,10 +149,14 @@ export function App() {
         onStatusChange: (busy) => {
           setIsBusy(busy);
           if (busy) {
-            thinkingStartTimeRef.current = Date.now();
+            if (!thinkingStartTimeRef.current) {
+              thinkingStartTimeRef.current = Date.now();
+            }
             thinkingDurationMsRef.current = null;
           } else {
             setActiveTool(null);
+            thinkingStartTimeRef.current = null;
+            thinkingDurationMsRef.current = null;
           }
         },
         onMessageDelta: (deltaText) => {
@@ -162,12 +166,13 @@ export function App() {
           const duration = thinkingDurationMsRef.current ?? undefined;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant' && last.isStreaming) {
+            if (last && last.role === 'assistant') {
               const updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
                 content: deltaText,
                 thinkingDurationMs: duration ?? last.thinkingDurationMs,
+                isStreaming: true,
               };
               return updated;
             } else {
@@ -192,11 +197,12 @@ export function App() {
           }
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant' && last.isStreaming) {
+            if (last && last.role === 'assistant') {
               const updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
                 thinking: thinkingText,
+                isStreaming: true,
               };
               return updated;
             } else {
