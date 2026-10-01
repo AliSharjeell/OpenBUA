@@ -256,7 +256,7 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
               onClick={handleOpenAiStudio}
               className="w-full py-2.5 px-4 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-100 font-medium text-xs flex items-center justify-center transition-all shadow-md cursor-pointer active:scale-[0.99]"
             >
-              Get Gemini API Key
+              Get Free Gemini API Key
             </button>
           </div>
 
