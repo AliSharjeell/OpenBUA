@@ -138,14 +138,28 @@ export async function setStorageItem<T>(key: string, value: T): Promise<void> {
 // Settings
 export async function loadSettings(): Promise<AppSettings> {
   const settings = await getStorageItem<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS);
-  return {
+  const loadedFreeModel = settings?.free?.model;
+  // Automatically migrate deprecated 2.5 models to gemini-3.5-flash-lite
+  const activeFreeModel =
+    loadedFreeModel === 'gemini-2.5-flash-lite' || loadedFreeModel === 'gemini-2.5-flash'
+      ? 'gemini-3.5-flash-lite'
+      : loadedFreeModel || DEFAULT_SETTINGS.free.model;
+
+  const mergedSettings: AppSettings = {
     ...DEFAULT_SETTINGS,
     ...settings,
     selectedMode: settings?.selectedMode || 'free',
-    free: { ...DEFAULT_SETTINGS.free, ...(settings?.free || {}) },
+    free: { ...DEFAULT_SETTINGS.free, ...(settings?.free || {}), model: activeFreeModel },
     openai: { ...DEFAULT_SETTINGS.openai, ...(settings?.openai || {}) },
     anthropic: { ...DEFAULT_SETTINGS.anthropic, ...(settings?.anthropic || {}) },
   };
+
+  // If migration occurred, persist the updated model to storage
+  if (loadedFreeModel && loadedFreeModel !== activeFreeModel) {
+    setStorageItem(SETTINGS_KEY, mergedSettings).catch(() => {});
+  }
+
+  return mergedSettings;
 }
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
