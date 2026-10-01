@@ -344,7 +344,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         provider: 'openai',
         baseUrl: this.settings.free?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/',
         apiKey: this.settings.free?.apiKey || '',
-        model: this.settings.free?.model || 'gemini-3.8-flash',
+        model: this.settings.free?.model || 'gemini-3.5-flash-lite',
         isFreeMode: true,
         mode: 'free',
       };

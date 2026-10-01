@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AppSettings, ProviderType, ModelMode } from '../types';
-import { saveSettings, getGeminiDailyUsage, GeminiUsageInfo } from '../services/storage';
+import { saveSettings } from '../services/storage';
 import { Input } from './ui/input';
 import {
   CheckCircle2,
@@ -112,20 +112,11 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
     settings.free?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/'
   );
   const [freeKey, setFreeKey] = useState(settings.free?.apiKey || '');
-  const [freeModel, setFreeModel] = useState(settings.free?.model || 'gemini-3.5-flash-lite');
-
-  // Gemini daily usage limits tracking (1,500 RPD)
-  const [geminiUsage, setGeminiUsage] = useState<GeminiUsageInfo>({
-    count: 0,
-    limit: 1500,
-    remaining: 1500,
-    remainingPercent: 100,
-    date: new Date().toISOString().slice(0, 10),
-  });
-
-  useEffect(() => {
-    getGeminiDailyUsage().then(setGeminiUsage).catch(() => {});
-  }, []);
+  const [freeModel, setFreeModel] = useState(
+    settings.free?.model && settings.free.model !== 'gemini-3.8-flash'
+      ? settings.free.model
+      : 'gemini-3.5-flash-lite'
+  );
 
   // BYOK Provider Type ('openai' | 'anthropic')
   const [activeProvider, setActiveProvider] = useState<ProviderType>(settings.activeProvider || 'openai');
@@ -359,21 +350,11 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
             </div>
           </div>
 
-          {/* 3. Gemini Model Selector with RPM/RPD Limits */}
+          {/* 3. Gemini Model Selector */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-medium text-zinc-300 block">
-                Free Gemini Model
-              </label>
-              {(() => {
-                const currentOpt = FREE_GEMINI_MODELS.find((m) => m.id === freeModel);
-                return currentOpt ? (
-                  <span className="text-[10px] text-emerald-400 font-medium">
-                    {currentOpt.rpm} • {currentOpt.rpd}
-                  </span>
-                ) : null;
-              })()}
-            </div>
+            <label className="text-[11px] font-medium text-zinc-300 block">
+              Free Gemini Model
+            </label>
             <select
               value={freeModel}
               onChange={(e) => setFreeModel(e.target.value)}
@@ -388,36 +369,6 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
             <p className="text-[10px] text-zinc-400 leading-relaxed">
               If one model's limit is reached, you may use another and resume.
             </p>
-          </div>
-
-          {/* 4. Percentage / Quota Bar (No icon, white percentage text) */}
-          <div className="p-3 rounded-xl bg-zinc-900/70 border border-zinc-800/80 space-y-2">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="font-medium text-zinc-300">Free Tier Daily Quota</span>
-              <span className="text-xs font-semibold text-white">
-                {geminiUsage.remainingPercent}% left
-              </span>
-            </div>
-
-            {/* Percentage Bar */}
-            <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
-                style={{ width: `${geminiUsage.remainingPercent}%` }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between text-[10px] text-zinc-400 pt-0.5">
-              <span>{geminiUsage.remaining.toLocaleString()} / 1,500 requests remaining</span>
-              <button
-                type="button"
-                onClick={handleOpenAiStudio}
-                className="text-blue-400 hover:text-blue-300 flex items-center gap-0.5 underline cursor-pointer"
-              >
-                <span>AI Studio</span>
-                <ExternalLink className="w-2.5 h-2.5" />
-              </button>
-            </div>
           </div>
 
           {/* 4. Permissions Section */}
