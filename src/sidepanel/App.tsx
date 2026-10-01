@@ -37,7 +37,7 @@ import { ChatView, formatEntireChatAsText } from '../components/ChatView';
 import { MemoryView } from '../components/MemoryView';
 import { SettingsView } from '../components/SettingsView';
 import { PreviewView } from '../components/PreviewView';
-import { SuggestedMemoriesModal } from '../components/SuggestedMemoriesModal';
+import { SuggestedMemoriesView } from '../components/SuggestedMemoriesView';
 import {
   MessageSquare,
   Layers,
@@ -73,7 +73,7 @@ function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
 }
 
 export function App() {
-  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings' | 'preview'>('chat');
+  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings' | 'preview' | 'suggestions'>('chat');
   const [settingsTab, setSettingsTab] = useState<ModelMode>(DEFAULT_SETTINGS.selectedMode || 'free');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [globalMemories, setGlobalMemories] = useState<UserDocument[]>([]);
@@ -86,7 +86,6 @@ export function App() {
   const [unseenPreviews, setUnseenPreviews] = useState<Record<string, boolean>>({});
   const hasUnseenPreview = Boolean(unseenPreviews[activeSessionId]);
   const [suggestedMemories, setSuggestedMemories] = useState<SuggestedMemory[]>([]);
-  const [isSuggestedMemoriesOpen, setIsSuggestedMemoriesOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
@@ -104,7 +103,7 @@ export function App() {
 
   const harnessRef = useRef<FormAgentHarness | null>(null);
   const currentTabKeyRef = useRef<string>('session_default');
-  const activeNavTabRef = useRef<'chat' | 'memory' | 'settings' | 'preview'>('chat');
+  const activeNavTabRef = useRef<'chat' | 'memory' | 'settings' | 'preview' | 'suggestions'>('chat');
   const thinkingStartTimeRef = useRef<number | null>(null);
   const thinkingDurationMsRef = useRef<number | null>(null);
 
@@ -408,7 +407,7 @@ export function App() {
             return updated;
           });
         },
-        onError: (err) => {
+        onError: (err: any) => {
           setActiveTool(null);
           const errStr = typeof err === 'string' ? err : err?.message || String(err);
           const isInterrupted =
@@ -491,7 +490,7 @@ export function App() {
     init();
   }, []);
 
-  const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings' | 'preview') => {
+  const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings' | 'preview' | 'suggestions') => {
     if (tab === 'preview') {
       setUnseenPreviews((prev) => ({ ...prev, [activeSessionId]: false }));
     }
@@ -750,9 +749,9 @@ export function App() {
 
       {/* Floating Top Header (Positioned absolute over viewport, zero solid strip) */}
       <header className="absolute top-2.5 left-0 right-0 z-30 px-3 flex items-center justify-between pointer-events-none">
-        {/* Left: Circle Back Button (in Settings) OR 2-Line Hamburger Button (in Chat/Memory/Preview) */}
+        {/* Left: Circle Back Button (in Settings / Suggestions) OR 2-Line Hamburger Button (in Chat/Memory/Preview) */}
         <div className="flex items-center pointer-events-auto">
-          {activeNavTab === 'settings' ? (
+          {activeNavTab === 'settings' || activeNavTab === 'suggestions' ? (
             <button
               type="button"
               onClick={() => handleSelectNavTab('chat')}
@@ -773,7 +772,7 @@ export function App() {
           )}
         </div>
 
-        {/* Center: Chat / Memory / Preview Floating Toggle OR Free / BYOK Toggle in Settings */}
+        {/* Center: Chat / Memory / Preview Floating Toggle OR Free / BYOK Toggle in Settings OR Suggested memory Pill */}
         {activeNavTab === 'settings' ? (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
             <button
@@ -798,6 +797,18 @@ export function App() {
             >
               BYOK
             </button>
+          </div>
+        ) : activeNavTab === 'suggestions' ? (
+          <div className="flex items-center gap-1.5 h-8 px-4 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+            <span className="text-xs font-semibold text-zinc-100 tracking-tight">Suggested memory</span>
+            {suggestedMemories.length > 0 && (
+              <span
+                className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white leading-none"
+                style={{ backgroundColor: '#007AFF' }}
+              >
+                {suggestedMemories.length}
+              </span>
+            )}
           </div>
         ) : (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
@@ -847,16 +858,16 @@ export function App() {
         <div className="flex items-center pointer-events-auto">
           <button
             type="button"
-            onClick={() => setIsSuggestedMemoriesOpen(true)}
+            onClick={() => handleSelectNavTab(activeNavTab === 'suggestions' ? 'chat' : 'suggestions')}
             title={`Suggested Memories${suggestedMemories.length > 0 ? ` (${suggestedMemories.length} pending)` : ''}`}
             className={`relative w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95 flex items-center justify-center ${
-              isSuggestedMemoriesOpen
+              activeNavTab === 'suggestions'
                 ? 'border-zinc-700 bg-zinc-800 text-white'
                 : 'border-zinc-800/90 text-zinc-300 hover:text-white'
             }`}
           >
             <Brain className="w-4 h-4 text-white" />
-            {suggestedMemories.length > 0 && (
+            {suggestedMemories.length > 0 && activeNavTab !== 'suggestions' && (
               <span
                 className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full ring-2 ring-zinc-950 animate-pulse"
                 style={{ backgroundColor: '#007AFF' }}
@@ -1085,19 +1096,18 @@ export function App() {
             }}
           />
         )}
-      </main>
 
-      {/* Suggested Memories Modal */}
-      <SuggestedMemoriesModal
-        isOpen={isSuggestedMemoriesOpen}
-        onClose={() => setIsSuggestedMemoriesOpen(false)}
-        suggestions={suggestedMemories}
-        currentTabTitle={sessions.find((s) => s.id === activeSessionId)?.title || 'Current Chat'}
-        onApproveAsTab={handleApproveAsTabMemory}
-        onApproveAsGlobal={handleApproveAsGlobalMemory}
-        onDiscard={handleDiscardSuggestion}
-        onClearAll={handleClearAllSuggestions}
-      />
+        {activeNavTab === 'suggestions' && (
+          <SuggestedMemoriesView
+            suggestions={suggestedMemories}
+            currentTabTitle={sessions.find((s) => s.id === activeSessionId)?.title || 'Current Chat'}
+            onApproveAsTab={handleApproveAsTabMemory}
+            onApproveAsGlobal={handleApproveAsGlobalMemory}
+            onDiscard={handleDiscardSuggestion}
+            onClearAll={handleClearAllSuggestions}
+          />
+        )}
+      </main>
     </div>
   );
 }
