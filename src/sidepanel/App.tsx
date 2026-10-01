@@ -6,12 +6,14 @@ import {
   ToolCallState,
   ChatSession,
   ModelMode,
+  SuggestedMemory,
 } from '../types';
 import {
   loadSettings,
   loadGlobalMemories,
   loadTabMemories,
   saveTabMemory,
+  saveGlobalMemory,
   loadChatHistoryForTab,
   saveChatHistoryForTab,
   loadChatSessions,
@@ -24,6 +26,9 @@ import {
   loadLastActiveState,
   getScratchpad,
   clearScratchpad,
+  loadSuggestedMemories,
+  deleteSuggestedMemory,
+  clearSuggestedMemories,
   DEFAULT_SETTINGS,
 } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
@@ -32,6 +37,7 @@ import { ChatView, formatEntireChatAsText } from '../components/ChatView';
 import { MemoryView } from '../components/MemoryView';
 import { SettingsView } from '../components/SettingsView';
 import { PreviewView } from '../components/PreviewView';
+import { SuggestedMemoriesModal } from '../components/SuggestedMemoriesModal';
 import {
   MessageSquare,
   Layers,
@@ -44,6 +50,7 @@ import {
   Copy,
   ArrowLeft,
   Eye,
+  Brain,
 } from 'lucide-react';
 
 function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
@@ -78,6 +85,8 @@ export function App() {
   const [previewMarkdown, setPreviewMarkdown] = useState<string>('');
   const [unseenPreviews, setUnseenPreviews] = useState<Record<string, boolean>>({});
   const hasUnseenPreview = Boolean(unseenPreviews[activeSessionId]);
+  const [suggestedMemories, setSuggestedMemories] = useState<SuggestedMemory[]>([]);
+  const [isSuggestedMemoriesOpen, setIsSuggestedMemoriesOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
@@ -134,6 +143,18 @@ export function App() {
     };
   }, []);
 
+  // Listen for real-time suggested memories updates from agent
+  useEffect(() => {
+    const handleSuggestedMemoriesUpdate = async () => {
+      const sugs = await loadSuggestedMemories(currentTabKeyRef.current);
+      setSuggestedMemories(sugs);
+    };
+    window.addEventListener('openbua_suggested_memories_updated', handleSuggestedMemoriesUpdate);
+    return () => {
+      window.removeEventListener('openbua_suggested_memories_updated', handleSuggestedMemoriesUpdate);
+    };
+  }, []);
+
   // Close sidebar drawer smoothly on Escape key
   useEffect(() => {
     if (!isSidebarOpen) return;
@@ -162,10 +183,11 @@ export function App() {
       currentTabKeyRef.current = targetSessionId;
       setActiveSessionIdState(targetSessionId);
 
-      const [loadedTabMems, loadedChat, loadedScratch] = await Promise.all([
+      const [loadedTabMems, loadedChat, loadedScratch, loadedSugs] = await Promise.all([
         loadTabMemories(targetSessionId),
         loadChatHistoryForTab(targetSessionId),
         getScratchpad(targetSessionId),
+        loadSuggestedMemories(targetSessionId),
       ]);
 
       setSettings(loadedSettings);
@@ -177,6 +199,7 @@ export function App() {
       setTabMemories(loadedTabMems);
       setMessages(loadedChat);
       setPreviewMarkdown(loadedScratch || '');
+      setSuggestedMemories(loadedSugs);
 
       const activeDocs = [
         ...loadedGlobal.filter((m) => m.isActiveForContext),
@@ -458,14 +481,16 @@ export function App() {
     currentTabKeyRef.current = sessionId;
     setActiveSessionIdState(sessionId);
     saveLastActiveState(activeNavTab, sessionId);
-    const [tMems, msgs, loadedScratch] = await Promise.all([
+    const [tMems, msgs, loadedScratch, loadedSugs] = await Promise.all([
       loadTabMemories(sessionId),
       loadChatHistoryForTab(sessionId),
       getScratchpad(sessionId),
+      loadSuggestedMemories(sessionId),
     ]);
     setTabMemories(tMems);
     setMessages(msgs);
     setPreviewMarkdown(loadedScratch || '');
+    setSuggestedMemories(loadedSugs);
     if (activeNavTabRef.current === 'preview') {
       setUnseenPreviews((prev) => ({ ...prev, [sessionId]: false }));
     }
@@ -473,6 +498,71 @@ export function App() {
       harnessRef.current.setSessionId(sessionId);
       harnessRef.current.setConversationHistory(msgs);
     }
+  };
+
+  const handleApproveAsTabMemory = async (sug: SuggestedMemory) => {
+    const newDoc: UserDocument = {
+      id: `mem-${Date.now()}`,
+      title: sug.title,
+      type: 'markdown',
+      content: sug.content,
+      summary: `${sug.title} (${sug.content.slice(0, 80)}...)`,
+      createdAt: Date.now(),
+      sizeBytes: new Blob([sug.content]).size,
+      tags: [sug.category || 'fact', 'suggested'],
+      isActiveForContext: true,
+      isGlobal: false,
+      tabUrlPattern: activeSessionId,
+    };
+    await saveTabMemory(activeSessionId, newDoc);
+    const updatedSugs = await deleteSuggestedMemory(sug.id);
+    const updatedTabMems = [newDoc, ...tabMemories];
+    setTabMemories(updatedTabMems);
+    setSuggestedMemories(updatedSugs.filter((s) => !s.sessionId || s.sessionId === activeSessionId));
+    if (harnessRef.current) {
+      const activeDocs = [
+        ...globalMemories.filter((m) => m.isActiveForContext),
+        ...updatedTabMems.filter((m) => m.isActiveForContext),
+      ];
+      harnessRef.current.updateConfig(settings, activeDocs);
+    }
+  };
+
+  const handleApproveAsGlobalMemory = async (sug: SuggestedMemory) => {
+    const newDoc: UserDocument = {
+      id: `mem-${Date.now()}`,
+      title: sug.title,
+      type: 'markdown',
+      content: sug.content,
+      summary: `${sug.title} (${sug.content.slice(0, 80)}...)`,
+      createdAt: Date.now(),
+      sizeBytes: new Blob([sug.content]).size,
+      tags: [sug.category || 'fact', 'suggested'],
+      isActiveForContext: true,
+      isGlobal: true,
+    };
+    await saveGlobalMemory(newDoc);
+    const updatedSugs = await deleteSuggestedMemory(sug.id);
+    const updatedGlobal = [newDoc, ...globalMemories];
+    setGlobalMemories(updatedGlobal);
+    setSuggestedMemories(updatedSugs.filter((s) => !s.sessionId || s.sessionId === activeSessionId));
+    if (harnessRef.current) {
+      const activeDocs = [
+        ...updatedGlobal.filter((m) => m.isActiveForContext),
+        ...tabMemories.filter((m) => m.isActiveForContext),
+      ];
+      harnessRef.current.updateConfig(settings, activeDocs);
+    }
+  };
+
+  const handleDiscardSuggestion = async (id: string) => {
+    const updatedSugs = await deleteSuggestedMemory(id);
+    setSuggestedMemories(updatedSugs.filter((s) => !s.sessionId || s.sessionId === activeSessionId));
+  };
+
+  const handleClearAllSuggestions = async () => {
+    await clearSuggestedMemories(activeSessionId);
+    setSuggestedMemories([]);
   };
 
   const handleCreateSession = async () => {
@@ -719,20 +809,20 @@ export function App() {
           </div>
         )}
 
-        {/* Right: Circle Preview Button with iMessage Blue Notification Dot */}
+        {/* Right: Circle Suggested Memories Button with Notification Dot */}
         <div className="flex items-center pointer-events-auto">
           <button
             type="button"
-            onClick={handleTogglePreview}
-            title={activeNavTab === 'preview' ? 'Back to Chat' : 'Live Preview'}
+            onClick={() => setIsSuggestedMemoriesOpen(true)}
+            title={`Suggested Memories${suggestedMemories.length > 0 ? ` (${suggestedMemories.length} pending)` : ''}`}
             className={`relative w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95 flex items-center justify-center ${
-              activeNavTab === 'preview'
+              isSuggestedMemoriesOpen
                 ? 'border-zinc-700 bg-zinc-800 text-white'
                 : 'border-zinc-800/90 text-zinc-300 hover:text-white'
             }`}
           >
-            <Eye className="w-4 h-4 text-white" />
-            {hasUnseenPreview && activeNavTab !== 'preview' && (
+            <Brain className="w-4 h-4 text-white" />
+            {suggestedMemories.length > 0 && (
               <span
                 className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full ring-2 ring-zinc-950 animate-pulse"
                 style={{ backgroundColor: '#007AFF' }}
@@ -962,6 +1052,18 @@ export function App() {
           />
         )}
       </main>
+
+      {/* Suggested Memories Modal */}
+      <SuggestedMemoriesModal
+        isOpen={isSuggestedMemoriesOpen}
+        onClose={() => setIsSuggestedMemoriesOpen(false)}
+        suggestions={suggestedMemories}
+        currentTabTitle={sessions.find((s) => s.id === activeSessionId)?.title || 'Current Chat'}
+        onApproveAsTab={handleApproveAsTabMemory}
+        onApproveAsGlobal={handleApproveAsGlobalMemory}
+        onDiscard={handleDiscardSuggestion}
+        onClearAll={handleClearAllSuggestions}
+      />
     </div>
   );
 }
