@@ -386,8 +386,8 @@ const ScratchpadSchema = Type.Object({
 
 export const scratchpadTool: AgentTool<typeof ScratchpadSchema> = {
   name: 'scratchpad',
-  label: 'Research Scratchpad / Notepad',
-  description: 'A persistent session notepad for storing, appending, and organizing research findings, lists of people/leads/papers, URLs, or multi-step notes across long tasks. Use "append" as you find each item so you never forget or lose data across page navigations. Use "read" to view all collected findings.',
+  label: 'Live Preview & Research Scratchpad',
+  description: 'A persistent session notepad and LIVE Markdown preview document. Content appended here is displayed in real time to the user in their dedicated top-right "Preview" tab while you work! Whenever you find events, emails, flight options, leads, job listings, tables, or research notes, immediately call scratchpad with action="append" and clean markdown so the user can watch findings accumulate live without waiting.',
   parameters: ScratchpadSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
