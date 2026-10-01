@@ -408,7 +408,14 @@ export async function appendToScratchpad(entry: string, sessionId?: string): Pro
   const sid = sessionId || currentActiveSessionId || 'session_default';
   const current = await getScratchpad(sid);
   const trimmed = entry.trim();
-  const updated = current ? `${current}\n\n${trimmed}` : trimmed;
+  if (!current) {
+    await saveScratchpad(trimmed, sid);
+    return trimmed;
+  }
+  const isTableRow = trimmed.startsWith('|') && trimmed.includes('|');
+  const lastLineIsTableRow = current.trimEnd().endsWith('|');
+  const separator = isTableRow && lastLineIsTableRow ? '\n' : '\n\n';
+  const updated = `${current.trimEnd()}${separator}${trimmed}`;
   await saveScratchpad(updated, sid);
   return updated;
 }
