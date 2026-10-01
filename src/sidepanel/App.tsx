@@ -410,19 +410,53 @@ export function App() {
         },
         onError: (err) => {
           setActiveTool(null);
+          const errStr = typeof err === 'string' ? err : err?.message || String(err);
+          const isInterrupted =
+            errStr.toLowerCase().includes('cancel') ||
+            errStr.toLowerCase().includes('abort') ||
+            errStr.toLowerCase().includes('interrupt');
+          const displayContent = isInterrupted
+            ? 'Agent interrupted. Type continue to resume.'
+            : `Error: ${errStr.replace(/^⚠️\s*/, '')}`;
+
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant' && last.content.includes(err)) {
+            if (
+              last &&
+              last.role === 'assistant' &&
+              (last.content === displayContent || last.content.includes(displayContent))
+            ) {
               return prev;
             }
+            let updated = [...prev];
+            if (last && last.role === 'assistant' && last.isStreaming) {
+              if (!last.content || !last.content.trim()) {
+                updated[updated.length - 1] = {
+                  ...last,
+                  content: displayContent,
+                  isStreaming: false,
+                };
+                saveChatHistoryForTab(currentTabKeyRef.current, updated);
+                if (harnessRef.current) {
+                  harnessRef.current.setConversationHistory(updated);
+                }
+                return updated;
+              } else {
+                updated[updated.length - 1] = {
+                  ...last,
+                  isStreaming: false,
+                };
+              }
+            }
+
             const errorMsg: ChatMessage = {
               id: `err-${Date.now()}`,
               role: 'assistant',
-              content: `⚠️ Error: ${err}`,
+              content: displayContent,
               timestamp: Date.now(),
               isStreaming: false,
             };
-            const updated = [...prev, errorMsg];
+            updated = [...updated, errorMsg];
             saveChatHistoryForTab(currentTabKeyRef.current, updated);
             if (harnessRef.current) {
               harnessRef.current.setConversationHistory(updated);

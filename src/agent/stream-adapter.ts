@@ -52,16 +52,16 @@ export async function createStreamFn(
       if (signal?.aborted) {
         const abortedMsg: AssistantMessage = {
           role: 'assistant',
-          content: [{ type: 'text', text: 'Request was cancelled.' }],
+          content: [{ type: 'text', text: 'Agent interrupted. Type continue to resume.' }],
           stopReason: 'aborted',
-          errorMessage: 'Request was cancelled',
+          errorMessage: 'Agent interrupted. Type continue to resume.',
         };
         stream.push({ type: 'error', reason: 'aborted', error: abortedMsg });
         stream.end(abortedMsg);
       } else {
         const errorMsg: AssistantMessage = {
           role: 'assistant',
-          content: [{ type: 'text', text: `⚠️ API Error: ${err?.message || String(err)}` }],
+          content: [{ type: 'text', text: `API Error: ${err?.message || String(err)}` }],
           stopReason: 'error',
           errorMessage: err?.message || String(err),
         };
@@ -461,7 +461,7 @@ async function streamOpenAI(
 
       for (let s = waitSeconds; s > 0; s--) {
         if (signal?.aborted) {
-          throw new Error('Request cancelled during rate limit wait');
+          throw new Error('Agent interrupted. Type continue to resume.');
         }
         await new Promise((r) => setTimeout(r, 1000));
       }
@@ -554,7 +554,7 @@ async function streamOpenAI(
       }
 
       if (signal?.aborted) {
-        throw new Error('Request cancelled during rate limit wait');
+        throw new Error('Agent interrupted. Type continue to resume.');
       }
       continue;
     }

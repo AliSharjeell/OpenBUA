@@ -45,8 +45,13 @@ export function convertChatMessagesToAgentMessages(
         });
       }
     } else if (msg.role === 'assistant') {
-      // Filter out pure error alert notifications
-      if (msg.content?.startsWith('⚠️') && (!msg.toolCalls || msg.toolCalls.length === 0)) {
+      // Filter out pure error alert notifications and interruption notices
+      if (
+        (msg.content?.startsWith('⚠️') ||
+          msg.content?.startsWith('Error:') ||
+          msg.content?.startsWith('Agent interrupted.')) &&
+        (!msg.toolCalls || msg.toolCalls.length === 0)
+      ) {
         continue;
       }
 
