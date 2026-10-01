@@ -1,7 +1,7 @@
 // Form Filling Agent Harness powered by @earendil-works/pi-agent-core
 import { Agent, AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
 import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
-import { ALL_AGENT_TOOLS } from './tools';
+import { ALL_AGENT_TOOLS, createAgentTools } from './tools';
 import { createCustomModel, createStreamFn } from './stream-adapter';
 import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
 import { setActiveSessionIdState } from '../services/storage';
@@ -365,6 +365,15 @@ ${(this.settings.autoConfirmSubmit ?? true)
     - When communicating directly to the user (e.g. asking a question, reporting results, or summarizing completed work), output clean text outside of the <thought> tags.
     - When a task is complete or between steps, summarize your progress clearly to the user.
 
+18. AUTOMATIC MEMORY SUGGESTION PROTOCOL ('suggest_memory'):
+    - While researching, browsing, or executing tasks, proactively detect persistent, high-value facts about the user or repeatable task steps:
+      * User profile & contact details (e.g. phone number, full name, address, email, portfolio URL, LinkedIn profile, graduation year, work authorization).
+      * User preferences (e.g. "Prefers economy class on Fly Jinnah", "Prefers remote AI engineer roles", "Use authuser=3 for university portal").
+      * Repeatable task workflows (e.g. "Step-by-step application flow for Skild AI").
+    - When you discover such facts or preferences, immediately call 'suggest_memory' with a concise title, content, category, and reason.
+    - The user will see this suggestion in their top-right Suggested Memories button and can approve it with 1 click as Global Memory (available in all chats) or Tab Memory, or discard it.
+    - Do not suggest temporary single-use session noise (like ephemeral search URLs or one-time verification codes).
+
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
@@ -422,7 +431,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       initialState: {
         model,
         systemPrompt,
-        tools: ALL_AGENT_TOOLS,
+        tools: createAgentTools(this.sessionId),
         messages: agentMessages.length > 0 ? agentMessages : undefined,
       },
       streamFn: (m, ctx, opts) => createStreamFn(config, m, ctx, opts?.signal),

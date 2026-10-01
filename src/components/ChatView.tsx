@@ -25,6 +25,7 @@ import {
   Keyboard,
   Globe,
   Wrench,
+  Brain,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
 import { ThinkingOrb } from 'thinking-orbs';
@@ -106,6 +107,12 @@ function getToolMeta(toolName: string) {
         label: 'Checking Website URL',
         desc: 'Verifying portfolio / site reachability in background...',
         icon: Globe,
+      };
+    case 'suggest_memory':
+      return {
+        label: 'Suggesting New Memory',
+        desc: 'Proposing discovered fact, preference, or workflow to save...',
+        icon: Brain,
       };
     default:
       return {
