@@ -22,6 +22,8 @@ import {
   setActiveSessionIdState,
   saveLastActiveState,
   loadLastActiveState,
+  getScratchpad,
+  clearScratchpad,
   DEFAULT_SETTINGS,
 } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
@@ -29,6 +31,7 @@ import { FormAgentHarness } from '../agent/form-agent';
 import { ChatView, formatEntireChatAsText } from '../components/ChatView';
 import { MemoryView } from '../components/MemoryView';
 import { SettingsView } from '../components/SettingsView';
+import { PreviewView } from '../components/PreviewView';
 import {
   MessageSquare,
   Layers,
@@ -40,6 +43,7 @@ import {
   Check,
   Copy,
   ArrowLeft,
+  Eye,
 } from 'lucide-react';
 
 function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
@@ -62,7 +66,7 @@ function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
 }
 
 export function App() {
-  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings'>('chat');
+  const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings' | 'preview'>('chat');
   const [settingsTab, setSettingsTab] = useState<ModelMode>(DEFAULT_SETTINGS.selectedMode || 'free');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [globalMemories, setGlobalMemories] = useState<UserDocument[]>([]);
@@ -71,6 +75,8 @@ export function App() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('session_default');
   const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
+  const [previewMarkdown, setPreviewMarkdown] = useState<string>('');
+  const [hasUnseenPreview, setHasUnseenPreview] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
@@ -88,13 +94,43 @@ export function App() {
 
   const harnessRef = useRef<FormAgentHarness | null>(null);
   const currentTabKeyRef = useRef<string>('session_default');
+  const activeNavTabRef = useRef<'chat' | 'memory' | 'settings' | 'preview'>('chat');
   const thinkingStartTimeRef = useRef<number | null>(null);
   const thinkingDurationMsRef = useRef<number | null>(null);
 
-  // Keep currentTabKeyRef synchronized with activeSessionId
+  // Keep activeNavTabRef and currentTabKeyRef synchronized
+  useEffect(() => {
+    activeNavTabRef.current = activeNavTab;
+    if (activeNavTab === 'preview') {
+      setHasUnseenPreview(false);
+    }
+  }, [activeNavTab]);
+
   useEffect(() => {
     currentTabKeyRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  // Listen for real-time scratchpad / live preview document updates from agent
+  useEffect(() => {
+    const handleScratchpadUpdate = (e: Event) => {
+      const customEvt = e as CustomEvent<{ content: string; sessionId?: string }>;
+      if (customEvt.detail) {
+        const { content, sessionId } = customEvt.detail;
+        if (!sessionId || sessionId === currentTabKeyRef.current) {
+          setPreviewMarkdown(content || '');
+          if (content && content.trim().length > 0) {
+            if (activeNavTabRef.current !== 'preview') {
+              setHasUnseenPreview(true);
+            }
+          }
+        }
+      }
+    };
+    window.addEventListener('openbua_scratchpad_updated', handleScratchpadUpdate);
+    return () => {
+      window.removeEventListener('openbua_scratchpad_updated', handleScratchpadUpdate);
+    };
+  }, []);
 
   // Close sidebar drawer smoothly on Escape key
   useEffect(() => {
@@ -124,9 +160,10 @@ export function App() {
       currentTabKeyRef.current = targetSessionId;
       setActiveSessionIdState(targetSessionId);
 
-      const [loadedTabMems, loadedChat] = await Promise.all([
+      const [loadedTabMems, loadedChat, loadedScratch] = await Promise.all([
         loadTabMemories(targetSessionId),
         loadChatHistoryForTab(targetSessionId),
+        getScratchpad(targetSessionId),
       ]);
 
       setSettings(loadedSettings);
@@ -137,6 +174,7 @@ export function App() {
       setActiveSessionId(targetSessionId);
       setTabMemories(loadedTabMems);
       setMessages(loadedChat);
+      setPreviewMarkdown(loadedScratch || '');
 
       const activeDocs = [
         ...loadedGlobal.filter((m) => m.isActiveForContext),
@@ -394,9 +432,21 @@ export function App() {
     init();
   }, []);
 
-  const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings') => {
+  const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings' | 'preview') => {
+    if (tab === 'preview') {
+      setHasUnseenPreview(false);
+    }
     setActiveNavTab(tab);
     saveLastActiveState(tab, currentTabKeyRef.current);
+  };
+
+  const handleTogglePreview = () => {
+    if (activeNavTab === 'preview') {
+      handleSelectNavTab('chat');
+    } else {
+      setHasUnseenPreview(false);
+      handleSelectNavTab('preview');
+    }
   };
 
   // When active session changes, load its scoped chat history and tab memories
@@ -406,12 +456,15 @@ export function App() {
     currentTabKeyRef.current = sessionId;
     setActiveSessionIdState(sessionId);
     saveLastActiveState(activeNavTab, sessionId);
-    const [tMems, msgs] = await Promise.all([
+    const [tMems, msgs, loadedScratch] = await Promise.all([
       loadTabMemories(sessionId),
       loadChatHistoryForTab(sessionId),
+      getScratchpad(sessionId),
     ]);
     setTabMemories(tMems);
     setMessages(msgs);
+    setPreviewMarkdown(loadedScratch || '');
+    setHasUnseenPreview(false);
     if (harnessRef.current) {
       harnessRef.current.setSessionId(sessionId);
       harnessRef.current.setConversationHistory(msgs);
@@ -569,9 +622,9 @@ export function App() {
 
       {/* Floating Top Header (Positioned absolute over viewport, zero solid strip) */}
       <header className="absolute top-2.5 left-0 right-0 z-30 px-3 flex items-center justify-between pointer-events-none">
-        {/* Left: Circle Back Button (in Settings) OR 2-Line Hamburger Button (in Chat/Memory) */}
+        {/* Left: Circle Back Button (in Settings or Preview) OR 2-Line Hamburger Button (in Chat/Memory) */}
         <div className="flex items-center pointer-events-auto">
-          {activeNavTab === 'settings' ? (
+          {activeNavTab === 'settings' || activeNavTab === 'preview' ? (
             <button
               type="button"
               onClick={() => handleSelectNavTab('chat')}
@@ -592,7 +645,7 @@ export function App() {
           )}
         </div>
 
-        {/* Center: Chat / Memory Floating Toggle OR Free / BYOK Toggle in Settings */}
+        {/* Center: Chat / Memory Floating Toggle OR Free / BYOK Toggle in Settings OR Preview Header */}
         {activeNavTab === 'settings' ? (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
             <button
@@ -617,6 +670,12 @@ export function App() {
             >
               BYOK
             </button>
+          </div>
+        ) : activeNavTab === 'preview' ? (
+          <div className="flex items-center px-4 py-1.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
+            <span className="text-xs font-semibold text-white tracking-wide">
+              Preview
+            </span>
           </div>
         ) : (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
@@ -645,8 +704,27 @@ export function App() {
           </div>
         )}
 
-        {/* Right: Balanced spacer matching hamburger button */}
-        <div className="w-9 pointer-events-none" />
+        {/* Right: Circle Preview Button with iMessage Blue Notification Dot */}
+        <div className="flex items-center pointer-events-auto">
+          <button
+            type="button"
+            onClick={handleTogglePreview}
+            title={activeNavTab === 'preview' ? 'Back to Chat' : 'Live Preview'}
+            className={`relative w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95 flex items-center justify-center ${
+              activeNavTab === 'preview'
+                ? 'border-zinc-700 bg-zinc-800 text-white'
+                : 'border-zinc-800/90 text-zinc-300 hover:text-white'
+            }`}
+          >
+            <Eye className="w-4 h-4 text-white" />
+            {hasUnseenPreview && activeNavTab !== 'preview' && (
+              <span
+                className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full ring-2 ring-zinc-950 animate-pulse"
+                style={{ backgroundColor: '#007AFF' }}
+              />
+            )}
+          </button>
+        </div>
       </header>
 
       {/* Backdrop Overlay (blurs background behind sidebar without dimming/lowering opacity) */}
@@ -798,8 +876,31 @@ export function App() {
             })}
           </div>
 
-          {/* Sticky Settings Button at the bottom */}
-          <div className="p-3 border-t border-zinc-900/50 bg-zinc-950/95 sticky bottom-0 shrink-0">
+          {/* Sticky Live Preview & Settings Buttons at the bottom */}
+          <div className="p-3 border-t border-zinc-900/50 bg-zinc-950/95 sticky bottom-0 shrink-0 space-y-1">
+            <button
+              type="button"
+              onClick={() => {
+                handleSelectNavTab('preview');
+                setIsSidebarOpen(false);
+              }}
+              className={`flex items-center justify-between w-full px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                activeNavTab === 'preview'
+                  ? 'bg-zinc-900 text-white'
+                  : 'text-white hover:bg-zinc-900/60'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Eye className="w-4 h-4 text-white" />
+                <span className="text-white">Live Preview</span>
+              </div>
+              {hasUnseenPreview && (
+                <span
+                  className="w-2 h-2 rounded-full ring-2 ring-zinc-950 animate-pulse"
+                  style={{ backgroundColor: '#007AFF' }}
+                />
+              )}
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -855,6 +956,17 @@ export function App() {
             onSettingsSaved={handleSettingsSaved}
             activeTab={settingsTab}
             onTabChange={setSettingsTab}
+          />
+        )}
+
+        {activeNavTab === 'preview' && (
+          <PreviewView
+            content={previewMarkdown}
+            isBusy={isBusy}
+            onClear={async () => {
+              await clearScratchpad(activeSessionId);
+              setPreviewMarkdown('');
+            }}
           />
         )}
       </main>

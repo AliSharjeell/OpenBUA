@@ -358,7 +358,7 @@ const LAST_ACTIVE_NAV_TAB_KEY = 'openbua_last_active_nav_tab';
 const LAST_ACTIVE_SESSION_ID_KEY = 'openbua_last_active_session_id';
 
 export async function saveLastActiveState(
-  navTab: 'chat' | 'memory' | 'settings',
+  navTab: 'chat' | 'memory' | 'settings' | 'preview',
   sessionId?: string
 ): Promise<void> {
   const ops: Promise<void>[] = [setStorageItem(LAST_ACTIVE_NAV_TAB_KEY, navTab)];
@@ -369,11 +369,11 @@ export async function saveLastActiveState(
 }
 
 export async function loadLastActiveState(): Promise<{
-  navTab: 'chat' | 'memory' | 'settings';
+  navTab: 'chat' | 'memory' | 'settings' | 'preview';
   sessionId?: string;
 }> {
   const [navTab, sessionId] = await Promise.all([
-    getStorageItem<'chat' | 'memory' | 'settings'>(LAST_ACTIVE_NAV_TAB_KEY, 'chat'),
+    getStorageItem<'chat' | 'memory' | 'settings' | 'preview'>(LAST_ACTIVE_NAV_TAB_KEY, 'chat'),
     getStorageItem<string | undefined>(LAST_ACTIVE_SESSION_ID_KEY, undefined),
   ]);
   return { navTab, sessionId };
