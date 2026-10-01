@@ -208,7 +208,7 @@ export function ChatView({
       const isCurrentlyStreamingBlock = Boolean(
         targetMsg?.isStreaming && (!targetMsg.content || targetMsg.content.length === 0)
       );
-      const currentExpanded = prev[msgId] ?? isCurrentlyStreamingBlock;
+      const currentExpanded = prev[msgId] !== undefined ? prev[msgId] : isCurrentlyStreamingBlock;
       return {
         ...prev,
         [msgId]: !currentExpanded,
@@ -223,7 +223,7 @@ export function ChatView({
       const isCurrentlyStreamingTools = Boolean(
         isRunningAnyTool || (targetMsg?.isStreaming && (!targetMsg.content || targetMsg.content.length === 0))
       );
-      const currentExpanded = prev[msgId] ?? isCurrentlyStreamingTools;
+      const currentExpanded = prev[msgId] !== undefined ? prev[msgId] : isCurrentlyStreamingTools;
       return {
         ...prev,
         [msgId]: !currentExpanded,

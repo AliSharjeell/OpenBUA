@@ -423,6 +423,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       case 'turn_start':
         this.currentStreamingText = '';
         this.currentThinkingText = '';
+        this.activeToolCalls.clear();
         break;
 
       case 'message_update':
@@ -433,14 +434,7 @@ ${this.settings.systemInstruction || ''}`.trim();
             this.listeners.onMessageDelta?.(this.currentStreamingText);
           } else if (ame.type === 'thinking_delta') {
             this.currentThinkingText += ame.delta;
-            if (!this.sessionThinkingText) {
-              this.sessionThinkingText = ame.delta;
-            } else if (this.currentThinkingText === ame.delta && !this.sessionThinkingText.endsWith('\n\n')) {
-              this.sessionThinkingText += `\n\n${ame.delta}`;
-            } else {
-              this.sessionThinkingText += ame.delta;
-            }
-            this.listeners.onThinkingDelta?.(this.sessionThinkingText);
+            this.listeners.onThinkingDelta?.(this.currentThinkingText);
           } else if (ame.type === 'toolcall_start') {
             const tc = ame.partial?.content?.[ame.contentIndex];
             if (tc && tc.type === 'toolCall') {
@@ -517,7 +511,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         this.listeners.onTurnComplete?.(
           this.currentStreamingText,
           Array.from(this.activeToolCalls.values()),
-          this.sessionThinkingText || this.currentThinkingText || undefined
+          this.currentThinkingText || undefined
         );
         break;
 

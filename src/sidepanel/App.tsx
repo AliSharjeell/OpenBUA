@@ -157,6 +157,13 @@ export function App() {
             setActiveTool(null);
             thinkingStartTimeRef.current = null;
             thinkingDurationMsRef.current = null;
+            setMessages((prev) => {
+              const hasStreaming = prev.some((m) => m.isStreaming);
+              if (!hasStreaming) return prev;
+              const updated = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
+              saveChatHistoryForTab(currentTabKeyRef.current, updated);
+              return updated;
+            });
           }
         },
         onMessageDelta: (deltaText) => {
@@ -166,7 +173,7 @@ export function App() {
           const duration = thinkingDurationMsRef.current ?? undefined;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant') {
+            if (last && last.role === 'assistant' && last.isStreaming) {
               const updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
@@ -197,7 +204,12 @@ export function App() {
           }
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant') {
+            if (
+              last &&
+              last.role === 'assistant' &&
+              last.isStreaming &&
+              (!last.content || last.content.trim().length === 0)
+            ) {
               const updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
@@ -225,7 +237,12 @@ export function App() {
           setActiveTool(toolCall);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant') {
+            if (
+              last &&
+              last.role === 'assistant' &&
+              last.isStreaming &&
+              (!last.content || last.content.trim().length === 0)
+            ) {
               const calls = last.toolCalls || [];
               const index = calls.findIndex((c) => c.id === toolCall.id);
               const updatedCalls = [...calls];
@@ -238,6 +255,7 @@ export function App() {
               updated[updated.length - 1] = {
                 ...last,
                 toolCalls: updatedCalls,
+                isStreaming: true,
               };
               return updated;
             } else {
@@ -258,22 +276,18 @@ export function App() {
         onToolCallEnd: (toolCall) => {
           setActiveTool((curr) => (curr?.id === toolCall.id ? null : curr));
           setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant') {
-              const calls = last.toolCalls || [];
-              const index = calls.findIndex((c) => c.id === toolCall.id);
-              const updatedCalls = [...calls];
-              if (index >= 0) {
-                updatedCalls[index] = toolCall;
-              } else {
-                updatedCalls.push(toolCall);
+            const updated = [...prev];
+            for (let i = updated.length - 1; i >= 0; i--) {
+              const m = updated[i];
+              if (m.role === 'assistant' && m.toolCalls) {
+                const idx = m.toolCalls.findIndex((c) => c.id === toolCall.id);
+                if (idx >= 0) {
+                  const calls = [...m.toolCalls];
+                  calls[idx] = toolCall;
+                  updated[i] = { ...m, toolCalls: calls };
+                  return updated;
+                }
               }
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                ...last,
-                toolCalls: updatedCalls,
-              };
-              return updated;
             }
             return prev;
           });
@@ -289,12 +303,12 @@ export function App() {
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             let updated: ChatMessage[];
-            if (last && last.role === 'assistant') {
+            if (last && last.role === 'assistant' && last.isStreaming) {
               updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
                 content: assistantText || last.content,
-                toolCalls: toolCalls.length > 0 ? toolCalls : last.toolCalls,
+                toolCalls: toolCalls.length > 0 ? toolCalls : (last.toolCalls || []),
                 thinking: thinkingText || last.thinking,
                 thinkingDurationMs: duration ?? last.thinkingDurationMs,
                 isStreaming: false,
