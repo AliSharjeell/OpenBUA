@@ -307,6 +307,91 @@ export async function renameChatSession(sessionId: string, newTitle: string): Pr
   return updated;
 }
 
+export function isGenericSessionTitle(title?: string): boolean {
+  if (!title) return true;
+  const trimmed = title.trim();
+  return (
+    /^Chat\s+\d+$/i.test(trimmed) ||
+    /^Chat$/i.test(trimmed) ||
+    /^New\s+Chat$/i.test(trimmed) ||
+    /^Untitled$/i.test(trimmed)
+  );
+}
+
+export function generateSessionTitle(prompt: string): string {
+  if (!prompt || typeof prompt !== 'string') return 'New Chat';
+
+  let text = prompt.trim();
+
+  // Strip code blocks, markdown tags, backticks
+  text = text.replace(/```[\s\S]*?```/g, '').replace(/`.*?`/g, '').replace(/[*_~#]/g, '');
+
+  // Convert URLs to clean domain titles (e.g. jobs.lever.co -> Lever)
+  text = text.replace(/https?:\/\/(?:www\.)?([^\s/]+)[^\s]*/gi, (_match, domain) => {
+    const parts = domain.split('.');
+    const cleanDomain = parts.length > 2 && (parts[0] === 'jobs' || parts[0] === 'apply') ? parts[1] : parts[0];
+    return cleanDomain.charAt(0).toUpperCase() + cleanDomain.slice(1);
+  });
+
+  // Remove common conversational command prefixes
+  const prefixRegex =
+    /^(can you please|could you please|please|can you|could you|help me to|help me|i want to|i need to|i'd like to|let's|go to|open up|open|navigate to|look at|check out|find me|search for|look for|tell me about|tell me|show me|how to|what is|give me a|give me|start)\s+/i;
+
+  let cleaned = text.replace(prefixRegex, '').trim();
+  if (cleaned.length < 3) cleaned = text;
+
+  // Split into words, cleaning punctuation
+  let words = cleaned
+    .replace(/[^\w\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (words.length === 0) return 'New Chat';
+
+  // Acronym preservation
+  const acronyms = new Set(['ai', 'vc', 'ceo', 'cto', 'url', 'api', 'yc', 'bua', 'ui', 'ux', 'sf', 'la', 'ny', 'nyc', 'mv3', 'gfm', 'dom']);
+
+  // Handle common 1-word greetings or test inputs
+  const greetings = new Set(['hi', 'hello', 'hey', 'test', 'ping', 'sup', 'yo']);
+  if (words.length === 1 && greetings.has(words[0].toLowerCase())) {
+    return 'General Chat';
+  }
+
+  // Filter low-value filler words if phrase is longer than 3 words
+  const fillerWords = new Set(['the', 'a', 'an', 'this', 'that', 'these', 'those', 'my', 'our', 'some', 'any']);
+  if (words.length > 3) {
+    words = words.filter((w, idx) => idx === 0 || !fillerWords.has(w.toLowerCase()));
+  }
+
+  // Capitalize words
+  const capitalized = words.map((w) => {
+    const lower = w.toLowerCase();
+    if (acronyms.has(lower) || (w.length <= 4 && w === w.toUpperCase() && !/^\d+$/.test(w))) {
+      return w.toUpperCase();
+    }
+    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  });
+
+  // Accumulate up to 4 words (max ~25 chars)
+  const titleWords: string[] = [];
+  let length = 0;
+  for (const w of capitalized) {
+    if (titleWords.length >= 4) break;
+    if (length + w.length + 1 > 24 && titleWords.length >= 2) break;
+    titleWords.push(w);
+    length += w.length + 1;
+  }
+
+  // Remove trailing prepositions/stopwords (e.g. "On", "For", "To", "From", "In", "At", "With", "Of", "About")
+  const trailingPrepositions = new Set(['to', 'for', 'on', 'with', 'from', 'in', 'at', 'of', 'and', 'or', 'about']);
+  while (titleWords.length > 1 && trailingPrepositions.has(titleWords[titleWords.length - 1].toLowerCase())) {
+    titleWords.pop();
+  }
+
+  const result = titleWords.join(' ');
+  return result.length > 26 ? result.slice(0, 23).trim() + '...' : result;
+}
+
 // ========================================================
 // Last Active State (Nav Tab & Session ID Persistence)
 // ========================================================

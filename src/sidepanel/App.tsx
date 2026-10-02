@@ -30,6 +30,8 @@ import {
   deleteSuggestedMemory,
   clearSuggestedMemories,
   DEFAULT_SETTINGS,
+  isGenericSessionTitle,
+  generateSessionTitle,
 } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
 import { FormAgentHarness } from '../agent/form-agent';
@@ -188,6 +190,25 @@ export function App() {
         getScratchpad(targetSessionId),
         loadSuggestedMemories(targetSessionId),
       ]);
+
+      // Auto-name any existing sessions that still have generic default titles like "Chat 1"
+      let sessionsUpdated = false;
+      for (const sess of loadedSessions) {
+        if (isGenericSessionTitle(sess.title)) {
+          const hist = sess.id === targetSessionId ? loadedChat : await loadChatHistoryForTab(sess.id);
+          const firstUser = hist.find((m) => m.role === 'user' && m.content && m.content.trim().length > 0);
+          if (firstUser) {
+            const autoTitle = generateSessionTitle(firstUser.content);
+            if (autoTitle && autoTitle !== sess.title) {
+              sess.title = autoTitle;
+              sessionsUpdated = true;
+            }
+          }
+        }
+      }
+      if (sessionsUpdated) {
+        await saveChatSessions(loadedSessions);
+      }
 
       setSettings(loadedSettings);
       setSettingsTab(loadedSettings.selectedMode || 'free');
@@ -531,6 +552,19 @@ export function App() {
       harnessRef.current.setSessionId(sessionId);
       harnessRef.current.setConversationHistory(msgs);
     }
+
+    // If selecting a session that has a generic title but has messages, auto-suggest a name
+    const selectedSess = sessions.find((s) => s.id === sessionId);
+    if (selectedSess && isGenericSessionTitle(selectedSess.title)) {
+      const firstUser = msgs.find((m) => m.role === 'user' && m.content && m.content.trim().length > 0);
+      if (firstUser) {
+        const autoTitle = generateSessionTitle(firstUser.content);
+        if (autoTitle && autoTitle !== selectedSess.title) {
+          const updatedSessions = await renameChatSession(sessionId, autoTitle);
+          setSessions(updatedSessions);
+        }
+      }
+    }
   };
 
   const handleApproveAsTabMemory = async (sug: SuggestedMemory) => {
@@ -713,11 +747,26 @@ export function App() {
     return newDoc;
   };
 
-  const handleMessagesChange = (updatedMsgs: ChatMessage[]) => {
+  const handleMessagesChange = async (updatedMsgs: ChatMessage[]) => {
     setMessages(updatedMsgs);
     saveChatHistoryForTab(currentTabKeyRef.current, updatedMsgs);
     if (harnessRef.current) {
       harnessRef.current.setConversationHistory(updatedMsgs);
+    }
+
+    // Auto-rename generic chat session tabs based on first user message
+    const currentSession = sessions.find((s) => s.id === currentTabKeyRef.current);
+    if (currentSession && isGenericSessionTitle(currentSession.title)) {
+      const firstUserMsg = updatedMsgs.find(
+        (m) => m.role === 'user' && m.content && m.content.trim().length > 0
+      );
+      if (firstUserMsg) {
+        const suggestedTitle = generateSessionTitle(firstUserMsg.content);
+        if (suggestedTitle && suggestedTitle !== currentSession.title) {
+          const updatedSessions = await renameChatSession(currentSession.id, suggestedTitle);
+          setSessions(updatedSessions);
+        }
+      }
     }
   };
 
