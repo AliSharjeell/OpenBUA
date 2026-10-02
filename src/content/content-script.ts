@@ -568,6 +568,137 @@ function flashHighlight(element: HTMLElement) {
     element.style.outline = originalOutline;
     element.style.transition = originalTransition;
   }, 1200);
+
+  // Trigger smooth OpenBUA cursor animation
+  showAgentCursorClick(element);
+}
+
+const OPENBUA_CURSOR_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAA4lSURBVHhe7Vx5dFTVHQ77phz3aq1Wjxv+4UKrpcXMTEIggCIIshkEZAlb2CIEmMkyJCwhQCAhIYQlCYQlkLDvCAJVUmTzKC6tcqDHtqcVj1Wrh4qQ+X397pv70iFMCAkDTsL7zvmdmcy8ue/e3/e+33LfTEIsWPjZICKN9VMLNwrFxWi044Oy2N0fSemeD+WLPR97Ptn/F8nZfkJa6UMsXC9sKJXntr4vJw6eAfb+Gdj9EbDvU+Dw3wCScG7b8bIofaiFQKP4PYnbeMJzYefHwPrDgo1HBJuOCrYcE2w9LthLIg58DlAVNv0RC4HAsrflwaLDnl3bPwGK3wPWHhIU/0lQQhI2vEciSMJmkqCIOHgK2Hbc8wGAevrjFq4Fyw9Kr1Wl8tVGurTwj8CqdwRr3hUUkYR1JKGYJKwnCRu0GrYeZ2iiErYdk+f1EBZqgqQCNMk7INlrjgArS4H8twXLDwhWHBSsJAmrScIakrC21EtEuRpIxH6qYPORsqF6KAvVxfzteGbJfjmx+hiwZB9tr2DZPkHefkEBSaAqqAYx1KCIUGpQRJhq2PsZSETZCD2cheogcyeic/bKubx3gOxdgpzdgty3BItJwlKSwHyAfBJRrgZNhK8adjFXMEn31kNauBokZZ9tMX8HChYzzmftATK2CxbsFGSRhIUkYdEeLxFKDYqIPBLhqwYzLBUxXG1hviAZkXpoC1UhpUSenb3dczLnIDBnCzB3i2DeNsF8kpC5gySQCFMNiojFiggfNSgilBoUEasPASVHgTWH5Xd6eAtXAp0/KHWrnEvfDczcIJi1STB7s5AIQfpWLxGGGjQRSg05Wg1mWFJqMMPSyne9ldLqUjyhT2HBH6Jz0TC5RBam7QRmbAJSigXT1wtmkITUjYI0TYRSgyLCVIMKS0oNZlgy1KCSNElQSbqQuWP5fs9/mRPu06eyUBFT8vBwwjopTd0BTC0BppMAZSl8Pq3ES4ShBkWEVsNckpC5C8hhVZSzl3mCz42wVEENK0gA1XB22SG5RZ/Ogi9i86Wzq0jOJm+m8zcCE/O+x7C0kxiX/QVmMP4rNST7qoGWxmOz6PiZxT8gLusk3AVfIHe/JkKHJTNJL2cIWrrXcyrB6oQvx/gCTJ68BnCu9VqHAfNx210PoHGjRmjWvCWeeqEvJud/ZagheZ0YalAkpPNq7zFyIe6450E00sc+H94Paeu/MUgww5JK0gUkIPctzzF9SgsK0W40G5MnqyYXA7HLgSnrgIjXM8G30KhBfTRt2gxNGjcx/n6oVSiS1p7HVB47lSTMYY54NSbfeK9h/Xr62MbG30+2jsSCXRfB3sGbpElCAaugnN2e3XzfgsKQbHlk1DIcm1AExCwBxhYAI7K/Rcvb70Wjhg3QrFmLS4wfQffRRZi+FXCThKQ1P+KeXz6OBvXqVTi2uXFstHsXchiOzCSdRwKydnlWGie/2TEgUzpEL/F8NXoFMGyRYESuYByf93Id4ZUfwqu5eQWneglo03k8UpgPpq4HRmecNl5v0qSp32Nf7D8TOQdQXrIuYwhi2TrXmMDNjAEZEjMkF4jmVT84WzB0oSA6RzCaIaj7pENXJOC5yBi4mQcSqYCR8z5H8+aVE9Cp3wxkvY3yklV10vO2lcUZk7hZEZUhmYOXAgOzgQGZwBsLgEEkYQhJGJUPvBJXSgJUPL+cAJYuJGAMEjYA8UzUw9NPkYBbKiWgY7+ZyGAiNnoHkrCQ4Sh9s/T3zuQmQ89ZaNlnnmwfyKv+tXlAFK1fBtCfJAwkCW9k0aHLgK4TS9G4YeUE/LbDGLjYE0xh3oie4yWgaSUEREbNRPoelq9GA8fww46a3fTNtw/U2X3+sVfnysmoHKDnbKD3HKBPuiZiPvA6iVBqGEpyukzwEtCsEgJ+034MJrNSilsNDJl9ZQI6vDYTc1imphglK5DG3JFaIs96Z3WToKMbjm6z5WxPOvmVVNbsaSwdSUIvktB7LtCXRBhqmC8YzLzwYuwhEhBSKQHPRsRgIq/+CSupmlRvDqiMgIi+MzBLddQsWaeTgJQSz/lpRfIr78xuAnRKkX4vpXoudKXDX5oOvDwT6EYSus/yEqHUoIjoQyKUGgZSIS++eRSNmQP8EcAh0bpDLN5kwzaeFdPAWWeM1ysnIBUztjFhF7FxIwFT13n+NadQmhuTq+uISJIpnenoTjOAjslA52leErrw764kQqlBEaHU0FOrIYoq6TXrO7S8436qoL5fp0YOK8HYQvYNTOSjFp/H3fe3YhNGxfgeS/LUsX0nv2VsacSvFqTwManI85ExuboOR4InO5LOjZhKcwMd+KhI6JTCK5xEdPFRwytaDWZY6k8VtOm1yHCgUY7y6m7SuJHx9wNPRiB60QUMY6gazt5hHMNQ5NBVxnuKBN9jH2/dBc41HkxZxYS9igSwdCURe/le3YVtAJo4EmRDezrWngA4aOGJJCEJaE8iIhURJKGiGsyw9CqJUCREsSJq0ycXt93zqFENtbj1Tjzxh0F4Pf1bDF2sewf2DaqBG8NQ1H5wPu689zHj2Ft47NOOoRi79HtMYqKeuFwwqVCQTAJIxHI91boHeyzudCTJu+3pUHv8pRZGItqRBFMNkT5qMHKDGZaUGmgqN/RbyMe083jJ+Tl6pJzFIF71A/ma0TuQIEWC6h2iFwFjGJKGLfwJUdM+w+D0LzGRjo8lMePyBG8WCCaQBNW8xRXKND3duoXQKXg4LEk+iaAjKzrfNFMNiohyNajcoIjwowYVlnqpUpUOj6L5lqze3kEwKIuVk9FJMyRRGTFs5EbnMTewnB29lOpYxjBFEmLzBfHrSUp+2TA95boDW5y0pvP/0Y5OtLsud3xFU2owwlIFNZhhqVwNPknat2RVRPQjEf1176DUYHbSZlhS+0ojFwtilohBxFiSMomlK8nopKddN2B3SliYG9+2owOvxvmmOWhhPmq4miTtW7KavcP/1aCIMNXg3VdSSXoESRhFEsawwx5XAOYFeUpPvfYj1IluYVPlfDgdVx3n+9plSZpjVZWkjU6aJJidtFKD2UmbYclXDcOphhgSMGqx54cRhXK3nn7thm2KDAjnVcur369jq2sVk7SvGi5L0j4l66WdtFcNA0jCJUmaRIxiCBq+yHPa7UYDvYTaC5tLYtrRMWF0mD9n1tQqTdI8V2VJ+kr7SiosmUla7bIOzfG8o5dQe2GLx+QIOsMRYOf7WrWStB81+EvSIxn/SUShXkbthD1eklWZ6aBz/DkukFZlkuY8qkzSWg39M5kHqIA3FshUvZTaBzo/LYILVmHCn8Oul12SpP2owQxL5SWrIsKPGoYsNXJD7bwRY4uXDNXd3mjnm2aogeeuKkn7qsEMS+Yu64BsEjFPQvWSag/sCbLQ3Nfx55wbaTVN0n1IQJ+5ngtRc+RBvazaAUeC5AaL832tsiR9WcnKuSsSepOAnrPl7x0za9FvhhnzlwSj802rqAYzLBn7ShWSdC8m4h5pUqqXFvwod76fhQebXU2SVrdCu82sJSVoedjxs9hgtaqSdA8S0GWGxOslBi+CKeHWxC5Rg5mkSUJXVkJUQ0+9zOCEzclSsxY739cMNZhJWimBoahTShB/FcXuQnRdcb5pphrak4CIJM93kW65XS83uOBIOtvC5pIv1c6mv4XUdotgCApPlA/1coMP7HLDjZspfiZfF0zdpeMa1+vlBh/sLunfjqWav8nXBfPeo5ZkvdzgAwnoovb2/U2+LphWQPD+Kr5tnNzHK+T89dzf/9mMiVhtnbdNkKf1coMTrIIK2s/ihGt4X7cyU5WIcoC6cxbGJK/uHSsL9J20ykydhwXG18+75Va91ODEC065y54oZ/x9oarclDP9OFSFLyVzFWtNU6+p97yqkp9o/2ao+yudcYLh4CgfvzHuqnEsv+cKkKk58FxH9DKDG7YJ8lBYkhxUjlE3Xvw61HCY4dCv6cgzfHyf3fM+Pl/LxyxaEokcycdefC3c4cYztF+3YQ3eOhcN9alCfu/+4W4eF8fz/RSom/r+TK2Fc8zXp60dcLilI22aI0kyTIfySu5pONTldegLqbjN16E1RWi8Opfn4vVSgrp4Qp1l4/XpLPhDqFNmK0f5c+C1mlJtqPNiO30qC/5gVGEJ8mOgVaDGo2p/bOu2/ilHlbC5PGsDrQK1tUICPg2B+qmAhSvC7pTQ8ABvhxhfFI73lOhTWKgKNqe8H0gSlKJYgk7Rw1uoCnZXWbQqf/05syamNhhVlaWHt1AVVLfKZu3rQPQFRgJ2yXm7W+7Xw1u4GticnoxAqMBIwC7PpyEhVgKuFliOtnIkikdtefhz7NWa0QG7PEV6WAvVAUPHnmvdHveWtBKrh7RQHVAFL3tLyJqb6oDtibXwe6DBAJsbDexOz+ma3qM2dmBd8h+1AaiHtFBdqB+BXHFr/Aqmegkm4MN6KAs1gWMifsFQdK4m+0NG/HdJph7KQk3BZFxYk/0h40ZPvPTVw1ioKRwuaWMk02qUpN7yVcqonkf1MBauBTanHK3Od5bUbVIq51T37qivh7BwLbC5MLA6YUjfglyjP27hWtFhgjS3x3vOXu3+kLEDGi+j9MctBAKsaGZf1f4Q478iiiGotf6ohUDA4ZZHHIlysar9Ie38f9qS0ER/1EKgwGS8o6pc4H1fNumPWAgkQhOlrdqgq7QxozoMAhKks/6IhUAj1CmJ6kckRm/g43y199MhjeHHKSv0oRauF5iQB4W55bTqDdQVr8rOsCT53p4oada3H24Q2oyXpvZkCQt3S3+HG93sk6zbjhYsWLBgwYIFCxYsWLBgwYIFCxYsWDAQEvI/aKXlNGmsd1kAAAAASUVORK5CYII=';
+
+let isCursorStylesInjected = false;
+function ensureAgentCursorStyles() {
+  if (isCursorStylesInjected || document.getElementById('openbua-cursor-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'openbua-cursor-styles';
+  style.textContent = `
+    @keyframes openbuaCursorAnimation {
+      0% {
+        opacity: 0;
+        transform: translate(-14px, -18px) scale(0.6);
+      }
+      22% {
+        opacity: 1;
+        transform: translate(0px, 0px) scale(1);
+      }
+      38% {
+        transform: translate(0px, 2px) scale(0.82) rotate(-5deg);
+        filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7)) brightness(1.2);
+      }
+      54% {
+        transform: translate(0px, -2px) scale(1.05) rotate(0deg);
+        filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.45)) brightness(1);
+      }
+      70% {
+        opacity: 1;
+        transform: translate(0px, 0px) scale(1);
+      }
+      100% {
+        opacity: 0;
+        transform: translate(6px, -10px) scale(0.65);
+      }
+    }
+    @keyframes openbuaRipple {
+      0% {
+        opacity: 0.9;
+        transform: scale(0.5);
+      }
+      40% {
+        opacity: 0.65;
+        transform: scale(1.5);
+      }
+      100% {
+        opacity: 0;
+        transform: scale(2.4);
+      }
+    }
+  `;
+  (document.head || document.documentElement).appendChild(style);
+  isCursorStylesInjected = true;
+}
+
+function showAgentCursorClick(element: HTMLElement) {
+  setTimeout(() => {
+    try {
+      const rect = element.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
+
+      // Calculate natural target coordinates on the element (standard cursor size: 26px x 26px)
+      const targetX = rect.left + Math.min(rect.width / 2, 28);
+      const targetY = rect.top + Math.min(rect.height / 2, 20);
+
+      ensureAgentCursorStyles();
+
+      const container = document.createElement('div');
+      container.className = 'openbua-cursor-indicator';
+      container.style.cssText = [
+        'position: fixed',
+        `left: ${Math.round(targetX)}px`,
+        `top: ${Math.round(targetY)}px`,
+        'width: 0px',
+        'height: 0px',
+        'pointer-events: none',
+        'z-index: 2147483647',
+        'transform: translate(-50%, -50%)',
+      ].join('; ');
+
+      const ripple = document.createElement('div');
+      ripple.className = 'openbua-cursor-ripple';
+      ripple.style.cssText = [
+        'position: absolute',
+        'left: 0',
+        'top: 0',
+        'width: 26px',
+        'height: 26px',
+        'margin-left: -13px',
+        'margin-top: -13px',
+        'border-radius: 50%',
+        'border: 2px solid #007AFF',
+        'box-shadow: 0 0 10px rgba(0, 122, 255, 0.6), inset 0 0 6px rgba(0, 122, 255, 0.3)',
+        'pointer-events: none',
+        'animation: openbuaRipple 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) forwards',
+        'animation-delay: 0.18s',
+        'opacity: 0',
+      ].join('; ');
+
+      const cursor = document.createElement('img');
+      cursor.className = 'openbua-cursor-img';
+      cursor.src = OPENBUA_CURSOR_BASE64;
+      cursor.alt = 'OpenBUA Cursor';
+      cursor.style.cssText = [
+        'position: absolute',
+        'left: 0',
+        'top: 0',
+        'width: 26px',
+        'height: 26px',
+        'margin-left: -13px',
+        'margin-top: -13px',
+        'filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5))',
+        'pointer-events: none',
+        'animation: openbuaCursorAnimation 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        'will-change: transform, opacity',
+      ].join('; ');
+
+      container.appendChild(ripple);
+      container.appendChild(cursor);
+      (document.documentElement || document.body).appendChild(container);
+
+      setTimeout(() => {
+        container.remove();
+      }, 850);
+    } catch (err) {
+      console.debug('[OpenBUA Cursor] Animation notice:', err);
+    }
+  }, 40);
 }
 
 function findTargetElement(refId?: string, selector?: string): HTMLElement | null {
