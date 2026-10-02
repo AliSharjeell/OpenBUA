@@ -264,17 +264,29 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
   });
 
   const buttons: Array<{ refId: string; text: string; type: string; isSubmit: boolean; isNext: boolean; isPrevious: boolean }> = [];
-  document.querySelectorAll<HTMLElement>('button, input[type="submit"], input[type="button"], [role="button"]').forEach((btn) => {
-    const text = (btn.textContent || (btn as HTMLInputElement).value || '').trim();
+  const rawButtons = Array.from(document.querySelectorAll<HTMLElement>(
+    'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, ytd-button-renderer, yt-button-shape'
+  )).filter((el) => !el.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list'));
+
+  rawButtons.forEach((btn) => {
+    const text = (btn.textContent || (btn as HTMLInputElement).value || btn.getAttribute('aria-label') || '').trim();
     if (!text || text.length > 50) return;
     const lower = text.toLowerCase();
     counter++;
     const refId = `af_btn_${counter}`;
     btn.setAttribute('data-autoform-ref', refId);
+
+    const isTab = btn.getAttribute('role') === 'tab' ||
+      btn.tagName.toLowerCase() === 'tp-yt-paper-tab' ||
+      btn.tagName.toLowerCase() === 'yt-tab-shape' ||
+      lower.includes('popular') ||
+      lower.includes('latest') ||
+      lower.includes('videos');
+
     buttons.push({
       refId,
       text,
-      type: btn.getAttribute('type') || 'button',
+      type: isTab ? 'tab' : (btn.getAttribute('type') || 'button'),
       isSubmit: lower.includes('submit') || lower.includes('finish') || lower.includes('complete'),
       isNext: lower.includes('next') || lower.includes('continue') || lower.includes('proceed'),
       isPrevious: lower.includes('back') || lower.includes('prev'),
@@ -294,7 +306,7 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
     url: window.location.href,
     fields,
     stepIndicators: stepIndicators.slice(0, 5),
-    buttons: buttons.slice(0, 8),
+    buttons: buttons.slice(0, 30),
   };
 }
 
@@ -498,12 +510,29 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     target = document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
   }
   if (!target && selector) {
-    target = document.querySelector(selector);
+    try {
+      target = document.querySelector(selector);
+    } catch {}
+    // If selector had an absolute URL e.g. a[href="https://www.youtube.com/@MrBeast"], also try relative pathname
+    if (!target && /href=["']https?:\/\/[^/]+(\/[^"']+)["']/i.test(selector)) {
+      const pathMatch = selector.match(/href=["']https?:\/\/[^/]+(\/[^"']+)["']/i);
+      if (pathMatch) {
+        try {
+          target = document.querySelector(`a[href="${pathMatch[1]}"], a[href*="${pathMatch[1]}"]`);
+        } catch {}
+      }
+    }
   }
   if (!target && text) {
-    const candidates = Array.from(document.querySelectorAll<HTMLElement>(
-      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder'
+    const rawCandidates = Array.from(document.querySelectorAll<HTMLElement>(
+      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip]'
     ));
+    // Filter out search prediction dropdowns / hidden autocomplete popups so we never accidentally click search suggestions
+    const candidates = rawCandidates.filter((c) => {
+      const inSearchDropdown = c.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list');
+      return !inSearchDropdown;
+    });
+
     const tLower = text.toLowerCase().trim();
 
     // 1. Exact match (highest priority)
@@ -542,7 +571,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     return { success: false, message: `Button or element not found: ${refId || selector || text}` };
   }
 
-  const clickable = target.closest<HTMLElement>('a[href], button, [role="button"], [contenteditable="true"]') || target;
+  const clickable = target.closest<HTMLElement>('a[href], button, [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"]') || target;
   clickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
   clickable.focus();
   clickable.click();

@@ -336,13 +336,18 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
     });
   });
 
-  // Collect action buttons (Next, Submit, Send, Continue, Back, Comment, Post, etc.)
+  // Collect action buttons (Next, Submit, Send, Continue, Back, Comment, Post, etc.) and tabs
   const rawButtonElements = Array.from(root.querySelectorAll<HTMLElement>(
-    'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"], ytd-button-renderer, yt-button-shape'
+    'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, ytd-button-renderer, yt-button-shape'
   ));
 
+  // Filter out elements inside search prediction dropdowns / hidden autocomplete popups
+  const filteredButtonElements = rawButtonElements.filter((el) => {
+    return !el.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list');
+  });
+
   // Prioritize buttons inside active dialog/modal first
-  const buttonElements = rawButtonElements.sort((a, b) => {
+  const buttonElements = filteredButtonElements.sort((a, b) => {
     const aInDialog = a.closest('[role="dialog"], dialog, .M9, [aria-modal="true"], .modal') ? 100 : 0;
     const bInDialog = b.closest('[role="dialog"], dialog, .M9, [aria-modal="true"], .modal') ? 100 : 0;
     return bInDialog - aInDialog;
@@ -384,11 +389,18 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
 
     const isPrevious = lower.includes('back') || lower.includes('prev') || lower.includes('previous');
 
+    const isTab = btn.getAttribute('role') === 'tab' ||
+      btn.tagName.toLowerCase() === 'tp-yt-paper-tab' ||
+      btn.tagName.toLowerCase() === 'yt-tab-shape' ||
+      lower.includes('popular') ||
+      lower.includes('latest') ||
+      lower.includes('videos');
+
     const refId = generateRefId(btn);
     buttons.push({
       refId,
       text,
-      type: btn.getAttribute('type') || 'button',
+      type: isTab ? 'tab' : (btn.getAttribute('type') || 'button'),
       isSubmit,
       isNext,
       isPrevious,
@@ -873,11 +885,25 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   } else if (refId) {
     target = document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
   } else if (selector) {
-    target = document.querySelector(selector);
+    try {
+      target = document.querySelector(selector);
+    } catch {}
+    // If selector had an absolute URL e.g. a[href="https://www.youtube.com/@MrBeast"], also try relative pathname
+    if (!target && /href=["']https?:\/\/[^/]+(\/[^"']+)["']/i.test(selector)) {
+      const pathMatch = selector.match(/href=["']https?:\/\/[^/]+(\/[^"']+)["']/i);
+      if (pathMatch) {
+        try {
+          target = document.querySelector(`a[href="${pathMatch[1]}"], a[href*="${pathMatch[1]}"]`);
+        } catch {}
+      }
+    }
   } else if (text) {
     const rawCandidates = Array.from(document.querySelectorAll<HTMLElement>(
-      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, [data-tooltip]'
-    ));
+      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip]'
+    )).filter((c) => {
+      // Exclude search suggestions / autocomplete dropdowns so we never click search predictions accidentally
+      return !c.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list');
+    });
 
     // Prioritize candidates inside an active modal / dialog first
     const candidates = rawCandidates.sort((a, b) => {
@@ -927,7 +953,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   }
 
   // If clicked on an inner element (like yt-formatted-string or span), find the clickable parent button/anchor
-  const clickable = target.closest<HTMLElement>('a[href], button, [role="button"], [contenteditable="true"]') || target;
+  const clickable = target.closest<HTMLElement>('a[href], button, [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"]') || target;
 
   clickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
   flashHighlight(clickable);
@@ -1144,17 +1170,55 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .join('\n\n');
         }
 
+        // Helper to check ad URLs and tracking bloat
+        const isAdUrl = (url: string) => {
+          const u = url.toLowerCase();
+          return (
+            u.includes('googleadservices.com') ||
+            u.includes('doubleclick.net') ||
+            u.includes('/pagead/') ||
+            u.includes('aclk?') ||
+            u.includes('adclick') ||
+            u.includes('ad_type=')
+          );
+        };
+
         // 1. Gather interactive / item links (especially video links, search results, nav links)
         const links: string[] = [];
         const seenLinks = new Set<string>();
         document.querySelectorAll<HTMLAnchorElement>('a[href], a#video-title, [role="link"]').forEach((a) => {
           const text = (a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
           const href = a.getAttribute('href') || '';
+          if (!href || isAdUrl(href)) return;
           if (text && text.length > 2 && text.length < 100 && !seenLinks.has(text.toLowerCase())) {
             seenLinks.add(text.toLowerCase());
             if (links.length < 35) {
-              const fullUrl = href.startsWith('http') ? href : window.location.origin + href;
+              let fullUrl = href.startsWith('http') ? href : window.location.origin + href;
+              if (isAdUrl(fullUrl)) return;
+              if (fullUrl.length > 250 && fullUrl.includes('?')) {
+                try {
+                  const parsed = new URL(fullUrl);
+                  if (parsed.hostname.includes('youtube.com')) {
+                    const v = parsed.searchParams.get('v');
+                    if (v) fullUrl = `${parsed.origin}/watch?v=${v}`;
+                  }
+                } catch {}
+              }
               links.push(`- Link/Video: "${text}" (${fullUrl})`);
+            }
+          }
+        });
+
+        // 1b. Gather visible tabs (YouTube channel tabs, nav tabs, etc.)
+        const tabs: string[] = [];
+        const seenTabs = new Set<string>();
+        document.querySelectorAll<HTMLElement>('[role="tab"], tp-yt-paper-tab, yt-tab-shape, [role="tablist"] [role="tab"]').forEach((t) => {
+          if (!isElementVisible(t)) return;
+          const text = (t.textContent || t.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+          if (text && text.length > 1 && text.length < 50 && !seenTabs.has(text.toLowerCase())) {
+            seenTabs.add(text.toLowerCase());
+            if (tabs.length < 15) {
+              tabs.push(`- Tab: "${text}"`);
             }
           }
         });
@@ -1185,6 +1249,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         let formatted = `Title: ${document.title}\nURL: ${window.location.href}\n\n`;
         if (modalExcerpt) {
           formatted += `### Active Dialog / Compose Window Content:\n${modalExcerpt}\n\n`;
+        }
+        if (tabs.length > 0) {
+          formatted += `### Tabs on Page:\n${tabs.join('\n')}\n\n`;
         }
         if (links.length > 0) {
           formatted += `### Key Links / Videos on Page:\n${links.join('\n')}\n\n`;
