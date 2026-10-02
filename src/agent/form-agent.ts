@@ -554,18 +554,24 @@ ${(this.settings.autoConfirmSubmit ?? true)
 
 18. FAST-PATH DIRECT BROWSING & MINIMAL TURNS (TARGET: UNDER 25 SECONDS):
     - DIRECT BROWSING COMMANDS (e.g. "open YouTube and search MrBeast and go to his channel and sort by most viewed", "go to reddit.com/r/technology", "open GitHub"):
-      * NO PROACTIVE TAB LISTING: DO NOT call 'list_browser_tabs' before starting a direct navigation or search task. If the active tab is an internal page (e.g. chrome://extensions/, newtab) or you are opening a new destination, use 'navigate_browser_tab' directly or 'open_new_tab'.
-      * NO REDUNDANT TAB SWITCHING: 'open_new_tab' automatically activates and focuses the newly opened tab. NEVER call 'switch_browser_tab' immediately after 'open_new_tab'.
-      * COMPOUND DIRECT URL NAVIGATION: Construct canonical URLs directly instead of chaining 8 baby steps:
+      * COMPOUND DIRECT URL NAVIGATION (CRITICAL):
+        Construct direct, deep URLs immediately instead of chaining 8 baby steps:
         - YouTube Search: 'https://www.youtube.com/results?search_query={query}'
-        - YouTube Channel Videos: 'https://www.youtube.com/@{handle}/videos'
+        - YouTube Channel Videos: 'https://www.youtube.com/@{handle}/videos' (e.g. 'https://www.youtube.com/@MrBeast/videos')
         - Twitter/X Profile: 'https://x.com/{handle}'
         - GitHub Repo: 'https://github.com/{owner}/{repo}'
         - Google Search: 'https://www.google.com/search?q={query}'
-        When on a YouTube search page and you see the target channel handle (e.g. '@MrBeast'), navigate directly to 'https://www.youtube.com/@MrBeast/videos' in 1 step!
-      * NO FORM INSPECTION ON CONTENT SITES:
-        - NEVER call 'get_active_tab_form' on YouTube, video players, search engines, or article sites to find links or buttons.
-        - Click elements directly: 'click_element({ text: "Popular" })' or 'click_element({ selector: "..." })'.
+        NEVER navigate to a homepage (like 'https://www.youtube.com') just to find and type into a search box. Navigate directly to the search results or target channel URL in Turn 1!
+      * NO PROACTIVE TAB LISTING: DO NOT call 'list_browser_tabs' before starting a direct navigation or search task. If the active tab is an internal page (e.g. chrome://extensions/, newtab) or you are opening a new destination, use 'navigate_browser_tab' directly or 'open_new_tab'.
+      * NO REDUNDANT TAB SWITCHING: 'open_new_tab' automatically activates and focuses the newly opened tab. NEVER call 'switch_browser_tab' immediately after 'open_new_tab'.
+      * NO FORM INSPECTION ON CONTENT / VIDEO SITES:
+        - NEVER call 'get_active_tab_form' on YouTube, video players, search engines, or article sites to find links, tabs, or buttons. Form inspection is only for text data entry (signups, logins, applications).
+        - Click elements directly: 'click_element({ text: "Popular" })', 'click_element({ text: "Videos" })', or 'click_element({ selector: "..." })'.
+      * ONE-STEP SORTING & FILTERING:
+        - When the user asks to go to a channel and sort videos by popular / most viewed:
+          Turn 1: Navigate directly to the channel videos URL: 'https://www.youtube.com/@{handle}/videos' (e.g. 'https://www.youtube.com/@MrBeast/videos').
+          Turn 2: Click the 'Popular' chip/tab: 'click_element({ text: "Popular" })'.
+          Turn 3: Report completion to the user!
       * IGNORE NON-BLOCKING BACKGROUND NOTICES:
         - If page text mentions background notices (e.g. "You're signed out", "TV watch history", cookie banners that don't block interaction), DO NOT waste turns pressing Escape or trying to close them. Proceed directly with your action.
       * ZERO REDUNDANT VERIFICATION TURNS:
@@ -642,6 +648,37 @@ ${this.settings.systemInstruction || ''}`.trim();
     });
   }
 
+  private pruneAgentStateMessages(): void {
+    if (!this.agent || !this.agent.state || !Array.isArray(this.agent.state.messages)) return;
+    const messages = this.agent.state.messages;
+    const total = messages.length;
+    if (total <= 3) return;
+
+    // Prune older turn tool results and purge base64 image data to prevent compounding context bloat
+    for (let i = 0; i < total - 3; i++) {
+      const msg = messages[i] as any;
+      if (msg.role === 'toolResult' && Array.isArray(msg.content)) {
+        // Keep scratchpad and append_to_preview unpruned so accumulated working notes remain intact
+        if (msg.toolName === 'scratchpad' || msg.toolName === 'append_to_preview') {
+          continue;
+        }
+
+        for (const item of msg.content) {
+          // Purge heavy base64 image data from previous turns
+          if (item.type === 'image' || item.data || (item.text && item.text.startsWith('data:image/'))) {
+            item.type = 'text';
+            item.text = '[Screenshot previously captured and evaluated]';
+            delete item.data;
+            delete item.mimeType;
+          } else if (item.type === 'text' && typeof item.text === 'string' && item.text.length > 350) {
+            const pruned = item.text.length - 250;
+            item.text = item.text.slice(0, 250) + `\n... [Prior turn DOM content compacted - ${pruned} chars pruned]`;
+          }
+        }
+      }
+    }
+  }
+
   private async handleAgentEvent(event: any) {
     switch (event.type) {
       case 'agent_start':
@@ -653,6 +690,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         break;
 
       case 'turn_start':
+        this.pruneAgentStateMessages();
         this.currentStreamingText = '';
         this.currentThinkingText = '';
         this.activeToolCalls.clear();
@@ -737,6 +775,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       }
 
       case 'turn_end': {
+        this.pruneAgentStateMessages();
         if (event.message?.errorMessage) {
           this.listeners.onError?.(event.message.errorMessage);
         }
