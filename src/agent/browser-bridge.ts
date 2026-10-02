@@ -20,36 +20,45 @@ export function isExtensionPage(tab?: chrome.tabs.Tab | null): boolean {
   );
 }
 
-export async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
+export async function getActiveTab(timeoutMs = 1500): Promise<chrome.tabs.Tab | null> {
   if (typeof chrome === 'undefined' || !chrome.tabs) {
     return null;
   }
   return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      resolve(null);
+    }, timeoutMs);
+
+    const safeResolve = (tab: chrome.tabs.Tab | null) => {
+      clearTimeout(timer);
+      resolve(tab);
+    };
+
     // 1. In Side Panel (Chrome), lastFocusedWindow targets the main browser window tab
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       const validLast = (tabs || []).find((t) => !isExtensionPage(t));
       if (validLast) {
-        return resolve(validLast);
+        return safeResolve(validLast);
       }
 
       // 2. In Arc Browser or floating window mode, query normal browser windows
       chrome.tabs.query({ active: true, windowType: 'normal' }, (normalTabs) => {
         const validNormal = (normalTabs || []).find((t) => !isExtensionPage(t));
         if (validNormal) {
-          return resolve(validNormal);
+          return safeResolve(validNormal);
         }
 
         // 3. Fallback: query any active non-extension tab
         chrome.tabs.query({ active: true }, (tabs3) => {
           const validAnyActive = (tabs3 || []).find((t) => !isExtensionPage(t));
           if (validAnyActive) {
-            return resolve(validAnyActive);
+            return safeResolve(validAnyActive);
           }
 
           // 4. Last resort: any non-extension tab in the browser
           chrome.tabs.query({}, (allTabs) => {
             const anyValid = (allTabs || []).find((t) => !isExtensionPage(t));
-            resolve(anyValid || null);
+            safeResolve(anyValid || null);
           });
         });
       });
@@ -1068,53 +1077,101 @@ export async function scrollActiveTab(
   return response || { success: false };
 }
 
-// Get Page Text — wrapped in a hard timeout to prevent hanging on SPAs like YouTube
-export async function getActiveTabPageContent(): Promise<{ text: string; title: string; url: string }> {
-  const fallback = { text: '', title: '', url: '' };
-
-  const activeTab = await getActiveTab();
+// Get Page Text — wrapped in a hard timeout and direct scripting fallback to prevent hanging
+export async function getActiveTabPageContent(timeoutMs = 4000): Promise<{ text: string; title: string; url: string }> {
+  const activeTab = await getActiveTab(1500);
   if (!activeTab || !activeTab.id) {
     return {
-      text: 'Mock Webpage Content: Application Form for Software Developer Position.',
-      title: 'Dev Mock Page',
-      url: 'https://example.com/careers/apply',
+      text: 'No active browser tab found. Please open a webpage in your browser.',
+      title: 'No Tab',
+      url: '',
     };
   }
 
-  // Check for CAPTCHA challenge before reading content
-  const captcha = await checkActiveTabCaptcha(activeTab.id);
-  if (captcha.detected) {
-    const gate = await captchaManager.runGate(activeTab.id, captcha.type || 'bot_challenge', activeTab.url || '');
-    if (!gate.solved) {
-      return {
-        text: `[BLOCKED BY CAPTCHA]: ${gate.message}`,
-        title: 'Bot Verification / CAPTCHA Challenge',
-        url: activeTab.url || '',
-      };
-    }
+  const rawUrl = activeTab.url || '';
+
+  // 1. Guard against internal / restricted browser pages that reject content scripts
+  if (
+    rawUrl.startsWith('chrome://') ||
+    rawUrl.startsWith('chrome-extension://') ||
+    rawUrl.startsWith('edge://') ||
+    rawUrl.startsWith('about:') ||
+    rawUrl.startsWith('devtools://')
+  ) {
+    return {
+      text: `Browser internal page (${rawUrl}). Content cannot be inspected due to browser security restrictions.`,
+      title: activeTab.title || 'Internal Page',
+      url: rawUrl,
+    };
   }
 
-  // Hard 5-second timeout to prevent the tool from hanging forever
+  // 2. Passive CAPTCHA detection (NON-BLOCKING: never freeze read tools with a human gate!)
+  let captchaNotice = '';
+  try {
+    const captcha = await checkActiveTabCaptcha(activeTab.id);
+    if (captcha && captcha.detected) {
+      captchaNotice = `[Note: Bot challenge / CAPTCHA detected on page (${captcha.type || 'bot_challenge'})]\n\n`;
+    }
+  } catch {
+    // Non-blocking, continue extraction
+  }
+
+  // 3. Fast extraction with hard timeout race
   const result = await Promise.race([
     (async () => {
-      // Force re-inject content script before sending message (handles SPA navigations like YouTube)
-      await ensureContentScriptInjected(activeTab.id!).catch(() => {});
-      const response = await sendMessageToTab(activeTab.id!, { action: 'GET_PAGE_TEXT' }, 3000).catch(() => null);
-      if (response && response.success) {
-        return { text: response.text, title: response.title, url: response.url };
+      // Step A: Try content script messaging first
+      try {
+        await ensureContentScriptInjected(activeTab.id!, 1500).catch(() => {});
+        const response = await sendMessageToTab(activeTab.id!, { action: 'GET_PAGE_TEXT' }, 2200).catch(() => null);
+        if (response && response.success && response.text) {
+          return {
+            text: captchaNotice + response.text,
+            title: response.title || activeTab.title || '',
+            url: response.url || rawUrl,
+          };
+        }
+      } catch {
+        // Fall through to direct script
       }
+
+      // Step B: Direct executeScript fallback (fast, immune to content script messaging stalls)
+      if (typeof chrome !== 'undefined' && chrome.scripting) {
+        try {
+          const directScriptResults = await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id! },
+            func: () => {
+              const title = document.title || '';
+              const url = window.location.href;
+              const mainEl = document.querySelector('main, article, #content, [role="main"]') || document.body;
+              const text = (mainEl ? (mainEl as HTMLElement).innerText || '' : '').replace(/\n\s*\n\s*\n/g, '\n\n').slice(0, 10000);
+              return { title, url, text };
+            },
+          });
+          if (directScriptResults && directScriptResults[0] && directScriptResults[0].result) {
+            const data = directScriptResults[0].result as { title: string; url: string; text: string };
+            return {
+              text: captchaNotice + (data.text || activeTab.title || 'No readable text content on page.'),
+              title: data.title || activeTab.title || '',
+              url: data.url || rawUrl,
+            };
+          }
+        } catch {
+          // Direct script failed (e.g. page still loading or frame discarded)
+        }
+      }
+
       return null;
     })(),
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
   ]);
 
   if (result) return result;
 
-  // Fallback: use tab metadata if content script communication failed
+  // Step C: Guaranteed fallback — returns active tab title & URL immediately instead of hanging
   return {
-    text: activeTab.title || 'Web page',
+    text: `${captchaNotice}Page Title: ${activeTab.title || 'Web page'}\nURL: ${rawUrl}\n(Notice: Detailed DOM extraction timed out. The page may still be loading or heavy. Proceeding with tab context.)`,
     title: activeTab.title || '',
-    url: activeTab.url || '',
+    url: rawUrl,
   };
 }
 

@@ -360,7 +360,19 @@ export const getPageContentTool: AgentTool<typeof GetPageContentSchema> = {
   parameters: GetPageContentSchema,
   execute: async (): Promise<AgentToolResult> => {
     try {
-      const res = await getActiveTabPageContent();
+      const resPromise = getActiveTabPageContent(4000);
+      const timeoutPromise = new Promise<{ text: string; title: string; url: string }>((resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              title: 'Extraction Timeout',
+              url: '',
+              text: 'Page content extraction timed out after 6 seconds. Proceed with other actions or navigate if needed.',
+            }),
+          6000
+        )
+      );
+      const res = await Promise.race([resPromise, timeoutPromise]);
       return {
         content: [{ type: 'text', text: `Page Title: ${res.title}\nURL: ${res.url}\n\nContent:\n${res.text}` }],
         details: res,
