@@ -1236,12 +1236,15 @@ export async function createNewTab(url: string): Promise<number | null> {
     return null;
   }
   const activeTab = await getActiveTab();
-  const createProps: chrome.tabs.CreateProperties = { url };
+  const createProps: chrome.tabs.CreateProperties = { url, active: true };
   if (activeTab?.windowId) {
     createProps.windowId = activeTab.windowId;
   }
   return new Promise((resolve) => {
     chrome.tabs.create(createProps, (tab) => {
+      if (tab?.windowId) {
+        chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      }
       resolve(tab?.id || null);
     });
   });

@@ -278,10 +278,24 @@ export const listBrowserTabsTool: AgentTool<typeof ListBrowserTabsSchema> = {
   execute: async (): Promise<AgentToolResult> => {
     try {
       const tabs = await listAllTabs();
-      const text = tabs.map(t => `- [Tab ${t.id}] ${t.active ? '(ACTIVE) ' : ''}"${t.title}" - ${t.url}`).join('\n');
+      const text = tabs
+        .map((t) => {
+          let cleanUrl = t.url;
+          if (cleanUrl.length > 90) {
+            try {
+              const u = new URL(cleanUrl);
+              cleanUrl = `${u.origin}${u.pathname}${u.search ? '?...' : ''}`;
+              if (cleanUrl.length > 90) cleanUrl = cleanUrl.slice(0, 87) + '...';
+            } catch {
+              cleanUrl = cleanUrl.slice(0, 87) + '...';
+            }
+          }
+          return `- [Tab ${t.id}] ${t.active ? '(ACTIVE) ' : ''}"${t.title.slice(0, 60)}" - ${cleanUrl}`;
+        })
+        .join('\n');
       return {
-        content: [{ type: 'text', text: `Open tabs:\n${text}` }],
-        details: { tabs },
+        content: [{ type: 'text', text: `Open tabs (${tabs.length} total):\n${text}` }],
+        details: { tabsCount: tabs.length },
       };
     } catch (err: any) {
       return {
@@ -658,14 +672,14 @@ const OpenNewTabSchema = Type.Object({
 export const openNewTabTool: AgentTool<typeof OpenNewTabSchema> = {
   name: 'open_new_tab',
   label: 'Open New Tab',
-  description: 'Opens a new browser tab with the specified URL WITHOUT navigating away from the current active tab. Use this when you need to look up information (e.g. from another website) while filling a form so you do NOT lose form progress. After reading the new tab, close it with close_tab and switch back to the original tab.',
+  description: 'Opens a new browser tab with the specified URL and automatically focuses and switches to it as the active tab. Use this when you want to open a destination in a fresh tab or look up information without replacing the current tab. The new tab is ALREADY active and focused upon creation, so you do NOT need to call switch_browser_tab.',
   parameters: OpenNewTabSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
       const tabId = await createNewTab(params.url);
       if (tabId) {
         return {
-          content: [{ type: 'text', text: `Opened new tab (ID: ${tabId}) with URL: ${params.url}. Use switch_browser_tab to switch to it, or close_tab to close it when done.` }],
+          content: [{ type: 'text', text: `Opened new tab (ID: ${tabId}) with URL: ${params.url} and switched to it. It is now the active tab and ready for actions.` }],
           details: { success: true, tabId, url: params.url },
         };
       }

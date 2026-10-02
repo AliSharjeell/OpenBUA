@@ -1123,10 +1123,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
 
       case 'GET_PAGE_TEXT': {
-        // 0. Extract active modal / dialog text (Gmail compose, popups, overlays)
+        // 0. Extract active, truly visible modal / dialog text (Gmail compose, popups, overlays)
+        // Must be genuinely visible on screen and sufficiently sized to avoid hidden YouTube TV-sync dialogs or invisible analytics overlays
         const activeModals = Array.from(document.querySelectorAll<HTMLElement>(
           'div[role="dialog"]:not([aria-hidden="true"]), dialog[open], .M9, div[aria-label*="New Message" i], div[aria-label*="Compose" i]'
-        ));
+        )).filter((m) => {
+          if (!isElementVisible(m)) return false;
+          const rect = m.getBoundingClientRect();
+          if (rect.width < 50 || rect.height < 50) return false;
+          if (rect.bottom < 0 || rect.right < 0 || rect.top > (window.innerHeight || document.documentElement.clientHeight)) return false;
+          const text = (m.innerText || m.textContent || '').toLowerCase();
+          if (text.includes('watch history and influence tv recommendations')) return false;
+          return true;
+        });
         let modalExcerpt = '';
         if (activeModals.length > 0) {
           modalExcerpt = activeModals
