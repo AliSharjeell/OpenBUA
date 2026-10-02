@@ -271,12 +271,22 @@ export function ChatView({
 
   const [isAtBottom, setIsAtBottom] = useState(true);
   const isAtBottomRef = useRef(true);
+  const manualScrollTimestampRef = useRef<number>(0);
 
   const handleScroll = () => {
     const el = scrollContainerRef.current;
     if (!el) return;
+
+    // If programmatic smooth scrolling was recently triggered, ignore intermediate frames
+    if (Date.now() < manualScrollTimestampRef.current) {
+      setIsAtBottom(true);
+      isAtBottomRef.current = true;
+      return;
+    }
+
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const atBottom = distanceFromBottom < 48;
+    // Generous threshold to accommodate subpixel scaling and momentum scrolling
+    const atBottom = distanceFromBottom <= 80;
     setIsAtBottom(atBottom);
     isAtBottomRef.current = atBottom;
   };
@@ -317,17 +327,64 @@ export function ChatView({
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
 
   const scrollToBottom = (smooth = true) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
     isAtBottomRef.current = true;
     setIsAtBottom(true);
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    if (smooth) {
+      manualScrollTimestampRef.current = Date.now() + 600;
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
   };
 
-  // Only auto-scroll on streaming or message updates if user was already at the bottom
+  // Follow streaming and message updates if user was already at the bottom
   useEffect(() => {
     if (isAtBottomRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+      const raf = requestAnimationFrame(() => {
+        if (isAtBottomRef.current && el) {
+          el.scrollTop = el.scrollHeight;
+        }
+      });
+      return () => cancelAnimationFrame(raf);
     }
   }, [messages, isBusy, activeTool]);
+
+  // Real-time MutationObserver to track micro-mutations and token streaming
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    let rafId: number | null = null;
+
+    const observer = new MutationObserver(() => {
+      if (isAtBottomRef.current) {
+        if (rafId === null) {
+          rafId = requestAnimationFrame(() => {
+            if (isAtBottomRef.current && el) {
+              el.scrollTop = el.scrollHeight;
+            }
+            rafId = null;
+          });
+        }
+      }
+    });
+
+    observer.observe(el, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+
+    return () => {
+      observer.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   // When active session changes, reset scroll to bottom
   useEffect(() => {
@@ -385,6 +442,12 @@ export function ChatView({
       textareaRef.current.style.height = 'auto';
     }
 
+    // Immediately snap to bottom for user message
+    manualScrollTimestampRef.current = Date.now() + 600;
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    scrollToBottom(false);
+
     if (harness) {
       try {
         await harness.prompt(promptText);
@@ -418,7 +481,7 @@ export function ChatView({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-3.5 pt-16 pb-14 space-y-3.5 select-text"
+        className="flex-1 overflow-y-auto px-3.5 pt-16 pb-8 space-y-3.5 select-text"
       >
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
@@ -605,6 +668,20 @@ export function ChatView({
             </div>
           </div>
         ))}
+
+        {/* Dynamic bottom spacer to ensure message content is never occluded by floating input, thinking pill, or captcha */}
+        {messages.length > 0 && (
+          <div
+            className={`shrink-0 transition-all duration-200 pointer-events-none ${
+              captchaState.isActive
+                ? 'h-48'
+                : isBusy
+                ? 'h-36'
+                : 'h-24'
+            }`}
+            aria-hidden="true"
+          />
+        )}
 
         <div ref={messagesEndRef} />
       </div>
