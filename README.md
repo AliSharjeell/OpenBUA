@@ -10,44 +10,63 @@
 
 ---
 
-**OpenBUA** is an open-source, autonomous browser use Chrome Extension (Manifest V3) that runs directly inside your everyday browser. Unlike cloud browser-use tools that require spun-up headless containers, login bypass proxies, or remote servers, OpenBUA operates right inside your existing Chrome instance with all your active sessions, cookies, and logins already available.
+> Claude Code gave AI agents access to people's terminals. OpenBUA gives agents access to the one place users actually live all day - their own browser, already logged into Gmail, LinkedIn, GitHub, job boards and CRMs.
 
-Built with **`@earendil-works/pi-agent-core`** and **`@earendil-works/pi-ai`**, OpenBUA equips AI models with real-time DOM perception, intelligent multi-step navigation, native synthetic event form-filling, live streaming research preview, and a proactive self-learning memory system.
+---
+
+**OpenBUA** (Open Browser Use Agent) is an open-source, autonomous AI browser agent built as a Chrome Extension (Manifest V3) that runs directly inside your everyday browser. Unlike cloud browser-use tools that require spun-up headless containers, login bypass proxies, or remote servers, OpenBUA operates right inside your existing browser session with all your active cookies, credentials, and logins already available.
+
+Built with **`@earendil-works/pi-agent-core`** and **`@earendil-works/pi-ai`**, OpenBUA equips AI models with real-time DOM perception, intelligent multi-step navigation, synthetic event form-filling, incremental live research previews, and a self-learning memory system.
+
+---
+
+## Why OpenBUA? In-Browser Execution vs Cloud Browser-Use
+
+| Capability | OpenBUA | Traditional Cloud Browser-Use |
+| --- | --- | --- |
+| Session Authentication | Uses your active, signed-in sessions (Gmail, LinkedIn, GitHub, CRM) | Requires re-authentication, 2FA bypass, or fragile cookie imports |
+| Infrastructure | 100% Client-Side Chrome Extension (Zero servers) | Spun-up Docker containers, cloud VMs, remote Playwright instances |
+| Data Privacy | Zero data leaves your machine; prompts go straight to AI provider | Browsing traffic and page snapshots stream through remote servers |
+| Cost | Free Gemini tier (1,500 requests/day) or Bring Your Own Key | Per-minute cloud compute pricing plus proxy bandwidth costs |
+| Bot Detection | Bypasses headless blocks by running as a genuine local browser | Regularly blocked by Cloudflare, reCAPTCHA, and bot shields |
+| Captcha Handling | Human-in-the-Loop alert banner lets you solve challenges in 1 click | Requires expensive third-party captcha-solving API integrations |
+| Real-Time Feedback | Live Research Preview tab streams tables incrementally as agent works | Black-box execution until final summary is returned |
+| Knowledge Retention | Proactive self-learning memory with Global and Tab memory tiers | Ephemeral scratchpads discarded after each session |
 
 ---
 
 ## What Can OpenBUA Do?
 
-Because OpenBUA runs directly in your existing browser, it can perform complex autonomous workflows without needing you to log in again:
+Because OpenBUA runs directly in your existing browser, it executes end-to-end autonomous workflows without login barriers:
 
 - **Autonomous Web Research and Lead Generation**:
-  - Search directories, platforms, or search engines across multiple pages.
-  - Evaluate candidates, extract relevant details, and compile findings into clean tables.
+  - Search directories, platforms, search engines, or social networks across multiple pages.
+  - Automatically evaluate candidates, extract verified data, and compile structured tables.
   - Example: *"Search LinkedIn for 'world models PhD' researchers, extract profiles across pages, and compile a structured table with names, headlines, and locations."*
   - Example: *"Go through recent Hacker News submissions on LLM agents, find the top 5 discussions, and summarize key takeaways."*
 
 - **Live Research Preview Tab**:
-  - Features a dedicated Preview view accessible from the central Chat / Memory / Preview toggle.
-  - Streams extracted findings, candidate rows, and structured Markdown into the preview buffer incrementally as items are discovered (ReAct 1-item cycle), without making you wait for the full task to finish.
-  - Includes an automatic markdown table repair engine that stitches fragmented rows and scattered pipe data into contiguous tables.
-  - Per-chat scoping ensures every conversation tab maintains its own independent preview buffer with an instant Markdown copy button.
+  - Dedicated Preview tab accessible from the center navigation toggle (Chat / Memory / Preview).
+  - Incremental write-as-you-go streaming: The agent streams extracted candidates, table rows, and structured Markdown into the preview buffer as each item is inspected (ReAct 1-item cycle), eliminating black-box waiting.
+  - Automatic Markdown table repair engine: Automatically detects and stitches fragmented rows and scattered pipe data into contiguous tables.
+  - Scoped per chat session: Each conversation tab maintains its own independent preview buffer with an instant Markdown copy button.
 
 - **Self-Learning Memory System**:
-  - Automatically identifies personal facts, contact information, university affiliations, and repeatable workflow patterns while executing tasks.
-  - Queues discovered facts into a dedicated Suggested Memories interface where you can review them, discard with a single tap, or approve them into Tab Memory or Global Memory.
-  - Global Memory stores general user background (profile, resume, work history) across all browser tabs.
-  - Tab Memory isolates project-specific context and uploaded documents to the active chat session.
-  - Direct file uploads for PDF, Markdown, Text, and JSON documents with client-side text extraction powered by `pdfjs-dist`.
+  - Proactive fact extraction: Detects personal details, contact information, university affiliations, and repeatable workflow routines while browsing.
+  - Suggested Memories interface: Review suggested memories on a dedicated full-page screen, discard with a single tap, or approve into Tab Memory or Global Memory.
+  - Global Memory: General user background (profile, resume, work history) shared across all chats and browser tabs.
+  - Tab Memory: Project-specific notes and uploaded documents isolated to the active chat session.
+  - Document Uploads: Directly upload PDF, Markdown, Text, and JSON documents with client-side text parsing powered by `pdfjs-dist`.
 
 - **Autonomous Form Filling and Wizard Completion**:
-  - Automatically matches web forms, job application portals (Greenhouse, Lever, Workday), and onboarding wizards against your stored profile.
-  - Dispatches native synthetic event chains (`input`, `change`, `blur`) to ensure complete compatibility with React, Vue, Angular, Svelte, and vanilla HTML forms.
-  - Verifies DOM inputs after population to guarantee submission accuracy.
+  - Matches web forms, job application portals (Greenhouse, Lever, Workday), and customer onboarding wizards against your stored profile.
+  - Dispatches native synthetic event chains (`input`, `change`, `blur`) ensuring 100% compatibility with React, Vue, Angular, Svelte, and vanilla HTML forms.
+  - Verifies DOM values after population to prevent hallucinated submissions.
 
 - **Autonomous Email and Webmail Outreach (Gmail, Outlook, Webmail)**:
-  - Drafts, reviews, and sends genuine emails right from your existing, logged-in browser session (Gmail, Outlook, Yahoo, webmail). No third-party OAuth permissions, SMTP passwords, or external email APIs required.
-  - Navigates to your webmail interface, opens compose dialogs, inputs recipient chips, formats subject lines and body text, and clicks Send on your command.
-  - Includes intelligent Gmail Basic HTML mode navigation to eliminate DOM drift and click friction on dynamic Single-Page Applications.
+  - Drafts, reviews, and dispatches genuine emails right from your existing, logged-in browser session (Gmail, Outlook, Yahoo, webmail). No third-party OAuth permissions, SMTP passwords, or external email APIs required.
+  - Navigates to your webmail interface, triggers compose dialogs, inputs confirmed recipient chips, formats subject lines and body text, and clicks Send on your command.
+  - Features intelligent Gmail Basic HTML mode navigation fallback to eliminate DOM drift and click friction on dynamic Single-Page Applications.
 
 - **Multi-Tab Orchestration and Dynamic Automation**:
   - Opens, switches, and coordinates across browser tabs during multi-step workflows without losing current task progress or form context.
@@ -64,7 +83,7 @@ Because OpenBUA runs directly in your existing browser, it can perform complex a
 
 ---
 
-## AI Models and Providers
+## AI Models and Supported Providers
 
 OpenBUA supports both zero-cost free operation and flexible Bring Your Own Key (BYOK) providers:
 
@@ -209,6 +228,12 @@ OpenBUA will:
 - Enter the recipient address and dispatch confirmed chip creation.
 - Populate a clear subject line and draft a well-structured email body.
 - Click Send to dispatch the email directly from your personal or professional mailbox.
+
+---
+
+## Search & Discovery Keywords
+
+Autonomous AI browser agent, browser-use Chrome extension, in-browser AI automation, automated web research, AI form filling, Claude Code for browser, local browser automation, Manifest V3 AI agent, web scraping assistant, self-learning agent memory, live research preview, BYOK browser agent.
 
 ---
 
