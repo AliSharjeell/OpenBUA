@@ -65,7 +65,7 @@ export function PreviewView({ content, isBusy = false }: PreviewViewProps) {
 
       {/* Main Preview Markdown Body */}
       {hasContent ? (
-        <div className="flex-1 bg-zinc-900/40 border border-zinc-800/70 rounded-2xl p-4 shadow-sm select-text overflow-x-auto">
+        <div className="flex-1 bg-zinc-900/40 border border-zinc-800/70 rounded-2xl p-4 shadow-sm select-text min-w-0">
           <MarkdownRenderer content={content} />
         </div>
       ) : (

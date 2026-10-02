@@ -162,37 +162,84 @@ body {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* Enhanced Responsive Table Styling */
+.markdown-body .table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.85rem 0;
+  border-radius: 0.625rem;
+  border: 1px solid #27272a;
+  background-color: #0d0d10;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+}
+
 .markdown-body table {
   width: 100%;
-  display: block;
-  overflow-x: auto;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.72rem;
-  margin: 0.6rem 0;
-  border: 1px solid #27272a;
-  border-radius: 0.375rem;
+  margin: 0;
+  border: none;
 }
+
 .markdown-body thead {
   background-color: #18181b;
 }
-.markdown-body th, .markdown-body td {
-  border: 1px solid #27272a;
-  padding: 0.35rem 0.55rem;
-  text-align: left;
-  vertical-align: top;
-  min-width: 60px;
-}
+
 .markdown-body th {
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  vertical-align: middle;
   background-color: #18181b;
   color: #f4f4f5;
   font-weight: 600;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   white-space: nowrap;
+  border-bottom: 1px solid #27272a;
+  border-right: 1px solid #222226;
 }
-.markdown-body tr:nth-child(even) td {
-  background-color: #121215;
+
+.markdown-body th:last-child {
+  border-right: none;
 }
-.markdown-body tr:hover td {
-  background-color: #1c1c20;
+
+.markdown-body td {
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #1e1e22;
+  border-right: 1px solid #1a1a1e;
+  color: #d4d4d8;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.markdown-body td:last-child {
+  border-right: none;
+}
+
+.markdown-body tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.markdown-body tbody tr:nth-child(even) {
+  background-color: #121216;
+}
+
+.markdown-body tbody tr:nth-child(odd) {
+  background-color: #0c0c0f;
+}
+
+.markdown-body tbody tr:hover {
+  background-color: #1c1c22;
+}
+
+.markdown-body td:first-child {
+  font-weight: 500;
+  color: #a1a1aa;
 }
 
 /* Agent's Thinking Shimmer Character Glow Animation */
