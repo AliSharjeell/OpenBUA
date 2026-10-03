@@ -62,9 +62,22 @@ export function formatFileSize(bytes: number): string {
 export function detectDocumentCategory(
   fileName: string,
   content?: string
-): 'resume' | 'id_card' | 'photo' | 'document' | 'other' {
+): 'resume' | 'id_card' | 'photo' | 'video' | 'document' | 'other' {
   const lowerName = fileName.toLowerCase();
   const lowerContent = (content || '').toLowerCase();
+
+  if (
+    /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(fileName) ||
+    lowerName.includes('video') ||
+    lowerName.includes('demo') ||
+    lowerName.includes('trailer') ||
+    lowerName.includes('promo') ||
+    lowerName.includes('recording') ||
+    lowerContent.includes('video demo') ||
+    lowerContent.includes('video walkthrough')
+  ) {
+    return 'video';
+  }
 
   const isResume =
     lowerName.includes('resume') ||
@@ -99,6 +112,7 @@ export function detectDocumentCategory(
  */
 export function detectFileType(fileName: string, mimeType?: string): DocumentFileType {
   const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  if (['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'].includes(ext) || mimeType?.startsWith('video/')) return 'video';
   if (ext === 'pdf' || mimeType === 'application/pdf') return 'pdf';
   if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext) || mimeType?.startsWith('image/')) return 'image';
   if (ext === 'md' || ext === 'markdown') return 'markdown';
@@ -374,28 +388,143 @@ export interface ParsedFileResult {
   dataUrl: string;
   sizeBytes: number;
   ocrStatus: 'pending' | 'processing' | 'done' | 'failed';
-  fileCategory: 'resume' | 'id_card' | 'photo' | 'document' | 'other';
+  fileCategory: 'resume' | 'id_card' | 'photo' | 'video' | 'document' | 'other';
   tags: string[];
+  filePath?: string;
+  thumbnailUrl?: string;
+  videoDuration?: number;
 }
 
 /**
- * Process any uploaded file (PDF, image, markdown, json, text, or binary).
+ * Extract a video frame thumbnail and duration using offscreen HTMLVideoElement
+ */
+export function generateVideoThumbnail(
+  source: File | Blob | string
+): Promise<{ thumbnailUrl: string; duration: number }> {
+  return new Promise((resolve) => {
+    try {
+      const video = document.createElement('video');
+      let objectUrl = '';
+      if (typeof source === 'string') {
+        video.src = source;
+      } else {
+        objectUrl = URL.createObjectURL(source);
+        video.src = objectUrl;
+      }
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+
+      const cleanup = () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        video.remove();
+      };
+
+      video.onloadedmetadata = () => {
+        const duration = video.duration || 0;
+        video.currentTime = Math.min(1.0, duration > 1 ? 0.5 : 0.1);
+      };
+
+      video.onseeked = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.min(video.videoWidth || 320, 640);
+          canvas.height = Math.min(video.videoHeight || 180, 360);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.8);
+            cleanup();
+            resolve({ thumbnailUrl, duration: video.duration || 0 });
+            return;
+          }
+        } catch (e) {
+          console.warn('[AutoForm AI] Failed to draw video thumbnail:', e);
+        }
+        cleanup();
+        resolve({ thumbnailUrl: '', duration: video.duration || 0 });
+      };
+
+      video.onerror = () => {
+        cleanup();
+        resolve({ thumbnailUrl: '', duration: 0 });
+      };
+
+      // 4-second safety timeout in case seek stalls
+      setTimeout(() => {
+        cleanup();
+        resolve({ thumbnailUrl: '', duration: 0 });
+      }, 4000);
+    } catch {
+      resolve({ thumbnailUrl: '', duration: 0 });
+    }
+  });
+}
+
+/**
+ * Attempt to load file data from a local disk path or media URL
+ */
+export async function tryLoadFileFromLocalPath(
+  pathOrUrl: string
+): Promise<{ dataUrl: string; mimeType: string; sizeBytes: number; fileName: string } | null> {
+  const trimmed = pathOrUrl.trim();
+  if (!trimmed) return null;
+
+  let fetchUrl = trimmed;
+  // Convert Windows path C:\path\file.mp4 to file:///C:/path/file.mp4
+  if (/^[a-zA-Z]:[/\\]/.test(trimmed)) {
+    fetchUrl = `file:///${trimmed.replace(/\\/g, '/')}`;
+  }
+
+  try {
+    const res = await fetch(fetchUrl);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const dataUrl = await fileToDataUrl(blob);
+    const fileName = trimmed.split(/[/\\]/).pop() || 'media_file';
+    return {
+      dataUrl,
+      mimeType: blob.type || 'application/octet-stream',
+      sizeBytes: blob.size,
+      fileName,
+    };
+  } catch (e) {
+    console.debug('[AutoForm AI] Could not fetch local file path:', e);
+    return null;
+  }
+}
+
+/**
+ * Process any uploaded file (PDF, image, video, markdown, json, text, or binary).
  * Generates raw base64 dataUrl, extracts content (via pdfjs or VLM OCR for images),
- * and detects category (resume, id_card, photo, document).
+ * and detects category (resume, video, id_card, photo, document).
  */
 export async function processUploadedFile(
   file: File,
-  options?: { runOcr?: boolean }
+  options?: { runOcr?: boolean; filePath?: string }
 ): Promise<ParsedFileResult> {
   const dataUrl = await fileToDataUrl(file);
   const type = detectFileType(file.name, file.type);
-  const mimeType = file.type || (type === 'pdf' ? 'application/pdf' : 'application/octet-stream');
+  const mimeType = file.type || (type === 'pdf' ? 'application/pdf' : type === 'video' ? 'video/mp4' : 'application/octet-stream');
   const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
 
   let content = '';
   let ocrStatus: 'pending' | 'processing' | 'done' | 'failed' = 'done';
+  let thumbnailUrl: string | undefined;
+  let videoDuration: number | undefined;
 
-  if (type === 'pdf') {
+  if (type === 'video') {
+    try {
+      const vidInfo = await generateVideoThumbnail(file);
+      thumbnailUrl = vidInfo.thumbnailUrl;
+      videoDuration = Math.round(vidInfo.duration);
+      content = `[Video Media: ${file.name}] Duration: ${videoDuration}s. Ready for Reddit, YouTube, and social media marketing upload.`;
+      ocrStatus = 'done';
+    } catch {
+      content = `[Video Media: ${file.name}] Stored video media. Ready for Reddit, YouTube, and marketing form upload.`;
+      ocrStatus = 'done';
+    }
+  } else if (type === 'pdf') {
     try {
       content = await extractTextFromPdf(file);
       ocrStatus = 'done';
@@ -430,6 +559,8 @@ export async function processUploadedFile(
   const tags = [type];
   if (fileCategory === 'resume') {
     tags.push('resume', 'profile');
+  } else if (fileCategory === 'video') {
+    tags.push('video', 'marketing');
   } else if (fileCategory !== 'other' && fileCategory !== 'document') {
     tags.push(fileCategory);
   }
@@ -437,6 +568,7 @@ export async function processUploadedFile(
   return {
     title: cleanTitle,
     fileName: file.name,
+    filePath: options?.filePath,
     type,
     mimeType,
     content,
@@ -444,6 +576,8 @@ export async function processUploadedFile(
     sizeBytes: file.size,
     ocrStatus,
     fileCategory,
+    videoDuration,
+    thumbnailUrl,
     tags,
   };
 }
