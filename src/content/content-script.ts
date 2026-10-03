@@ -158,6 +158,10 @@ function readElementValue(el: HTMLElement): string {
   const tagName = el.tagName.toLowerCase();
   if (tagName === 'input') {
     const input = el as HTMLInputElement;
+    if (input.type === 'file') {
+      const files = Array.from(input.files || []).map((f) => f.name).join(', ');
+      return files || input.value || '';
+    }
     if (input.type === 'checkbox' || input.type === 'radio') {
       return input.checked ? 'true' : 'false';
     }
@@ -438,7 +442,11 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
   };
 }
 
-function setNativeValue(element: HTMLElement, value: string): void {
+function setNativeValue(
+  element: HTMLElement,
+  value: string,
+  fileData?: { fileName: string; mimeType: string; dataUrl: string }
+): void {
   const tagName = element.tagName.toLowerCase();
   const isContentEditable = element.isContentEditable || element.getAttribute('contenteditable') === 'true' || element.getAttribute('role') === 'textbox';
 
@@ -461,7 +469,59 @@ function setNativeValue(element: HTMLElement, value: string): void {
     const input = element as HTMLInputElement;
     const type = (input.getAttribute('type') || 'text').toLowerCase();
 
-    if (type === 'checkbox') {
+    if (type === 'file') {
+      try {
+        let fileObj: File | null = null;
+        if (fileData?.dataUrl) {
+          const parts = fileData.dataUrl.split(',');
+          const mime = fileData.mimeType || 'application/octet-stream';
+          const bstr = atob(parts[1] || '');
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+          }
+          fileObj = new File([u8arr], fileData.fileName || 'upload.pdf', { type: mime });
+        } else if (value.startsWith('data:')) {
+          const parts = value.split(',');
+          const mimeMatch = parts[0]?.match(/:(.*?);/);
+          const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+          const bstr = atob(parts[1] || '');
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+          }
+          fileObj = new File([u8arr], fileData?.fileName || 'upload.pdf', { type: mime });
+        }
+
+        if (fileObj) {
+          const dt = new DataTransfer();
+          dt.items.add(fileObj);
+          input.files = dt.files;
+          input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+
+          const dropzone =
+            input.closest('.dropzone, [class*="upload"], [class*="drop"], [role="button"]') ||
+            input.parentElement;
+          if (dropzone && dropzone !== input) {
+            try {
+              const dropEvent = new DragEvent('drop', {
+                bubbles: true,
+                cancelable: true,
+                composed: true,
+                dataTransfer: dt,
+              });
+              dropzone.dispatchEvent(dropEvent);
+            } catch {}
+          }
+          return;
+        }
+      } catch (fileErr) {
+        console.warn('[AutoForm AI] Error attaching file:', fileErr);
+      }
+    } else if (type === 'checkbox') {
       const boolVal = value === 'true' || value === '1' || value === 'yes' || value === 'on';
       const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked');
       if (descriptor?.set) {
@@ -929,7 +989,13 @@ function findTargetElement(refId?: string, selector?: string): HTMLElement | nul
 }
 
 async function fillFormFields(
-  assignments: Array<{ refId?: string; selector?: string; value: string; pressEnter?: boolean }>,
+  assignments: Array<{
+    refId?: string;
+    selector?: string;
+    value: string;
+    pressEnter?: boolean;
+    fileData?: { fileName: string; mimeType: string; dataUrl: string };
+  }>,
   pressEnterAll?: boolean
 ): Promise<FormFillResult> {
   let successCount = 0;
@@ -954,7 +1020,7 @@ async function fillFormFields(
     }
 
     try {
-      setNativeValue(target, item.value);
+      setNativeValue(target, item.value, item.fileData);
 
       // Yield briefly to let rich-text frameworks (Lexical, React, ProseMirror, Slate) flush DOM reconciliations
       await new Promise((resolve) => setTimeout(resolve, 60));
@@ -1014,7 +1080,11 @@ async function fillFormFields(
           (sel.selectedIndex > 0 && !cleanRequested.includes('select'));
       }
 
+      const isFileInput = target.tagName.toLowerCase() === 'input' && (target as HTMLInputElement).type === 'file';
+      const isFileAttached = isFileInput && ((target as HTMLInputElement).files?.length ?? 0) > 0;
+
       const isVerified =
+        isFileAttached ||
         isRecipientChip ||
         isDigitsMatch ||
         isSelectMatch ||
@@ -1571,6 +1641,56 @@ export function detectCaptchaChallenge(): CaptchaDetectionResult {
   return { detected: false };
 }
 
+async function uploadFileToElement(
+  refId?: string,
+  selector?: string,
+  fileData?: { fileName: string; mimeType: string; dataUrl: string }
+): Promise<{ success: boolean; message: string; fileName?: string }> {
+  if (!fileData || !fileData.dataUrl) {
+    return { success: false, message: 'No file data or dataUrl provided for upload.' };
+  }
+
+  let target: HTMLElement | null = findTargetElement(refId, selector);
+
+  // If no target element or target is not file input, look for input[type="file"] on page
+  if (!target || target.tagName.toLowerCase() !== 'input' || (target as HTMLInputElement).type !== 'file') {
+    if (target) {
+      const innerInput = target.querySelector<HTMLInputElement>('input[type="file"]');
+      if (innerInput) {
+        target = innerInput;
+      }
+    }
+    if (!target || target.tagName.toLowerCase() !== 'input') {
+      const anyFileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+      if (anyFileInput) {
+        target = anyFileInput;
+      }
+    }
+  }
+
+  if (!target) {
+    return {
+      success: false,
+      message: 'Could not find any file input (<input type="file">) or dropzone on the page.',
+    };
+  }
+
+  try {
+    setNativeValue(target, fileData.fileName, fileData);
+    flashHighlight(target);
+
+    const input = target as HTMLInputElement;
+    const count = input.files?.length || 0;
+    return {
+      success: true,
+      message: `Successfully attached "${fileData.fileName}" to ${target.tagName.toLowerCase()}${input.name ? `[name="${input.name}"]` : ''} (${count} file(s) attached in DOM).`,
+      fileName: fileData.fileName,
+    };
+  } catch (err: any) {
+    return { success: false, message: `Failed to attach file: ${err?.message || err}` };
+  }
+}
+
 // Listen for messages from the Side Panel / Extension
 if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
   (window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__ = true;
@@ -1596,6 +1716,17 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
           })
           .catch((err) => {
             sendResponse({ success: false, error: err?.message || String(err) });
+          });
+        break;
+      }
+
+      case 'UPLOAD_FILE_TO_ELEMENT': {
+        uploadFileToElement(request.refId, request.selector, request.fileData)
+          .then((result) => {
+            sendResponse(result);
+          })
+          .catch((err) => {
+            sendResponse({ success: false, message: err?.message || String(err) });
           });
         break;
       }

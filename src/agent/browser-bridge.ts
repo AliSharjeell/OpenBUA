@@ -1,4 +1,5 @@
-import { PageFormSummary, FormElementDescriptor, FormFillResult } from '../types';
+import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
+import { loadGlobalMemories, loadTabMemories, getTabKey } from '../services/storage';
 
 export interface TabInfo {
   id: number;
@@ -404,7 +405,45 @@ function inPageFillForm(
       if (tagName === 'input') {
         const input = target as HTMLInputElement;
         const type = (input.getAttribute('type') || 'text').toLowerCase();
-        if (type === 'checkbox' || type === 'radio') {
+        if (type === 'file') {
+          try {
+            let fileObj: File | null = null;
+            const fileData = (item as any).fileData;
+            if (fileData?.dataUrl) {
+              const parts = fileData.dataUrl.split(',');
+              const mime = fileData.mimeType || 'application/octet-stream';
+              const bstr = atob(parts[1] || '');
+              let n = bstr.length;
+              const u8arr = new Uint8Array(n);
+              while (n--) u8arr[n] = bstr.charCodeAt(n);
+              fileObj = new File([u8arr], fileData.fileName || 'upload.pdf', { type: mime });
+            } else if (item.value && item.value.startsWith('data:')) {
+              const parts = item.value.split(',');
+              const mimeMatch = parts[0]?.match(/:(.*?);/);
+              const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+              const bstr = atob(parts[1] || '');
+              let n = bstr.length;
+              const u8arr = new Uint8Array(n);
+              while (n--) u8arr[n] = bstr.charCodeAt(n);
+              fileObj = new File([u8arr], fileData?.fileName || 'upload.pdf', { type: mime });
+            }
+            if (fileObj) {
+              const dt = new DataTransfer();
+              dt.items.add(fileObj);
+              input.files = dt.files;
+              input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+              const dropzone = input.closest('.dropzone, [class*="upload"], [class*="drop"], [role="button"]') || input.parentElement;
+              if (dropzone && dropzone !== input) {
+                try {
+                  dropzone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
+                } catch {}
+              }
+            }
+          } catch (fileErr) {
+            console.warn('[AutoForm AI] Error attaching file in fallback:', fileErr);
+          }
+        } else if (type === 'checkbox' || type === 'radio') {
           const boolVal = item.value === 'true' || item.value === '1' || item.value === 'yes' || item.value === 'on';
           const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked');
           if (desc?.set) desc.set.call(input, boolVal);
@@ -492,7 +531,13 @@ function inPageFillForm(
       let actualVal = '';
       if (tagName === 'input') {
         const inp = target as HTMLInputElement;
-        actualVal = inp.type === 'checkbox' || inp.type === 'radio' ? String(inp.checked) : inp.value;
+        if (inp.type === 'file') {
+          actualVal = Array.from(inp.files || []).map((f) => f.name).join(', ') || inp.value || '';
+        } else if (inp.type === 'checkbox' || inp.type === 'radio') {
+          actualVal = String(inp.checked);
+        } else {
+          actualVal = inp.value;
+        }
       } else if (tagName === 'textarea') {
         actualVal = (target as HTMLTextAreaElement).value;
       } else if (tagName === 'select') {
@@ -532,7 +577,11 @@ function inPageFillForm(
           (sel.selectedIndex > 0 && !cleanRequested.includes('select'));
       }
 
+      const isFileInput = target.tagName.toLowerCase() === 'input' && (target as HTMLInputElement).type === 'file';
+      const isFileAttached = isFileInput && ((target as HTMLInputElement).files?.length ?? 0) > 0;
+
       const verified =
+        isFileAttached ||
         isDigitsMatch ||
         isSelectMatch ||
         (cleanActual.length > 0 && (
@@ -1244,7 +1293,13 @@ export async function inspectActiveTabForm(selector?: string): Promise<PageFormS
 
 // Fill fields on active tab
 export async function fillActiveTabFields(
-  assignments: Array<{ refId?: string; selector?: string; value: string; pressEnter?: boolean }>,
+  assignments: Array<{
+    refId?: string;
+    selector?: string;
+    value: string;
+    pressEnter?: boolean;
+    fileData?: { fileName: string; mimeType: string; dataUrl: string };
+  }>,
   pressEnterAll?: boolean
 ): Promise<FormFillResult> {
   const activeTab = await getActiveTab();
@@ -1268,12 +1323,68 @@ export async function fillActiveTabFields(
     throw new Error(`Chrome restricts extensions from accessing internal pages (${activeTab.url}). Please open a regular webpage or form (such as test-form.html) in your browser!`);
   }
 
-  const cleanAssignments = (assignments || []).map((a) => ({
-    refId: a.refId || '',
-    selector: a.selector || '',
-    value: String(a.value ?? ''),
-    pressEnter: Boolean(a.pressEnter),
-  }));
+  // Pre-fetch stored documents to automatically attach raw file binary if assignment targets a file or references a stored file/resume
+  const tabKey = getTabKey(activeTab);
+  const [globalDocs, tabDocs] = await Promise.all([
+    loadGlobalMemories().catch(() => []),
+    loadTabMemories(tabKey).catch(() => []),
+  ]);
+  const allStoredDocs = [...globalDocs, ...tabDocs];
+
+  const cleanAssignments = (assignments || []).map((a) => {
+    let fileData = a.fileData;
+    if (!fileData) {
+      const valLower = String(a.value ?? '').toLowerCase().trim();
+      const selLower = String(a.selector ?? '').toLowerCase();
+      const refLower = String(a.refId ?? '').toLowerCase();
+      const isFileField =
+        selLower.includes('file') ||
+        selLower.includes('upload') ||
+        selLower.includes('resume') ||
+        selLower.includes('cv') ||
+        refLower.includes('file') ||
+        refLower.includes('upload');
+      const isFileVal =
+        valLower.endsWith('.pdf') ||
+        valLower.endsWith('.png') ||
+        valLower.endsWith('.jpg') ||
+        valLower.endsWith('.jpeg') ||
+        valLower.endsWith('.webp') ||
+        valLower === 'resume' ||
+        valLower === 'my resume' ||
+        valLower === 'cv';
+
+      if (isFileField || isFileVal) {
+        const match = allStoredDocs.find(
+          (d) =>
+            d.dataUrl &&
+            ((d.fileName && valLower.includes(d.fileName.toLowerCase())) ||
+              (d.title && valLower.includes(d.title.toLowerCase())) ||
+              d.fileCategory === 'resume' ||
+              d.tags?.includes('resume') ||
+              d.type === 'pdf')
+        );
+        if (match && match.dataUrl) {
+          fileData = {
+            fileName: match.fileName || `${match.title}.${match.type === 'pdf' ? 'pdf' : 'png'}`,
+            mimeType: match.mimeType || (match.type === 'pdf' ? 'application/pdf' : 'application/octet-stream'),
+            dataUrl: match.dataUrl,
+          };
+          if (!a.value || a.value === 'resume' || a.value === 'my resume') {
+            a.value = fileData.fileName;
+          }
+        }
+      }
+    }
+
+    return {
+      refId: a.refId || '',
+      selector: a.selector || '',
+      value: String(a.value ?? ''),
+      pressEnter: Boolean(a.pressEnter),
+      fileData,
+    };
+  });
 
   // Generous timeout for large forms (e.g. 40+ fields on test pages)
   const fillTimeoutMs = Math.max(12000, cleanAssignments.length * 300);
@@ -1313,6 +1424,150 @@ export async function fillActiveTabFields(
   }
 
   throw new Error('Failed to fill form fields on active tab');
+}
+
+// Programmatically upload a stored raw file (resume, image, PDF, doc) to a file input or dropzone on active tab
+export async function uploadFileToActiveTab(options: {
+  refId?: string;
+  selector?: string;
+  fileName?: string;
+  fileData?: { fileName: string; mimeType: string; dataUrl: string };
+}): Promise<{ success: boolean; message: string; fileName?: string }> {
+  const activeTab = await getActiveTab();
+  if (!activeTab || !activeTab.id) {
+    return { success: false, message: 'No active browser tab found to upload file to.' };
+  }
+
+  let filePayload = options.fileData;
+
+  if (!filePayload) {
+    const tabKey = getTabKey(activeTab);
+    const [globalMems, tabMems] = await Promise.all([
+      loadGlobalMemories().catch(() => []),
+      loadTabMemories(tabKey).catch(() => []),
+    ]);
+    const allMems = [...globalMems, ...tabMems];
+    const requestedName = (options.fileName || '').toLowerCase().trim();
+
+    let match: UserDocument | undefined;
+    if (requestedName) {
+      match = allMems.find(
+        (m) =>
+          m.dataUrl &&
+          ((m.fileName && m.fileName.toLowerCase().includes(requestedName)) ||
+            m.title.toLowerCase().includes(requestedName))
+      );
+    }
+
+    if (!match) {
+      match = allMems.find(
+        (m) =>
+          m.dataUrl &&
+          (m.fileCategory === 'resume' ||
+            m.tags?.includes('resume') ||
+            (m.fileName && /resume|cv/i.test(m.fileName)) ||
+            /resume|cv/i.test(m.title))
+      );
+    }
+
+    if (!match) {
+      match = allMems.find((m) => m.dataUrl);
+    }
+
+    if (!match || !match.dataUrl) {
+      return {
+        success: false,
+        message: `No stored document with raw file attachment was found in Memory${
+          requestedName ? ` matching "${requestedName}"` : ''
+        }. Please upload your resume or file in the Memory tab first!`,
+      };
+    }
+
+    filePayload = {
+      fileName: match.fileName || `${match.title}.${match.type === 'pdf' ? 'pdf' : 'png'}`,
+      mimeType: match.mimeType || (match.type === 'pdf' ? 'application/pdf' : 'application/octet-stream'),
+      dataUrl: match.dataUrl,
+    };
+  }
+
+  // 1. Send message to tab content script
+  try {
+    const res = await sendMessageToTab(
+      activeTab.id,
+      {
+        action: 'UPLOAD_FILE_TO_ELEMENT',
+        refId: options.refId,
+        selector: options.selector || 'input[type="file"]',
+        fileData: filePayload,
+      },
+      8000
+    );
+    if (res && (res.success || res.message)) {
+      return res;
+    }
+  } catch (msgErr) {
+    console.warn('[OpenBUA] uploadFile sendMessageToTab notice:', msgErr);
+  }
+
+  // 2. Direct executeScript fallback
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const scriptRes = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: (refId, selector, fileData) => {
+          let target: HTMLElement | null = null;
+          if (refId) {
+            target = document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`) || document.getElementById(refId);
+          }
+          if (!target && selector) {
+            try { target = document.querySelector(selector); } catch {}
+          }
+          if (!target || target.tagName.toLowerCase() !== 'input' || (target as HTMLInputElement).type !== 'file') {
+            if (target) {
+              const inner = target.querySelector<HTMLInputElement>('input[type="file"]');
+              if (inner) target = inner;
+            }
+            if (!target || target.tagName.toLowerCase() !== 'input') {
+              target = document.querySelector<HTMLInputElement>('input[type="file"]');
+            }
+          }
+          if (!target) {
+            return { success: false, message: 'No file input or dropzone found on page.' };
+          }
+          try {
+            const input = target as HTMLInputElement;
+            const parts = fileData.dataUrl.split(',');
+            const mime = fileData.mimeType || 'application/octet-stream';
+            const bstr = atob(parts[1] || '');
+            let n = bstr.length;
+            const u8arr = new Uint8Array(n);
+            while (n--) u8arr[n] = bstr.charCodeAt(n);
+            const file = new File([u8arr], fileData.fileName || 'document.pdf', { type: mime });
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+            return {
+              success: true,
+              message: `Attached "${fileData.fileName}" to ${input.tagName.toLowerCase()} in DOM.`,
+              fileName: fileData.fileName,
+            };
+          } catch (e: any) {
+            return { success: false, message: `Failed to attach file: ${e?.message || e}` };
+          }
+        },
+        args: [options.refId, options.selector, filePayload],
+      });
+      if (scriptRes && scriptRes[0]?.result) {
+        return scriptRes[0].result;
+      }
+    } catch (e: any) {
+      return { success: false, message: `Script execution error: ${e?.message || e}` };
+    }
+  }
+
+  return { success: false, message: 'Could not attach file to page.' };
 }
 
 // Click element on active tab
