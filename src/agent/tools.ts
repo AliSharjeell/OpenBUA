@@ -782,6 +782,46 @@ export const searchWebTool: AgentTool<typeof SearchWebSchema> = {
   },
 };
 
+// 18. Wait / Pause Tool (Mandatory for chat polling, waiting for replies, streaming completions)
+const WaitSecondsSchema = Type.Object({
+  seconds: Type.Number({
+    description:
+      'Number of seconds to pause execution (1 to 30 seconds, default 5). Use when waiting for a chat contact to reply on WhatsApp/Slack/Telegram, waiting for AI streaming responses, or waiting for page updates. NEVER call search_web to pass time.',
+    minimum: 1,
+    maximum: 30,
+  }),
+  reason: Type.Optional(
+    Type.String({
+      description: 'Reason for pausing (e.g. "Waiting for Mustafa to type reply in WhatsApp Web")',
+    })
+  ),
+});
+
+export const waitSecondsTool: AgentTool<typeof WaitSecondsSchema> = {
+  name: 'wait_seconds',
+  label: 'Wait / Pause Execution',
+  description:
+    'Pauses execution for a specified number of seconds (1 to 30) before the next action. MANDATORY for polling in multi-round chat loops (WhatsApp, Slack, Telegram) while waiting for contacts to reply, waiting for AI streaming responses to complete, or waiting for asynchronous page updates. NEVER call search_web to pass time.',
+  parameters: WaitSecondsSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    const rawSec = typeof params.seconds === 'number' ? params.seconds : 5;
+    const clampedSec = Math.max(1, Math.min(30, Math.round(rawSec)));
+    const reasonText = params.reason ? ` for: "${params.reason}"` : '';
+
+    await new Promise((resolve) => setTimeout(resolve, clampedSec * 1000));
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Paused for ${clampedSec} second(s)${reasonText}. Ready to re-check page content or take the next action.`,
+        },
+      ],
+      details: { seconds: clampedSec, reason: params.reason },
+    };
+  },
+};
+
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string): AgentTool<any>[] {
   return [
@@ -802,6 +842,7 @@ export function createAgentTools(sessionId?: string): AgentTool<any>[] {
     sendWebEmailTool,
     quickUrlCheckTool,
     searchWebTool,
+    waitSecondsTool,
     openNewTabTool,
     closeTabTool,
   ];
