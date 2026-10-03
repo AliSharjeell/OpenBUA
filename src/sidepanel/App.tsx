@@ -289,12 +289,7 @@ export function App() {
           }
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (
-              last &&
-              last.role === 'assistant' &&
-              last.isStreaming &&
-              (!last.content || last.content.trim().length === 0)
-            ) {
+            if (last && last.role === 'assistant' && last.isStreaming) {
               const updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
@@ -322,12 +317,7 @@ export function App() {
           setActiveTool(toolCall);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (
-              last &&
-              last.role === 'assistant' &&
-              last.isStreaming &&
-              (!last.content || last.content.trim().length === 0)
-            ) {
+            if (last && last.role === 'assistant' && last.isStreaming) {
               const calls = last.toolCalls || [];
               const index = calls.findIndex((c) => c.id === toolCall.id);
               const updatedCalls = [...calls];
@@ -340,17 +330,6 @@ export function App() {
               updated[updated.length - 1] = {
                 ...last,
                 toolCalls: updatedCalls,
-                isStreaming: true,
-              };
-              return updated;
-            } else if (last && last.role === 'assistant' && last.isStreaming && last.content && !last.thinking) {
-              const calls = last.toolCalls || [];
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                ...last,
-                thinking: last.content,
-                content: '',
-                toolCalls: [...calls, toolCall],
                 isStreaming: true,
               };
               return updated;
@@ -403,7 +382,7 @@ export function App() {
               updated = [...prev];
               updated[updated.length - 1] = {
                 ...last,
-                content: assistantText !== undefined ? assistantText : last.content,
+                content: assistantText !== undefined && assistantText !== '' ? assistantText : last.content,
                 toolCalls: toolCalls.length > 0 ? toolCalls : (last.toolCalls || []),
                 thinking: thinkingText || last.thinking,
                 thinkingDurationMs: duration ?? last.thinkingDurationMs,

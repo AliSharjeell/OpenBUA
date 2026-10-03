@@ -475,6 +475,39 @@ export function ChatView({
     setTimeout(() => setCopiedMessageId(null), 2000);
   };
 
+  // Deduplicate consecutive assistant messages that share identical content or were split during tool execution
+  const displayMessages = React.useMemo(() => {
+    const result: ChatMessage[] = [];
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const prev = result[result.length - 1];
+
+      // If this message and previous message are consecutive assistant messages within 15 seconds of each other
+      // and either have identical content or one is just the tools for the previous one, merge them
+      if (
+        prev &&
+        prev.role === 'assistant' &&
+        msg.role === 'assistant' &&
+        Math.abs(msg.timestamp - prev.timestamp) < 15000 &&
+        (!msg.content || !prev.content || msg.content.trim() === prev.content.trim())
+      ) {
+        result[result.length - 1] = {
+          ...prev,
+          content: prev.content || msg.content,
+          thinking: prev.thinking || msg.thinking,
+          thinkingDurationMs: prev.thinkingDurationMs || msg.thinkingDurationMs,
+          toolCalls: [...(prev.toolCalls || []), ...(msg.toolCalls || [])].filter(
+            (tc, idx, arr) => arr.findIndex((t) => t.id === tc.id) === idx
+          ),
+          isStreaming: prev.isStreaming || msg.isStreaming,
+        };
+      } else {
+        result.push(msg);
+      }
+    }
+    return result;
+  }, [messages]);
+
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
       {/* Messages Scroll Area - Full height canvas with top and bottom clearance for floating elements */}
@@ -483,7 +516,7 @@ export function ChatView({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-3.5 pt-16 pb-8 space-y-3.5 select-text"
       >
-        {messages.length === 0 && (
+        {displayMessages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
             <div className="flex flex-col items-center">
               <h3 className="font-semibold text-zinc-100 text-sm tracking-tight">OpenBUA</h3>
@@ -504,7 +537,7 @@ export function ChatView({
           </div>
         )}
 
-        {messages.map((msg) => (
+        {displayMessages.map((msg) => (
           <div
             key={msg.id}
             className={`group flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1.5 select-text`}
@@ -670,7 +703,7 @@ export function ChatView({
         ))}
 
         {/* Dynamic bottom spacer to ensure message content is never occluded by floating input, thinking pill, or captcha */}
-        {messages.length > 0 && (
+        {displayMessages.length > 0 && (
           <div
             className={`shrink-0 transition-all duration-200 pointer-events-none ${
               captchaState.isActive
