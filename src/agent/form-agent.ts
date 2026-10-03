@@ -86,10 +86,11 @@ export function convertChatMessagesToAgentMessages(
         });
       }
 
-      if (contentBlocks.length === 0) {
+      const hasTextOrTools = contentBlocks.some((b) => b.type === 'text' || b.type === 'toolCall');
+      if (!hasTextOrTools) {
         contentBlocks.push({
           type: 'text',
-          text: 'Understood.',
+          text: cleanContent || 'Understood.',
         });
       }
 

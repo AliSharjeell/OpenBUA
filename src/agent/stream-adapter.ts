@@ -213,6 +213,7 @@ async function streamOpenAI(
       messages.push({ role: 'user', content: text });
     } else if (m.role === 'assistant') {
       let textParts = '';
+      let thinkingParts = '';
       let toolCalls: any[] = [];
 
       const isGoogle = isGemini;
@@ -223,6 +224,11 @@ async function streamOpenAI(
         textParts = m.content
           .filter((c: any) => c.type === 'text')
           .map((c: any) => c.text || '')
+          .join('\n');
+
+        thinkingParts = m.content
+          .filter((c: any) => c.type === 'thinking')
+          .map((c: any) => c.thinking || '')
           .join('\n');
 
         toolCalls = m.content
@@ -257,10 +263,19 @@ async function streamOpenAI(
       }
 
       const msg: any = { role: 'assistant' };
-      if (textParts) msg.content = textParts;
+      if (textParts && textParts.trim().length > 0) {
+        msg.content = textParts;
+      }
+      if (thinkingParts && thinkingParts.trim().length > 0) {
+        msg.reasoning_content = thinkingParts;
+      }
+
       if (toolCalls.length > 0) {
         msg.tool_calls = toolCalls;
-        if (!textParts) msg.content = null;
+        if (!msg.content) msg.content = null;
+      } else if (!msg.content) {
+        // Assistant turns without tool calls MUST provide content per OpenAI spec
+        msg.content = msg.reasoning_content?.slice(0, 500) || 'Understood.';
       }
       messages.push(msg);
     } else if (m.role === 'toolResult') {
@@ -318,6 +333,20 @@ async function streamOpenAI(
       const msg = messages[i];
       if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.length > 250) {
         msg.content = msg.content.slice(0, 250) + '\n... [Prior turn output compacted for Groq limit]';
+      }
+    }
+  }
+
+  // Final validation pass to enforce OpenAI spec across all assistant turns:
+  // Assistant messages must provide content, reasoning_content, or tool_calls
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg.role === 'assistant') {
+      const hasTools = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+      const hasContent = typeof msg.content === 'string' && msg.content.trim().length > 0;
+      const hasReasoning = typeof msg.reasoning_content === 'string' && msg.reasoning_content.trim().length > 0;
+      if (!hasTools && !hasContent) {
+        msg.content = hasReasoning ? (msg.reasoning_content.slice(0, 500) || 'Thinking...') : 'Understood.';
       }
     }
   }
