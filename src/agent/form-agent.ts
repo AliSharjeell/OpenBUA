@@ -3,6 +3,7 @@ import { Agent, AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
 import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS, createAgentTools } from './tools';
 import { createCustomModel, createStreamFn } from './stream-adapter';
+import { getActiveTab, isExtensionPage } from './browser-bridge';
 import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
 import { setActiveSessionIdState, getScratchpad, appendToScratchpad, loadSuggestedMemories, saveSuggestedMemory } from '../services/storage';
 
@@ -586,8 +587,9 @@ ${(this.settings.autoConfirmSubmit ?? true)
 
 19. FAST WEB MESSAGING AUTOMATION (WhatsApp Web, Telegram, Slack, Web Chat, DMs):
     - When the user asks to send a message or text someone on WhatsApp Web, Telegram, Slack, or web chat (e.g. "text to sidhart on whatsapp that this is a test reply", "send a message on Slack", "DM user on Twitter/X"):
-      * PROHIBIT UNNECESSARY TAB LISTING:
-        - If WhatsApp Web or the target chat is already the active tab, DO NOT call 'list_browser_tabs'.
+      * STRICT PROHIBITION ON TAB LISTING:
+        - NEVER call 'list_browser_tabs'! The active browser tab is already provided in your turn context. Calling 'list_browser_tabs' causes severe multi-second delays and frozen turn cycles.
+        - Immediately inspect the form with 'get_active_tab_form' or click the contact in turn 1.
       * CHAT SELECTION (IF NEEDED):
         - If the target chat is not open:
           a) Check 'get_active_tab_form' buttons/actions for 'Chat: <Name>' and click its refId, OR call 'click_element({ text: "<Name>" })' or 'click_element({ selector: "span[title*=\'<Name>\' i]" })'.
@@ -880,26 +882,39 @@ ${this.settings.systemInstruction || ''}`.trim();
     }
     if (!this.agent) throw new Error('Agent failed to initialize');
 
+    // Query active browser tab to inject current live tab context directly into prompt
+    let turnInput = input;
+    try {
+      const activeTab = await getActiveTab(1200);
+      if (activeTab && activeTab.url && !isExtensionPage(activeTab)) {
+        const cleanTitle = (activeTab.title || 'Web page').trim().slice(0, 70);
+        turnInput = `${input}\n\n[Current Active Browser Tab: "${cleanTitle}" - ${activeTab.url}]`;
+      }
+    } catch {}
+
     try {
       this.listeners.onStatusChange?.(true);
 
       const currentMsgs = this.agent.state.messages;
       const lastMsg = currentMsgs[currentMsgs.length - 1];
+      const lastContent =
+        typeof lastMsg?.content === 'string'
+          ? lastMsg.content.trim()
+          : Array.isArray(lastMsg?.content) && (lastMsg.content[0] as any)?.text?.trim();
+
       const isAlreadyLastUserMsg =
         lastMsg &&
         lastMsg.role === 'user' &&
-        (typeof lastMsg.content === 'string'
-          ? lastMsg.content.trim() === input.trim()
-          : Array.isArray(lastMsg.content) && (lastMsg.content[0] as any)?.text?.trim() === input.trim());
+        (lastContent === input.trim() || (turnInput && lastContent === turnInput.trim()));
 
       if (isAlreadyLastUserMsg) {
         try {
           await this.agent.continue();
         } catch {
-          await this.agent.prompt(input);
+          await this.agent.prompt(turnInput);
         }
       } else {
-        await this.agent.prompt(input);
+        await this.agent.prompt(turnInput);
       }
     } catch (err: any) {
       console.error('[FormAgentHarness] prompt execution error:', err);
