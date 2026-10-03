@@ -1235,23 +1235,252 @@ export async function clickActiveTabElement(options: {
   return { success: false, message: 'Could not click element on active tab' };
 }
 
+// In-page fallback script for directly scrolling containers without relying on message ports
+function inPageScrollPage(
+  direction: 'up' | 'down' | 'top' | 'bottom' | 'element',
+  selector?: string
+): { success: boolean; message: string } {
+  const isVisible = (el: HTMLElement | null): boolean => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 5 && rect.height > 5;
+  };
+
+  if (direction === 'element' && selector) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return { success: true, message: `Scrolled to element "${selector}"` };
+    }
+  }
+
+  let container: HTMLElement | Window = window;
+
+  // 1. Explicit selector if provided
+  if (selector) {
+    try {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el) {
+        const style = window.getComputedStyle(el);
+        if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 10) {
+          container = el;
+        } else {
+          const scrollableChild = Array.from(el.querySelectorAll<HTMLElement>('*')).find((c) => {
+            const s = window.getComputedStyle(c);
+            return (s.overflowY === 'auto' || s.overflowY === 'scroll') && c.scrollHeight > c.clientHeight + 10;
+          });
+          if (scrollableChild) container = scrollableChild;
+        }
+      }
+    } catch {}
+  }
+
+  // 2. WhatsApp Web active conversation messages panel (#main)
+  if (container === window) {
+    const mainPane = document.querySelector<HTMLElement>('#main');
+    if (mainPane && isVisible(mainPane)) {
+      const whatsappSelectors = [
+        '#main div[data-testid="conversation-panel-messages"]',
+        '#main div[role="application"]',
+        '#main .copyable-area > div[tabindex="0"]',
+        '#main .copyable-area > div:nth-child(2)',
+        '#main .copyable-area > div',
+        '#main div[tabindex="0"]',
+        '#main div[tabindex="-1"]',
+      ];
+      for (const sel of whatsappSelectors) {
+        const el = document.querySelector<HTMLElement>(sel);
+        if (el && el.scrollHeight > el.clientHeight + 20) {
+          container = el;
+          break;
+        }
+      }
+      if (container === window) {
+        const mainChildren = Array.from(mainPane.querySelectorAll<HTMLElement>('*'));
+        for (const child of mainChildren) {
+          if (child.scrollHeight > child.clientHeight + 30) {
+            const style = window.getComputedStyle(child);
+            if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+              container = child;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 3. WhatsApp Web contact list (#pane-side)
+  if (container === window) {
+    const paneSide = document.querySelector<HTMLElement>('#pane-side, div[data-testid="chat-list"]');
+    if (paneSide && isVisible(paneSide) && paneSide.scrollHeight > paneSide.clientHeight + 20) {
+      container = paneSide;
+    }
+  }
+
+  // 4. Common web app chat and feed containers (Slack, Discord, Telegram, YouTube comments, modal dialogs)
+  if (container === window) {
+    const commonAppSelectors = [
+      'div[role="dialog"] [class*="scroll" i]',
+      'div[role="dialog"]',
+      '[data-qa="slack_kit_scrollbar"]',
+      '[data-qa="message_pane"]',
+      '[class*="messagesWrapper"]',
+      '[class*="chatContent"]',
+      '.messages-container',
+      '#comments #contents',
+      'ytd-item-section-renderer #contents',
+      '[role="feed"]',
+      '[role="log"]',
+    ];
+    for (const sel of commonAppSelectors) {
+      try {
+        const el = document.querySelector<HTMLElement>(sel);
+        if (el && isVisible(el) && el.scrollHeight > el.clientHeight + 20) {
+          container = el;
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  // 5. Check if main document is scrollable
+  if (container === window) {
+    const docScrollable =
+      document.documentElement.scrollHeight > window.innerHeight + 50 ||
+      document.body.scrollHeight > window.innerHeight + 50;
+
+    if (!docScrollable) {
+      let largest: HTMLElement | null = null;
+      let maxArea = 0;
+      const candidates = Array.from(document.querySelectorAll<HTMLElement>('div, section, main, article'));
+      for (const el of candidates) {
+        if (el.scrollHeight > el.clientHeight + 40 && el.clientHeight > 150 && el.clientWidth > 150 && isVisible(el)) {
+          const style = window.getComputedStyle(el);
+          if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+            const area = el.clientHeight * el.clientWidth;
+            if (area > maxArea) {
+              maxArea = area;
+              largest = el;
+            }
+          }
+        }
+      }
+      if (largest) container = largest;
+    }
+  }
+
+  if (container === window) {
+    const amount = Math.round(window.innerHeight * 0.75);
+    if (direction === 'top') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (direction === 'bottom') {
+      window.scrollTo({ top: document.documentElement.scrollHeight || document.body.scrollHeight, behavior: 'smooth' });
+    } else if (direction === 'down') {
+      window.scrollBy({ top: amount, behavior: 'smooth' });
+    } else if (direction === 'up') {
+      window.scrollBy({ top: -amount, behavior: 'smooth' });
+    }
+    return { success: true, message: `Scrolled window ${direction} (${amount}px)` };
+  }
+
+  const el = container as HTMLElement;
+  const amount = Math.max(350, Math.round(el.clientHeight * 0.75));
+  const beforeTop = el.scrollTop;
+  const delta = direction === 'up' || direction === 'top' ? -amount : amount;
+
+  if (direction === 'top') {
+    el.scrollTop = 0;
+    try { el.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
+  } else if (direction === 'bottom') {
+    el.scrollTop = el.scrollHeight;
+    try { el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); } catch {}
+  } else if (direction === 'down') {
+    const prev = el.scrollTop;
+    try { el.scrollBy({ top: amount, behavior: 'smooth' }); } catch {}
+    if (el.scrollTop === prev) {
+      el.scrollTop += amount;
+    }
+  } else if (direction === 'up') {
+    const prev = el.scrollTop;
+    try { el.scrollBy({ top: -amount, behavior: 'smooth' }); } catch {}
+    if (el.scrollTop === prev) {
+      el.scrollTop = Math.max(0, el.scrollTop - amount);
+    }
+  }
+
+  el.dispatchEvent(new Event('scroll', { bubbles: true, cancelable: false }));
+
+  try {
+    const rect = el.getBoundingClientRect();
+    const wheelEvent = new WheelEvent('wheel', {
+      deltaY: delta,
+      deltaMode: 0,
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: Math.round(rect.left + Math.min(rect.width / 2, 200)),
+      clientY: Math.round(rect.top + Math.min(rect.height / 2, 200)),
+    });
+    el.dispatchEvent(wheelEvent);
+  } catch {}
+
+  try {
+    const key = direction === 'top' ? 'Home' : direction === 'bottom' ? 'End' : direction === 'up' ? 'PageUp' : 'PageDown';
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { key, code: key, bubbles: true, cancelable: true }));
+  } catch {}
+
+  const containerLabel = el.id ? `#${el.id}` : (el.getAttribute('data-testid') || el.tagName.toLowerCase());
+  return {
+    success: true,
+    message: `Scrolled <${containerLabel}> ${direction} (scrollTop: ${Math.round(beforeTop)} -> ${Math.round(el.scrollTop)}, max: ${el.scrollHeight})`,
+  };
+}
+
 // Scroll page
 export async function scrollActiveTab(
   direction: 'up' | 'down' | 'top' | 'bottom' | 'element',
   selector?: string
-): Promise<{ success: boolean }> {
+): Promise<{ success: boolean; message?: string }> {
   const activeTab = await getActiveTab();
   if (!activeTab || !activeTab.id) {
-    return { success: true };
+    return { success: true, message: `[Dev Mock] Scrolled ${direction}` };
   }
 
-  const response = await sendMessageToTab(activeTab.id, {
-    action: 'SCROLL_PAGE',
-    direction,
-    selector,
-  }, 1500).catch(() => ({ success: false }));
+  // 1. Try sendMessageToTab
+  try {
+    const response = await sendMessageToTab(activeTab.id, {
+      action: 'SCROLL_PAGE',
+      direction,
+      selector,
+    }, 1500);
+    if (response && response.success) {
+      return response as { success: boolean; message?: string };
+    }
+  } catch {
+    // Fall back to direct executeScript
+  }
 
-  return response || { success: false };
+  // 2. Direct executeScript fallback (never fails, works on WhatsApp Web, Slack, etc.)
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: inPageScrollPage,
+        args: [direction, selector],
+      });
+      if (results && results[0] && results[0].result) {
+        return results[0].result as { success: boolean; message?: string };
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  return { success: false, message: 'Could not scroll active tab' };
 }
 
 // Get Page Text — wrapped in a hard timeout and direct scripting fallback to prevent hanging

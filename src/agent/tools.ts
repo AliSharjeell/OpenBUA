@@ -176,14 +176,15 @@ const ScrollPageSchema = Type.Object({
 export const scrollPageTool: AgentTool<typeof ScrollPageSchema> = {
   name: 'scroll_page',
   label: 'Scroll Webpage',
-  description: 'Scrolls the active webpage down, up, or to a specific element to reveal more fields or lazy-loaded elements.',
+  description: 'Scrolls the active webpage or chat message container down, up, top, bottom, or to a specific element to reveal older messages, more fields, or lazy-loaded elements.',
   parameters: ScrollPageSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
-      await scrollActiveTab(params.direction as any, params.selector);
+      const res = await scrollActiveTab(params.direction as any, params.selector);
+      const text = res.message || `Scrolled page ${params.direction}`;
       return {
-        content: [{ type: 'text', text: `Scrolled page ${params.direction}` }],
-        details: { scrolled: true, direction: params.direction },
+        content: [{ type: 'text', text }],
+        details: { scrolled: res.success, direction: params.direction, message: res.message },
       };
     } catch (err: any) {
       return {

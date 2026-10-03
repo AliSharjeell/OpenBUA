@@ -1135,26 +1135,221 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   return { success: true, message: `Clicked element successfully (${primaryTarget.tagName.toLowerCase()}: "${label}")` };
 }
 
-function scrollPage(direction: 'up' | 'down' | 'top' | 'bottom' | 'element', selector?: string): { success: boolean } {
-  if (direction === 'element' && selector) {
-    const el = document.querySelector(selector);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return { success: true };
+function resolveScrollableContainer(selector?: string): HTMLElement | Window {
+  // 1. Explicit selector if provided
+  if (selector) {
+    try {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el) {
+        const style = window.getComputedStyle(el);
+        if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 10) {
+          return el;
+        }
+        const scrollableChild = Array.from(el.querySelectorAll<HTMLElement>('*')).find((c) => {
+          const s = window.getComputedStyle(c);
+          return (s.overflowY === 'auto' || s.overflowY === 'scroll') && c.scrollHeight > c.clientHeight + 10;
+        });
+        if (scrollableChild) return scrollableChild;
+
+        let p = el.parentElement;
+        while (p && p !== document.body) {
+          const s = window.getComputedStyle(p);
+          if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && p.scrollHeight > p.clientHeight + 10) {
+            return p;
+          }
+          p = p.parentElement;
+        }
+        return el;
+      }
+    } catch {}
+  }
+
+  // 2. WhatsApp Web active conversation messages panel (#main)
+  const mainPane = document.querySelector<HTMLElement>('#main');
+  if (mainPane && isElementVisible(mainPane)) {
+    const whatsappSelectors = [
+      '#main div[data-testid="conversation-panel-messages"]',
+      '#main div[role="application"]',
+      '#main .copyable-area > div[tabindex="0"]',
+      '#main .copyable-area > div:nth-child(2)',
+      '#main .copyable-area > div',
+      '#main div[tabindex="0"]',
+      '#main div[tabindex="-1"]',
+    ];
+    for (const sel of whatsappSelectors) {
+      const el = document.querySelector<HTMLElement>(sel);
+      if (el && el.scrollHeight > el.clientHeight + 20) {
+        return el;
+      }
+    }
+    const mainChildren = Array.from(mainPane.querySelectorAll<HTMLElement>('*'));
+    for (const child of mainChildren) {
+      if (child.scrollHeight > child.clientHeight + 30) {
+        const style = window.getComputedStyle(child);
+        if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+          return child;
+        }
+      }
     }
   }
 
-  if (direction === 'top') {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  } else if (direction === 'bottom') {
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-  } else if (direction === 'down') {
-    window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
-  } else if (direction === 'up') {
-    window.scrollBy({ top: -window.innerHeight * 0.75, behavior: 'smooth' });
+  // 3. Focused element's scrollable container
+  const activeEl = document.activeElement as HTMLElement | null;
+  if (activeEl && activeEl !== document.body && activeEl !== document.documentElement) {
+    let p: HTMLElement | null = activeEl;
+    while (p && p !== document.body && p !== document.documentElement) {
+      const s = window.getComputedStyle(p);
+      if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && p.scrollHeight > p.clientHeight + 20) {
+        return p;
+      }
+      p = p.parentElement;
+    }
   }
 
-  return { success: true };
+  // 4. WhatsApp Web contact list (#pane-side)
+  const paneSide = document.querySelector<HTMLElement>('#pane-side, div[data-testid="chat-list"]');
+  if (paneSide && isElementVisible(paneSide) && paneSide.scrollHeight > paneSide.clientHeight + 20) {
+    return paneSide;
+  }
+
+  // 5. Common web app chat and feed containers (Slack, Discord, Telegram, YouTube comments, modal dialogs)
+  const commonAppSelectors = [
+    'div[role="dialog"] [class*="scroll" i]',
+    'div[role="dialog"]',
+    '[data-qa="slack_kit_scrollbar"]',
+    '[data-qa="message_pane"]',
+    '[class*="messagesWrapper"]',
+    '[class*="chatContent"]',
+    '.messages-container',
+    '#comments #contents',
+    'ytd-item-section-renderer #contents',
+    '[role="feed"]',
+    '[role="log"]',
+  ];
+  for (const sel of commonAppSelectors) {
+    try {
+      const el = document.querySelector<HTMLElement>(sel);
+      if (el && isElementVisible(el) && el.scrollHeight > el.clientHeight + 20) {
+        return el;
+      }
+    } catch {}
+  }
+
+  // 6. Check if main document is scrollable (standard articles, blogs, search results)
+  const docScrollable =
+    document.documentElement.scrollHeight > window.innerHeight + 50 ||
+    document.body.scrollHeight > window.innerHeight + 50;
+
+  if (docScrollable) {
+    return window;
+  }
+
+  // 7. Fallback: find the largest scrollable element on screen
+  let largest: HTMLElement | null = null;
+  let maxArea = 0;
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>('div, section, main, article'));
+  for (const el of candidates) {
+    if (el.scrollHeight > el.clientHeight + 40 && el.clientHeight > 150 && el.clientWidth > 150 && isElementVisible(el)) {
+      const style = window.getComputedStyle(el);
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        const area = el.clientHeight * el.clientWidth;
+        if (area > maxArea) {
+          maxArea = area;
+          largest = el;
+        }
+      }
+    }
+  }
+
+  if (largest) return largest;
+
+  return window;
+}
+
+function scrollPage(
+  direction: 'up' | 'down' | 'top' | 'bottom' | 'element',
+  selector?: string
+): { success: boolean; message: string } {
+  if (direction === 'element' && selector) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      flashHighlight(el);
+      return { success: true, message: `Scrolled to element "${selector}"` };
+    }
+  }
+
+  const container = resolveScrollableContainer(selector);
+
+  if (container === window) {
+    const amount = Math.round(window.innerHeight * 0.75);
+    if (direction === 'top') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (direction === 'bottom') {
+      window.scrollTo({ top: document.documentElement.scrollHeight || document.body.scrollHeight, behavior: 'smooth' });
+    } else if (direction === 'down') {
+      window.scrollBy({ top: amount, behavior: 'smooth' });
+    } else if (direction === 'up') {
+      window.scrollBy({ top: -amount, behavior: 'smooth' });
+    }
+    return { success: true, message: `Scrolled window ${direction} (${amount}px)` };
+  }
+
+  const el = container as HTMLElement;
+  const amount = Math.max(350, Math.round(el.clientHeight * 0.75));
+  const beforeTop = el.scrollTop;
+  const delta = direction === 'up' || direction === 'top' ? -amount : amount;
+
+  if (direction === 'top') {
+    el.scrollTop = 0;
+    try { el.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
+  } else if (direction === 'bottom') {
+    el.scrollTop = el.scrollHeight;
+    try { el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); } catch {}
+  } else if (direction === 'down') {
+    const prev = el.scrollTop;
+    try { el.scrollBy({ top: amount, behavior: 'smooth' }); } catch {}
+    if (el.scrollTop === prev) {
+      el.scrollTop += amount;
+    }
+  } else if (direction === 'up') {
+    const prev = el.scrollTop;
+    try { el.scrollBy({ top: -amount, behavior: 'smooth' }); } catch {}
+    if (el.scrollTop === prev) {
+      el.scrollTop = Math.max(0, el.scrollTop - amount);
+    }
+  }
+
+  // Crucial for WhatsApp Web and virtualized lists: dispatch scroll, wheel, and key events
+  el.dispatchEvent(new Event('scroll', { bubbles: true, cancelable: false }));
+
+  try {
+    const rect = el.getBoundingClientRect();
+    const wheelEvent = new WheelEvent('wheel', {
+      deltaY: delta,
+      deltaMode: 0,
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: Math.round(rect.left + Math.min(rect.width / 2, 200)),
+      clientY: Math.round(rect.top + Math.min(rect.height / 2, 200)),
+    });
+    el.dispatchEvent(wheelEvent);
+  } catch {}
+
+  try {
+    const key = direction === 'top' ? 'Home' : direction === 'bottom' ? 'End' : direction === 'up' ? 'PageUp' : 'PageDown';
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { key, code: key, bubbles: true, cancelable: true }));
+  } catch {}
+
+  flashHighlight(el);
+
+  const containerLabel = el.id ? `#${el.id}` : (el.getAttribute('data-testid') || el.tagName.toLowerCase());
+  return {
+    success: true,
+    message: `Scrolled <${containerLabel}> ${direction} (scrollTop: ${Math.round(beforeTop)} -> ${Math.round(el.scrollTop)}, max: ${el.scrollHeight})`,
+  };
 }
 
 export interface CaptchaDetectionResult {
@@ -1412,9 +1607,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           }
         });
 
+        // 2b. Extract active chat conversation messages (WhatsApp Web, Slack, Telegram, Discord)
+        let chatExcerpt = '';
+        const chatNodes = Array.from(document.querySelectorAll<HTMLElement>(
+          '#main .copyable-text[data-pre-plain-text], #main .message-in, #main .message-out, [role="log"] [role="row"], [data-qa="message_content"]'
+        ));
+        if (chatNodes.length > 0) {
+          const lines: string[] = [];
+          chatNodes.forEach((node) => {
+            const pre = node.getAttribute('data-pre-plain-text') || '';
+            const txt = (node.innerText || node.textContent || '').trim();
+            if (txt) {
+              lines.push(pre ? `${pre}${txt}` : txt);
+            }
+          });
+          if (lines.length > 0) {
+            chatExcerpt = lines.slice(-60).join('\n');
+          }
+        }
+
         // 3. Clean excerpt of page content (up to 10,000 characters for rich model context)
         let mainText = '';
-        const mainEl = document.querySelector('main, article, #content, [role="main"]') || document.body;
+        const mainEl = document.querySelector('main, #main, article, #content, [role="main"]') || document.body;
         if (mainEl) {
           mainText = (mainEl as HTMLElement).innerText || '';
         } else if (document.body) {
@@ -1423,6 +1637,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         mainText = mainText.replace(/\n\s*\n\s*\n/g, '\n\n').slice(0, 10000);
 
         let formatted = `Title: ${document.title}\nURL: ${window.location.href}\n\n`;
+        if (chatExcerpt) {
+          formatted += `### Active Chat Conversation Messages:\n${chatExcerpt}\n\n`;
+        }
         if (modalExcerpt) {
           formatted += `### Active Dialog / Compose Window Content:\n${modalExcerpt}\n\n`;
         }

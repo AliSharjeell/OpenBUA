@@ -594,6 +594,11 @@ ${(this.settings.autoConfirmSubmit ?? true)
         - Once 'Enter' is pressed or the Send button is clicked, THE MESSAGE IS SENT!
         - DO NOT call 'get_active_tab_form' or 'capture_tab_screenshot' to "verify" or "inspect" whether the message was sent.
         - Report completion immediately to the user!
+      * CHAT READING & SCROLLING (WhatsApp Web, Telegram, Slack, Web Chat):
+        - When the user asks to read, check, summarize, or inspect chat messages (or scroll up/down to see conversation history):
+          a) Use 'get_page_content' to read the active conversation messages. OpenBUA extracts the message text along with authors and timestamps directly from the active chat.
+          b) Use 'scroll_page({ direction: "up" })' to scroll up and load earlier messages, or 'scroll_page({ direction: "down" })' to return to recent messages. OpenBUA automatically targets and scrolls the active chat messages container and dispatches the native scroll events.
+          c) After scrolling, call 'get_page_content' to read the updated transcript.
       * TURN BUDGET: Message sending MUST complete in 1 to 2 turns maximum (under 15 seconds).
 
 ${docsSummary}
