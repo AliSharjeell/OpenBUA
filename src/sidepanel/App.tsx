@@ -33,7 +33,7 @@ import {
   isGenericSessionTitle,
   generateSessionTitle,
 } from '../services/storage';
-import { readFileContent } from '../services/pdf-parser';
+import { readFileContent, processUploadedFile } from '../services/pdf-parser';
 import { FormAgentHarness } from '../agent/form-agent';
 import { ChatView, formatEntireChatAsText } from '../components/ChatView';
 import { MemoryView } from '../components/MemoryView';
@@ -705,21 +705,25 @@ export function App() {
   };
 
   const handleChatDocumentUpload = async (file: File): Promise<UserDocument> => {
-    const parsed = await readFileContent(file);
+    const parsed = await processUploadedFile(file);
     const tabKey = currentTabKeyRef.current;
-    const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
     const newDoc: UserDocument = {
       id: `mem-${Date.now()}`,
-      title: cleanTitle,
+      title: parsed.title,
       type: parsed.type,
       content: parsed.content,
       summary: `${file.name} uploaded from chat`,
       createdAt: Date.now(),
-      sizeBytes: file.size,
-      tags: ['chat-upload'],
+      sizeBytes: parsed.sizeBytes,
+      tags: parsed.tags,
       isActiveForContext: true,
       isGlobal: false,
       tabUrlPattern: tabKey,
+      fileName: parsed.fileName,
+      mimeType: parsed.mimeType,
+      dataUrl: parsed.dataUrl,
+      ocrStatus: parsed.ocrStatus,
+      fileCategory: parsed.fileCategory,
     };
     await saveTabMemory(tabKey, newDoc);
     setTabMemories((prev) => [newDoc, ...prev]);

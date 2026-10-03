@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { UserDocument } from '../types';
 import {
   saveGlobalMemory,
@@ -8,6 +8,11 @@ import {
   deleteTabMemory,
   toggleTabMemoryActive,
 } from '../services/storage';
+import {
+  processUploadedFile,
+  extractTextForDocument,
+  formatFileSize,
+} from '../services/pdf-parser';
 import { Button } from './ui/button';
 import { Input, Textarea } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -16,6 +21,12 @@ import {
   Plus,
   Trash2,
   Check,
+  Upload,
+  Download,
+  Sparkles,
+  Loader2,
+  File,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 interface MemoryViewProps {
@@ -40,11 +51,132 @@ export function MemoryView({
   const [selectedDoc, setSelectedDoc] = useState<UserDocument | null>(null);
   const [isEditing, setIsEditing] = useState(false);
 
+  // File Upload and OCR states
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadingName, setUploadingName] = useState('');
+  const [ocrLoadingId, setOcrLoadingId] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
   // New Memory Form
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
 
   const activeMemories = memoryScope === 'global' ? globalMemories : tabMemories;
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    for (let i = 0; i < files.length; i++) {
+      await handleProcessFile(files[i]);
+    }
+  };
+
+  const handleProcessFile = async (file: File) => {
+    setIsUploading(true);
+    setUploadingName(file.name);
+    try {
+      const parsed = await processUploadedFile(file, { runOcr: true });
+      const newDoc: UserDocument = {
+        id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title: parsed.title,
+        type: parsed.type,
+        content: parsed.content,
+        summary: `${parsed.fileName} (${formatFileSize(parsed.sizeBytes)})`,
+        createdAt: Date.now(),
+        sizeBytes: parsed.sizeBytes,
+        tags: parsed.tags,
+        isActiveForContext: true,
+        isGlobal: memoryScope === 'global',
+        tabUrlPattern: memoryScope === 'tab' ? currentTabKey : undefined,
+        fileName: parsed.fileName,
+        mimeType: parsed.mimeType,
+        dataUrl: parsed.dataUrl,
+        ocrStatus: parsed.ocrStatus,
+        fileCategory: parsed.fileCategory,
+      };
+
+      if (memoryScope === 'global') {
+        await saveGlobalMemory(newDoc);
+        onGlobalMemoriesChange([newDoc, ...globalMemories]);
+      } else {
+        await saveTabMemory(currentTabKey, newDoc);
+        onTabMemoriesChange([newDoc, ...tabMemories]);
+      }
+    } catch (err: any) {
+      console.error('[AutoForm AI] File upload failed:', err);
+      alert(`Failed to process file: ${err?.message || err}`);
+    } finally {
+      setIsUploading(false);
+      setUploadingName('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        await handleProcessFile(files[i]);
+      }
+    }
+  };
+
+  const handleDownloadFile = (doc: UserDocument, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!doc.dataUrl) return;
+    const link = document.createElement('a');
+    link.href = doc.dataUrl;
+    link.download = doc.fileName || `${doc.title}.${doc.type === 'pdf' ? 'pdf' : 'txt'}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleRunOcr = async (doc: UserDocument, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!doc.dataUrl) return;
+    setOcrLoadingId(doc.id);
+    try {
+      const extracted = await extractTextForDocument(doc);
+      const updatedDoc: UserDocument = {
+        ...doc,
+        content: extracted,
+        ocrStatus: 'done',
+      };
+      if (memoryScope === 'global') {
+        await saveGlobalMemory(updatedDoc);
+        onGlobalMemoriesChange(globalMemories.map((m) => (m.id === doc.id ? updatedDoc : m)));
+      } else {
+        await saveTabMemory(currentTabKey, updatedDoc);
+        onTabMemoriesChange(tabMemories.map((m) => (m.id === doc.id ? updatedDoc : m)));
+      }
+      if (selectedDoc?.id === doc.id) {
+        setSelectedDoc(updatedDoc);
+        setContent(extracted);
+      }
+    } catch (err: any) {
+      console.error('[AutoForm AI] OCR Extraction failed:', err);
+      alert(`OCR text extraction failed: ${err?.message || err}`);
+    } finally {
+      setOcrLoadingId(null);
+    }
+  };
 
   const handleSaveMemory = async () => {
     if (!title.trim() || !content.trim()) return;
@@ -54,13 +186,18 @@ export function MemoryView({
       title: title.trim(),
       type: selectedDoc?.type || 'markdown',
       content: content.trim(),
-      summary: `${title.trim()} (${content.trim().slice(0, 80)}...)`,
+      summary: selectedDoc?.summary || `${title.trim()} (${content.trim().slice(0, 80)}...)`,
       createdAt: selectedDoc?.createdAt || Date.now(),
-      sizeBytes: new Blob([content]).size,
+      sizeBytes: selectedDoc?.sizeBytes || new Blob([content]).size,
       tags: selectedDoc?.tags || ['custom'],
       isActiveForContext: selectedDoc ? selectedDoc.isActiveForContext : true,
       isGlobal: memoryScope === 'global',
       tabUrlPattern: memoryScope === 'tab' ? currentTabKey : undefined,
+      fileName: selectedDoc?.fileName,
+      mimeType: selectedDoc?.mimeType,
+      dataUrl: selectedDoc?.dataUrl,
+      ocrStatus: selectedDoc?.ocrStatus,
+      fileCategory: selectedDoc?.fileCategory,
     };
 
     if (memoryScope === 'global') {
@@ -122,30 +259,67 @@ export function MemoryView({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 pt-16 pb-6 space-y-4 text-xs select-text bg-zinc-950">
+    <div
+      className={`flex-1 overflow-y-auto px-4 pt-16 pb-6 space-y-4 text-xs select-text bg-zinc-950 transition-colors ${
+        isDragging ? 'ring-2 ring-blue-500/50 bg-blue-950/10' : ''
+      }`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Hidden File Input for uploading resumes, images, PDFs, docs */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.md,.markdown,.json,.txt,.doc,.docx"
+        className="hidden"
+        onChange={handleFileUpload}
+      />
+
       {/* Header and Scope Selector */}
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-zinc-100 text-sm tracking-tight">Memory</h2>
 
-          <Button
-            size="sm"
-            className="h-7 px-3 text-[11px] gap-1.5 rounded-full bg-[#007AFF] text-white hover:bg-[#0071EB] font-medium shadow-xs transition-colors cursor-pointer"
-            onClick={() => {
-              if (isAddingNew && !isEditing) {
-                resetForm();
-              } else {
-                resetForm();
-                setIsAddingNew(true);
-              }
-            }}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add
-          </Button>
+          <div className="flex items-center gap-1.5">
+            {/* Upload Raw File Button */}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isUploading}
+              className="h-7 px-2.5 text-[11px] gap-1.5 rounded-full border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 hover:text-white font-medium shadow-xs transition-colors cursor-pointer"
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload resume.pdf, image, or document"
+            >
+              {isUploading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+              ) : (
+                <Upload className="w-3.5 h-3.5 text-zinc-400" />
+              )}
+              {isUploading ? 'Uploading...' : 'Upload File'}
+            </Button>
+
+            {/* Add Custom Note Button */}
+            <Button
+              size="sm"
+              className="h-7 px-3 text-[11px] gap-1.5 rounded-full bg-[#007AFF] text-white hover:bg-[#0071EB] font-medium shadow-xs transition-colors cursor-pointer"
+              onClick={() => {
+                if (isAddingNew && !isEditing) {
+                  resetForm();
+                } else {
+                  resetForm();
+                  setIsAddingNew(true);
+                }
+              }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </Button>
+          </div>
         </div>
 
-        {/* Sub-Tabs: Global Memory vs Current Tab Memory (Styled like BYOK provider selector) */}
+        {/* Sub-Tabs: Global Memory vs Current Tab Memory */}
         <div className="flex rounded-full bg-zinc-900 p-0.5 border border-zinc-800">
           <button
             type="button"
@@ -184,21 +358,106 @@ export function MemoryView({
         )}
       </div>
 
+      {/* Uploading Banner State */}
+      {isUploading && (
+        <div className="p-3 rounded-2xl bg-blue-950/40 border border-blue-800/60 flex items-center gap-2.5 text-blue-200">
+          <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium truncate">Processing {uploadingName}...</p>
+            <p className="text-[10px] text-blue-300/80">Saving raw file and extracting OCR/VLM text</p>
+          </div>
+        </div>
+      )}
+
+      {/* Drag & Drop Visual Indicator */}
+      {isDragging && (
+        <div className="p-6 rounded-3xl border-2 border-dashed border-blue-500/80 bg-blue-950/20 text-center text-blue-300">
+          <Upload className="w-6 h-6 mx-auto mb-1 text-blue-400 animate-bounce" />
+          <p className="text-xs font-semibold">Drop resume, PDF, or image files here</p>
+          <p className="text-[10px] text-blue-400/80 mt-0.5">Files will be saved as raw attachments with OCR text</p>
+        </div>
+      )}
+
       {/* Add / Edit Memory Form Panel */}
       {isAddingNew && (
         <Card className="border-zinc-800 bg-zinc-900/90 rounded-3xl shadow-md">
           <CardHeader className="p-3 pb-2 border-b border-zinc-800">
-            <CardTitle className="text-xs font-semibold text-zinc-100">
-              {isEditing
-                ? `Edit ${memoryScope === 'global' ? 'Global' : 'Tab'} Memory`
-                : `New ${memoryScope === 'global' ? 'Global' : 'Tab'} Memory`}
+            <CardTitle className="text-xs font-semibold text-zinc-100 flex items-center justify-between">
+              <span>
+                {isEditing
+                  ? `Edit ${memoryScope === 'global' ? 'Global' : 'Tab'} Memory`
+                  : `New ${memoryScope === 'global' ? 'Global' : 'Tab'} Memory`}
+              </span>
+              {selectedDoc?.fileName && (
+                <span className="text-[10px] font-mono text-blue-400 bg-blue-950/60 px-2 py-0.5 rounded-full border border-blue-800/50">
+                  {selectedDoc.fileName}
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="p-3 space-y-2.5">
+            {/* Raw file details if present */}
+            {selectedDoc?.dataUrl && (
+              <div className="p-2.5 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {selectedDoc.type === 'image' && selectedDoc.dataUrl ? (
+                    <img
+                      src={selectedDoc.dataUrl}
+                      alt={selectedDoc.fileName || 'file'}
+                      className="w-8 h-8 rounded-lg object-cover border border-zinc-800 shrink-0"
+                    />
+                  ) : (
+                    <File className="w-5 h-5 text-blue-400 shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-medium text-zinc-200 truncate">
+                      {selectedDoc.fileName || selectedDoc.title}
+                    </p>
+                    <p className="text-[10px] text-zinc-400">
+                      {formatFileSize(selectedDoc.sizeBytes)} • {selectedDoc.mimeType || selectedDoc.type}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* OCR trigger button */}
+                  {(selectedDoc.type === 'image' || selectedDoc.type === 'pdf') && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-[10px] gap-1 rounded-full text-blue-400 hover:text-blue-300 hover:bg-blue-950/40"
+                      disabled={ocrLoadingId === selectedDoc.id}
+                      onClick={(e) => handleRunOcr(selectedDoc, e)}
+                      title="Re-run VLM OCR text extraction"
+                    >
+                      {ocrLoadingId === selectedDoc.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-3 h-3" />
+                      )}
+                      OCR
+                    </Button>
+                  )}
+
+                  {/* Download button */}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[10px] gap-1 rounded-full text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
+                    onClick={(e) => handleDownloadFile(selectedDoc, e)}
+                    title="Download original raw file"
+                  >
+                    <Download className="w-3 h-3" />
+                    Download
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="text-[10px] font-medium text-zinc-400 block mb-1">Title</label>
               <Input
-                placeholder="e.g. Personal Profile, Job History, Address"
+                placeholder="e.g. Resume, Personal Profile, Address"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className="h-8 rounded-xl bg-zinc-950/80 border-zinc-800 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600"
@@ -206,10 +465,19 @@ export function MemoryView({
             </div>
 
             <div>
-              <label className="text-[10px] font-medium text-zinc-400 block mb-1">Content</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] font-medium text-zinc-400 block">
+                  Extracted Content / Form Context
+                </label>
+                {selectedDoc?.dataUrl && (
+                  <span className="text-[10px] text-zinc-500">
+                    Used by AI agent to fill matching text fields
+                  </span>
+                )}
+              </div>
               <Textarea
                 rows={6}
-                placeholder="Paste personal details, bio, or form answers here..."
+                placeholder="Personal details, resume text, or form answers..."
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 className="font-sans text-[11px] leading-relaxed rounded-xl bg-zinc-950/80 border-zinc-800 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-600"
@@ -246,74 +514,173 @@ export function MemoryView({
             <p className="text-xs text-zinc-400 mb-1 font-medium">
               No {memoryScope === 'global' ? 'global' : 'tab'} memories yet
             </p>
-            <p className="text-[11px] text-zinc-500 max-w-[240px] mx-auto">
+            <p className="text-[11px] text-zinc-500 max-w-[240px] mx-auto mb-3">
               {memoryScope === 'global'
-                ? 'Add your About Me, profile, and resume data to use across all forms.'
-                : 'Add memories or notes specifically for this webpage.'}
+                ? 'Upload resume.pdf, images, or enter text to use across all forms.'
+                : 'Add memories or files specifically for this webpage.'}
             </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[11px] rounded-full border-zinc-800 bg-zinc-900 text-zinc-300 hover:text-white hover:bg-zinc-800 gap-1.5"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="w-3 h-3 text-zinc-400" />
+              Upload resume or file
+            </Button>
           </div>
         ) : (
-          activeMemories.map((doc) => (
-            <div
-              key={doc.id}
-              className={`p-3.5 rounded-3xl transition-all cursor-pointer ${
-                doc.isActiveForContext
-                  ? 'border border-zinc-800 bg-zinc-900/90 hover:border-zinc-700'
-                  : 'border border-transparent bg-zinc-900/50 hover:bg-zinc-900/80'
-              }`}
-              onClick={() => openEdit(doc)}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                  {/* Clean White Tick in place of the file icon */}
-                  <button
-                    type="button"
-                    title={doc.isActiveForContext ? 'Turn off memory' : 'Turn on memory'}
-                    className={`w-6 h-6 rounded-xl flex items-center justify-center shrink-0 mt-0.5 transition-all cursor-pointer ${
-                      doc.isActiveForContext
-                        ? 'bg-zinc-800 text-white'
-                        : 'bg-zinc-800/40 text-transparent hover:text-zinc-500'
-                    }`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleToggleTick(doc.id);
-                    }}
-                  >
-                    <Check
-                      className={`w-3.5 h-3.5 stroke-[2.5] ${
-                        doc.isActiveForContext ? 'text-white' : 'opacity-0'
-                      }`}
-                    />
-                  </button>
+          activeMemories.map((doc) => {
+            const isOcrLoading = ocrLoadingId === doc.id;
+            const hasRawFile = Boolean(doc.dataUrl);
+            const isResume = doc.fileCategory === 'resume' || doc.tags?.includes('resume');
 
-                  <div className="min-w-0 flex-1">
-                    <span className="font-semibold text-zinc-100 text-xs truncate block">
-                      {doc.title}
-                    </span>
-                    <p className="text-[11px] text-zinc-400 mt-1 line-clamp-2 leading-relaxed">
-                      {doc.content || doc.summary}
-                    </p>
+            return (
+              <div
+                key={doc.id}
+                className={`p-3.5 rounded-3xl transition-all cursor-pointer ${
+                  doc.isActiveForContext
+                    ? 'border border-zinc-800 bg-zinc-900/90 hover:border-zinc-700'
+                    : 'border border-transparent bg-zinc-900/50 hover:bg-zinc-900/80'
+                }`}
+                onClick={() => openEdit(doc)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                    {/* Active Toggle Checkmark */}
+                    <button
+                      type="button"
+                      title={doc.isActiveForContext ? 'Turn off memory' : 'Turn on memory'}
+                      className={`w-6 h-6 rounded-xl flex items-center justify-center shrink-0 mt-0.5 transition-all cursor-pointer ${
+                        doc.isActiveForContext
+                          ? 'bg-zinc-800 text-white'
+                          : 'bg-zinc-800/40 text-transparent hover:text-zinc-500'
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleTick(doc.id);
+                      }}
+                    >
+                      <Check
+                        className={`w-3.5 h-3.5 stroke-[2.5] ${
+                          doc.isActiveForContext ? 'text-white' : 'opacity-0'
+                        }`}
+                      />
+                    </button>
+
+                    <div className="min-w-0 flex-1">
+                      {/* Title & Badges */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-zinc-100 text-xs truncate">
+                          {doc.title}
+                        </span>
+
+                        {/* Resume Category Badge */}
+                        {isResume && (
+                          <span className="text-[9px] font-medium bg-blue-500/10 text-blue-400 px-1.5 py-0.2 rounded-full border border-blue-500/20">
+                            Resume
+                          </span>
+                        )}
+
+                        {/* File Format Badge */}
+                        {hasRawFile && (
+                          <span className="text-[9px] uppercase font-mono bg-zinc-800 text-zinc-400 px-1.5 py-0.2 rounded-full">
+                            {doc.type}
+                          </span>
+                        )}
+
+                        {/* File Size */}
+                        {doc.sizeBytes > 0 && (
+                          <span className="text-[9px] text-zinc-500">
+                            {formatFileSize(doc.sizeBytes)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Content snippet & thumbnail preview */}
+                      <div className="flex items-start gap-2 mt-1.5">
+                        {doc.type === 'image' && doc.dataUrl && (
+                          <img
+                            src={doc.dataUrl}
+                            alt={doc.fileName || 'thumbnail'}
+                            className="w-10 h-10 rounded-xl object-cover border border-zinc-800 shrink-0"
+                          />
+                        )}
+                        <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed flex-1">
+                          {doc.content || doc.summary}
+                        </p>
+                      </div>
+
+                      {/* Raw File Actions Bar (Download & OCR trigger) */}
+                      {hasRawFile && (
+                        <div
+                          className="flex items-center gap-2 mt-2 pt-2 border-t border-zinc-800/60"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {/* Raw file indicator */}
+                          <span className="text-[10px] text-zinc-500 flex items-center gap-1 font-mono truncate max-w-[130px]">
+                            {doc.type === 'image' ? (
+                              <ImageIcon className="w-3 h-3 text-zinc-400 shrink-0" />
+                            ) : (
+                              <File className="w-3 h-3 text-zinc-400 shrink-0" />
+                            )}
+                            {doc.fileName || 'raw file'}
+                          </span>
+
+                          <div className="flex items-center gap-1 ml-auto">
+                            {/* OCR Extraction Button */}
+                            {(doc.type === 'image' || doc.type === 'pdf') && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-1 text-[10px] font-medium text-blue-400 hover:text-blue-300 bg-blue-950/40 hover:bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-900/50 transition-colors cursor-pointer"
+                                disabled={isOcrLoading}
+                                onClick={(e) => handleRunOcr(doc, e)}
+                                title="Extract text using VLM OCR"
+                              >
+                                {isOcrLoading ? (
+                                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                ) : (
+                                  <Sparkles className="w-2.5 h-2.5" />
+                                )}
+                                {isOcrLoading ? 'Extracting...' : 'OCR Text'}
+                              </button>
+                            )}
+
+                            {/* Download Button */}
+                            <button
+                              type="button"
+                              className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 px-2 py-0.5 rounded-full border border-zinc-700/50 transition-colors cursor-pointer"
+                              onClick={(e) => handleDownloadFile(doc, e)}
+                              title="Download raw file"
+                            >
+                              <Download className="w-2.5 h-2.5" />
+                              Download
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Trash Button */}
+                  <div
+                    className="flex items-center shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 rounded-full text-zinc-500 hover:text-red-400 hover:bg-zinc-800 cursor-pointer"
+                      onClick={() => handleDelete(doc.id)}
+                      title="Delete memory"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
                   </div>
                 </div>
-
-                {/* Trash Button */}
-                <div
-                  className="flex items-center shrink-0"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 rounded-full text-zinc-500 hover:text-red-400 hover:bg-zinc-800 cursor-pointer"
-                    onClick={() => handleDelete(doc.id)}
-                    title="Delete memory"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
