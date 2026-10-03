@@ -73,6 +73,13 @@ export async function ensureContentScriptInjected(tabId: number, timeoutMs = 250
   return Promise.race([
     (async () => {
       try {
+        const check = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => Boolean((window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__),
+        });
+        if (check && check[0] && check[0].result) {
+          return true; // Already alive; avoid duplicate injection
+        }
         await chrome.scripting.executeScript({
           target: { tabId },
           files: ['content.js'],
@@ -433,39 +440,48 @@ function inPageFillForm(
       } else if (isContentEditable) {
         // Selection replacement and insertText for rich text editors
         target.focus();
-        let selectAllSuccess = false;
+
+        // 1. Clear any existing content cleanly
+        const sel = window.getSelection();
+        if (sel) {
+          const range = document.createRange();
+          range.selectNodeContents(target);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
         try {
-          selectAllSuccess = document.execCommand('selectAll', false, undefined);
-        } catch {
-          selectAllSuccess = false;
-        }
-        if (!selectAllSuccess) {
-          const sel = window.getSelection();
-          if (sel) {
-            const range = document.createRange();
-            range.selectNodeContents(target);
-            sel.removeAllRanges();
-            sel.addRange(range);
-          }
-        }
-        let execSuccess = false;
+          document.execCommand('selectAll', false, undefined);
+          document.execCommand('delete', false, undefined);
+        } catch {}
+
+        // 2. Insert text via browser's native text insertion command
         try {
-          execSuccess = document.execCommand('insertText', false, item.value);
-        } catch {
-          execSuccess = false;
-        }
-        if (!execSuccess) {
-          target.innerText = item.value;
+          document.execCommand('insertText', false, item.value);
+        } catch {}
+
+        // 3. Verify if value is now present; fallback ONLY if still empty
+        const currentText = (target.innerText || target.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+        const hasInsertedText = currentText.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 10)) || currentText.length >= item.value.trim().length;
+
+        if (!hasInsertedText) {
           try {
-            const inputEvent = new InputEvent('input', {
+            const dt = new DataTransfer();
+            dt.setData('text/plain', item.value);
+            const pasteEvent = new ClipboardEvent('paste', {
+              clipboardData: dt,
               bubbles: true,
               cancelable: true,
-              inputType: 'insertText',
-              data: item.value,
             });
-            target.dispatchEvent(inputEvent);
+            target.dispatchEvent(pasteEvent);
           } catch {}
+
+          const afterPasteText = (target.innerText || target.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+          if (!afterPasteText.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 10))) {
+            target.innerText = item.value;
+          }
         }
+
+        // Always dispatch standard input/change events once
         target.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
         target.dispatchEvent(new Event('change', { bubbles: true }));
       } else {

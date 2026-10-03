@@ -548,42 +548,47 @@ function setNativeValue(element: HTMLElement, value: string): void {
     // Rich editor (WhatsApp Web Lexical, YouTube, Gmail, Twitter/X, Discord, Slack, Reddit)
     element.focus();
 
-    // Place selection inside the contenteditable or its inner paragraph
+    // 1. Clear any existing content cleanly
     const selection = window.getSelection();
     if (selection) {
-      const targetNode = element.querySelector('p.selectable-text, p, span[data-lexical-text]') || element;
       const range = document.createRange();
-      range.selectNodeContents(targetNode);
+      range.selectNodeContents(element);
       selection.removeAllRanges();
       selection.addRange(range);
     }
-
-    // Select all existing content using native 'selectAll' command
     try {
       document.execCommand('selectAll', false, undefined);
+      document.execCommand('delete', false, undefined);
     } catch {}
 
-    let insertedViaExec = false;
+    // 2. Insert text via browser's native text insertion command
     try {
-      insertedViaExec = document.execCommand('insertText', false, value);
-    } catch {
-      insertedViaExec = false;
-    }
+      document.execCommand('insertText', false, value);
+    } catch {}
 
-    if (!insertedViaExec) {
-      element.innerText = value;
+    // 3. Verify if value is now present; fallback ONLY if still empty
+    const currentText = (element.innerText || element.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    const hasInsertedText = currentText.toLowerCase().includes(value.toLowerCase().trim().slice(0, 10)) || currentText.length >= value.trim().length;
+
+    if (!hasInsertedText) {
       try {
-        const inputEvent = new InputEvent('input', {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', value);
+        const pasteEvent = new ClipboardEvent('paste', {
+          clipboardData: dt,
           bubbles: true,
           cancelable: true,
-          inputType: 'insertText',
-          data: value,
         });
-        element.dispatchEvent(inputEvent);
+        element.dispatchEvent(pasteEvent);
       } catch {}
+
+      const afterPasteText = (element.innerText || element.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+      if (!afterPasteText.toLowerCase().includes(value.toLowerCase().trim().slice(0, 10))) {
+        element.innerText = value;
+      }
     }
 
-    // Notify input and change events
+    // Always dispatch standard input/change events once
     element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
   } else {
@@ -1511,7 +1516,10 @@ export function detectCaptchaChallenge(): CaptchaDetectionResult {
 }
 
 // Listen for messages from the Side Panel / Extension
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
+  (window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__ = true;
+
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   try {
     switch (request.action) {
       case 'CHECK_CAPTCHA': {
@@ -1695,7 +1703,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   return true; // Keep message channel open for async response
-});
+  });
+}
 
 console.log('[AutoForm AI] Content script loaded and active.');
 
