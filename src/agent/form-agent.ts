@@ -601,6 +601,30 @@ ${(this.settings.autoConfirmSubmit ?? true)
           c) After scrolling, call 'get_page_content' to read the updated transcript.
       * TURN BUDGET: Message sending MUST complete in 1 to 2 turns maximum (under 15 seconds).
 
+20. STRICT ANTI-SPIRALING, SEARCH BUDGET & AI FALLBACK PROTOCOL:
+    - ZERO-SEARCH MANDATE FOR COMMON KNOWLEDGE, TRIVIA, DIALOGUE & QUOTES:
+      * When asked to answer a question, complete dialogue, roleplay, explain code, tell a joke, or answer trivia in a chat/group (e.g. "Ellie: You sweared Joel: ??", "what's the capital of France", "write a quick python snippet", "who directed Inception"):
+        NEVER open search engines, Google, Yahoo, Reddit, Tumblr, or wikis.
+        You are an advanced AI model. Answer DIRECTLY from your pre-trained knowledge!
+        Formulate your response immediately and proceed straight to the primary action (e.g. typing and sending the message in chat).
+    - SEARCH TURN BUDGET & USE OF 'search_web':
+      * If external or current information is genuinely needed (e.g. today's date, live stock/crypto price, recent events, specific company contact list):
+        a) ALWAYS call 'search_web({ query: "..." })' first. DO NOT call 'open_new_tab' or navigate to search engine homepages.
+           'search_web' executes in the background in milliseconds and returns the top titles, URLs, and clean snippets without disturbing the active browser tab or cluttering the context with 10,000s of characters of fandom wiki junk.
+        b) HARD TURN BUDGET: MAXIMUM 1 SEARCH TURN. Never chain multiple search queries back-to-back.
+        c) BAN ON MULTI-TAB RESEARCH SPIRALING: NEVER open 5+ browser tabs for research, never read multiple fandom wikis or Reddit threads in a loop.
+    - AI & WEB SEARCH ASSISTANT FALLBACK (Gemini, ChatGPT, DeepSeek):
+      * If the user explicitly asks to use Gemini, ChatGPT, or DeepSeek, or if an AI search assistant fallback is instructed:
+        a) Navigate directly to the service (e.g. 'https://gemini.google.com/app' or 'https://chatgpt.com').
+        b) OpenBUA operates directly inside the user's personal desktop browser session. If a "Sign in with Google" or "Continue with Google" button appears, click it to authenticate seamlessly with the user's signed-in Google account.
+        c) Submit the query in 1 turn, read the response with 'get_page_content', and immediately return to the task.
+    - PRIMARY TASK DISCIPLINE (STAY ON TARGET):
+      * When the user's instruction is an action (e.g. "read question in WhatsApp group and reply with answer", "fill application form"):
+        - NEVER get distracted by research rabbit holes.
+        - If an external lookup was performed via 'search_web', you remain on the chat tab.
+        - If a research tab was opened, switch back to the target chat tab immediately: 'switch_browser_tab({ tabId: ... })' or focus the window.
+        - Type the message, send it, and finish within 2 to 3 turns total.
+
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();

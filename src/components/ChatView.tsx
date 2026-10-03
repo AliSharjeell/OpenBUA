@@ -120,6 +120,24 @@ function getToolMeta(toolName: string) {
         desc: 'Proposing discovered fact, preference, or workflow to save...',
         icon: Brain,
       };
+    case 'search_web':
+      return {
+        label: 'Searching the Web',
+        desc: 'Running fast background web search for snippets and answers...',
+        icon: Globe,
+      };
+    case 'open_new_tab':
+      return {
+        label: 'Opening New Tab',
+        desc: 'Opening destination in a new browser tab...',
+        icon: Globe,
+      };
+    case 'close_tab':
+      return {
+        label: 'Closing Tab',
+        desc: 'Closing background tab...',
+        icon: Terminal,
+      };
     default:
       return {
         label: `Running Tool: ${toolName}`,

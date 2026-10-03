@@ -2049,3 +2049,170 @@ export async function checkUrlReachable(url: string): Promise<{ reachable: boole
     };
   }
 }
+
+export interface SearchWebResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+// Fast background web search (under 1.5s) returning clean snippets without opening browser tabs
+export async function searchWeb(
+  query: string,
+  limit = 5
+): Promise<{ success: boolean; query: string; results: SearchWebResult[]; message?: string }> {
+  const cleanQuery = (query || '').trim();
+  if (!cleanQuery) {
+    return { success: false, query: '', results: [], message: 'Empty search query provided.' };
+  }
+
+  const clean = (str: string) =>
+    (str || '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&quot;/g, '"')
+      .replace(/&#x27;/g, "'")
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const maxResults = Math.min(Math.max(1, limit || 5), 10);
+
+  // 1. Primary: DuckDuckGo HTML
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+
+    const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQuery)}`;
+    const resp = await fetch(ddgUrl, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+    clearTimeout(timeout);
+
+    if (resp.ok) {
+      const html = await resp.text();
+      const results: SearchWebResult[] = [];
+      const titleRegex = /<h2[^>]*class="[^"]*result__title[^"]*"[^>]*>[\s\S]*?<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+      const snippetRegex = /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+
+      const rawTitles: string[] = [];
+      const rawUrls: string[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = titleRegex.exec(html)) !== null) {
+        let link = m[1];
+        if (link.includes('uddg=')) {
+          try {
+            const parsed = new URL('https://duckduckgo.com' + link);
+            link = decodeURIComponent(parsed.searchParams.get('uddg') || link);
+          } catch {}
+        }
+        rawUrls.push(link);
+        rawTitles.push(clean(m[2]));
+      }
+
+      const rawSnippets: string[] = [];
+      while ((m = snippetRegex.exec(html)) !== null) {
+        rawSnippets.push(clean(m[1]));
+      }
+
+      const count = Math.min(rawTitles.length, rawSnippets.length, maxResults);
+      for (let i = 0; i < count; i++) {
+        results.push({
+          title: rawTitles[i],
+          url: rawUrls[i],
+          snippet: rawSnippets[i],
+        });
+      }
+
+      if (results.length > 0) {
+        return {
+          success: true,
+          query: cleanQuery,
+          results,
+        };
+      }
+    }
+  } catch (err: any) {
+    console.warn('[OpenBUA] searchWeb primary fetch error:', err?.message || err);
+  }
+
+  // 2. Fallback: DuckDuckGo Lite
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const liteResp = await fetch('https://lite.duckduckgo.com/lite/', {
+      method: 'POST',
+      signal: controller.signal,
+      body: new URLSearchParams({ q: cleanQuery }),
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+    clearTimeout(timeout);
+
+    if (liteResp.ok) {
+      const html = await liteResp.text();
+      const results: SearchWebResult[] = [];
+      const linkRegex = /<a[^>]*class="result-link"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+      const snippetRegex = /<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi;
+
+      const rawTitles: string[] = [];
+      const rawUrls: string[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = linkRegex.exec(html)) !== null) {
+        let link = m[1];
+        if (link.includes('uddg=')) {
+          try {
+            const parsed = new URL('https://duckduckgo.com' + link);
+            link = decodeURIComponent(parsed.searchParams.get('uddg') || link);
+          } catch {}
+        }
+        rawUrls.push(link);
+        rawTitles.push(clean(m[2]));
+      }
+
+      const rawSnippets: string[] = [];
+      while ((m = snippetRegex.exec(html)) !== null) {
+        rawSnippets.push(clean(m[1]));
+      }
+
+      const count = Math.min(rawTitles.length, rawSnippets.length, maxResults);
+      for (let i = 0; i < count; i++) {
+        results.push({
+          title: rawTitles[i],
+          url: rawUrls[i],
+          snippet: rawSnippets[i],
+        });
+      }
+
+      if (results.length > 0) {
+        return {
+          success: true,
+          query: cleanQuery,
+          results,
+        };
+      }
+    }
+  } catch (err: any) {
+    console.warn('[OpenBUA] searchWeb fallback fetch error:', err?.message || err);
+  }
+
+  return {
+    success: false,
+    query: cleanQuery,
+    results: [],
+    message: `No search results returned for "${cleanQuery}". You may answer from your internal knowledge or use direct URL navigation.`,
+  };
+}

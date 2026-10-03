@@ -16,6 +16,7 @@ import {
   pressKeyCombination,
   sendWebEmailDirect,
   checkUrlReachable,
+  searchWeb,
 } from './browser-bridge';
 import {
   loadDocuments,
@@ -723,6 +724,62 @@ export const closeTabTool: AgentTool<typeof CloseTabSchema> = {
   },
 };
 
+// 17. Search Web Tool (Fast Background Search)
+const SearchWebSchema = Type.Object({
+  query: Type.String({
+    description: 'The search query or terms to look up on the web (e.g. "Foundersuite 59 VC firms 2025", "The Last of Us quote")',
+  }),
+  limit: Type.Optional(
+    Type.Number({ description: 'Maximum number of results to return (default 5, max 10)' })
+  ),
+});
+
+export const searchWebTool: AgentTool<typeof SearchWebSchema> = {
+  name: 'search_web',
+  label: 'Fast Web Search',
+  description:
+    'Performs a fast, lightweight background web search (under 1.5s) returning top titles, URLs, and clean snippets. Use this whenever you need to check facts, find a website URL, or look up information WITHOUT opening new tabs, scraping spammy wikis, or disrupting your active page focus.',
+  parameters: SearchWebSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      const res = await searchWeb(params.query, params.limit);
+      if (!res.success || res.results.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: res.message || `No search results found for "${params.query}". Answer from internal knowledge or use direct URL navigation.`,
+            },
+          ],
+          details: res as any,
+        };
+      }
+
+      const formatted = res.results
+        .map(
+          (r, idx) =>
+            `${idx + 1}. **${r.title}**\n   URL: ${r.url}\n   Snippet: ${r.snippet}`
+        )
+        .join('\n\n');
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Found ${res.results.length} web search results for "${params.query}":\n\n${formatted}`,
+          },
+        ],
+        details: res as any,
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Search failed: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string): AgentTool<any>[] {
   return [
@@ -742,6 +799,7 @@ export function createAgentTools(sessionId?: string): AgentTool<any>[] {
     pressKeyCombinationTool,
     sendWebEmailTool,
     quickUrlCheckTool,
+    searchWebTool,
     openNewTabTool,
     closeTabTool,
   ];
