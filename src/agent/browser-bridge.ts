@@ -642,7 +642,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
   }
   if (!target && text) {
     const rawCandidates = Array.from(document.querySelectorAll<HTMLElement>(
-      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], [role="listitem"], [role="row"], [role="treeitem"], [role="menuitem"], [role="option"], tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip], [data-testid*="cell"], [data-testid*="list-item"], [data-testid*="chat-list-item"], span[title], div[title], [aria-label], #pane-side div[tabindex="-1"], #pane-side span'
+      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], [role="listitem"], [role="row"], [role="treeitem"], [role="menuitem"], [role="option"], [role="menuitemradio"], [role="combobox"], [aria-haspopup], mat-select, bard-mode-switcher, tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip], [data-testid*="cell"], [data-testid*="list-item"], [data-testid*="chat-list-item"], span[title], div[title], [aria-label], #pane-side div[tabindex="-1"], #pane-side span'
     ));
     // Filter out search prediction dropdowns / hidden autocomplete popups so we never accidentally click search suggestions
     const candidates = rawCandidates.filter((c) => {
@@ -651,11 +651,25 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     });
 
     const tLower = text.toLowerCase().trim();
+    const tNormalized = tLower.replace(/\s+/g, '');
+
+    const getElemText = (c: HTMLElement): string => {
+      return (
+        c.innerText ||
+        c.textContent ||
+        (c as HTMLInputElement).value ||
+        c.getAttribute('aria-label') ||
+        c.getAttribute('data-tooltip') ||
+        c.getAttribute('title') ||
+        ''
+      ).toLowerCase().trim();
+    };
 
     // 1. Exact match (highest priority)
     target = candidates.find((c) => {
-      const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').toLowerCase().trim();
-      return val === tLower || val.startsWith(tLower);
+      const val = getElemText(c);
+      const valNorm = val.replace(/\s+/g, '');
+      return val === tLower || valNorm === tNormalized || val.startsWith(tLower) || valNorm.startsWith(tNormalized);
     }) || null;
 
     // 2. Exact word boundary match
@@ -663,7 +677,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
       try {
         const wordRegex = new RegExp(`(^|\\s|[^a-zA-Z0-9])${tLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\s|[^a-zA-Z0-9])`, 'i');
         target = candidates.find((c) => {
-          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').trim();
+          const val = getElemText(c);
           return wordRegex.test(val);
         }) || null;
       } catch {}
@@ -673,10 +687,11 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     if (!target) {
       const matches = candidates
         .map((c) => {
-          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').toLowerCase().trim();
-          return { elem: c, val, len: val.length };
+          const val = getElemText(c);
+          const valNorm = val.replace(/\s+/g, '');
+          return { elem: c, val, valNorm, len: val.length };
         })
-        .filter((item) => item.val.includes(tLower))
+        .filter((item) => item.val.includes(tLower) || item.valNorm.includes(tNormalized))
         .sort((a, b) => a.len - b.len);
       if (matches.length > 0) {
         target = matches[0].elem;
@@ -745,7 +760,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     clientX,
     clientY,
     button: 0,
-    buttons: 1,
+    buttons: 0,
   };
 
   const pointerInit: PointerEventInit = {
@@ -755,36 +770,52 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     isPrimary: true,
     width: 1,
     height: 1,
-    pressure: 0.5,
+    pressure: 0,
   };
 
-  const dispatchCycle = (el: HTMLElement) => {
-    try {
-      el.dispatchEvent(new PointerEvent('pointerover', { ...pointerInit, buttons: 0 }));
-      el.dispatchEvent(new MouseEvent('mouseover', { ...mouseInit, buttons: 0 }));
-      el.dispatchEvent(new PointerEvent('pointerdown', pointerInit));
-      el.dispatchEvent(new MouseEvent('mousedown', mouseInit));
-    } catch {}
+  const dispatchTarget = leafTarget || primary;
 
-    try {
-      el.focus();
-    } catch {}
-
-    try {
-      el.dispatchEvent(new PointerEvent('pointerup', { ...pointerInit, buttons: 0 }));
-      el.dispatchEvent(new MouseEvent('mouseup', { ...mouseInit, buttons: 0 }));
-      el.dispatchEvent(new MouseEvent('click', { ...mouseInit, buttons: 0 }));
-    } catch {}
-  };
-
-  dispatchCycle(leafTarget);
-  if (container && container !== leafTarget) {
-    dispatchCycle(container);
-  }
-
+  // 1. Hover
   try {
-    primary.click();
+    dispatchTarget.dispatchEvent(new PointerEvent('pointerover', { ...pointerInit, buttons: 0 }));
+    dispatchTarget.dispatchEvent(new MouseEvent('mouseover', { ...mouseInit, buttons: 0 }));
+    dispatchTarget.dispatchEvent(new PointerEvent('pointerenter', { ...pointerInit, bubbles: false, buttons: 0 }));
   } catch {}
+
+  // 2. Press
+  try {
+    dispatchTarget.dispatchEvent(new PointerEvent('pointerdown', { ...pointerInit, buttons: 1, pressure: 0.5 }));
+    dispatchTarget.dispatchEvent(new MouseEvent('mousedown', { ...mouseInit, buttons: 1 }));
+  } catch {}
+
+  // 3. Focus interactive container
+  try {
+    primary.focus();
+  } catch {}
+
+  // 4. Release
+  try {
+    dispatchTarget.dispatchEvent(new PointerEvent('pointerup', { ...pointerInit, buttons: 0, pressure: 0 }));
+    dispatchTarget.dispatchEvent(new MouseEvent('mouseup', { ...mouseInit, buttons: 0 }));
+  } catch {}
+
+  // 5. Single atomic click activation
+  // Calling primary.click() triggers the browser's native activation behavior AND fires a single bubbling click event.
+  // We NEVER dispatch a synthetic click event before or after calling primary.click(), because that would fire 2-3 clicks,
+  // causing toggle dropdowns (such as Gemini's model switcher) to immediately open and close!
+  let activated = false;
+  try {
+    if (typeof primary.click === 'function') {
+      primary.click();
+      activated = true;
+    }
+  } catch {}
+
+  if (!activated) {
+    try {
+      dispatchTarget.dispatchEvent(new MouseEvent('click', { ...mouseInit, buttons: 0 }));
+    } catch {}
+  }
 
   const label = (primary.textContent || primary.getAttribute('aria-label') || target.getAttribute('title') || '').trim().slice(0, 30);
   return { success: true, message: `Clicked element "${label}"` };

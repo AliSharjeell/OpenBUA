@@ -662,40 +662,52 @@ function simulateInteractiveClick(target: HTMLElement, container?: HTMLElement |
     isPrimary: true,
     width: 1,
     height: 1,
-    pressure: 0.5,
+    pressure: 0,
   };
 
-  const dispatchCycle = (el: HTMLElement) => {
-    try {
-      el.dispatchEvent(new PointerEvent('pointerover', { ...pointerInit, buttons: 0 }));
-      el.dispatchEvent(new MouseEvent('mouseover', { ...mouseInit, buttons: 0 }));
-      el.dispatchEvent(new PointerEvent('pointerdown', pointerInit));
-      el.dispatchEvent(new MouseEvent('mousedown', mouseInit));
-    } catch {}
+  const dispatchTarget = target || primary;
 
-    try {
-      el.focus();
-    } catch {}
-
-    try {
-      el.dispatchEvent(new PointerEvent('pointerup', { ...pointerInit, buttons: 0 }));
-      el.dispatchEvent(new MouseEvent('mouseup', { ...mouseInit, buttons: 0 }));
-      el.dispatchEvent(new MouseEvent('click', { ...mouseInit, buttons: 0 }));
-    } catch {}
-  };
-
-  // 1. Dispatch on target element first (bubbles up through container to React/window root)
-  dispatchCycle(target);
-
-  // 2. If container exists and is distinct, also dispatch directly on container
-  if (container && container !== target) {
-    dispatchCycle(container);
-  }
-
-  // 3. Native .click() on primary element to execute native anchor/button behaviors
+  // 1. Hover
   try {
-    primary.click();
+    dispatchTarget.dispatchEvent(new PointerEvent('pointerover', { ...pointerInit, buttons: 0 }));
+    dispatchTarget.dispatchEvent(new MouseEvent('mouseover', { ...mouseInit, buttons: 0 }));
+    dispatchTarget.dispatchEvent(new PointerEvent('pointerenter', { ...pointerInit, bubbles: false, buttons: 0 }));
   } catch {}
+
+  // 2. Press
+  try {
+    dispatchTarget.dispatchEvent(new PointerEvent('pointerdown', { ...pointerInit, buttons: 1, pressure: 0.5 }));
+    dispatchTarget.dispatchEvent(new MouseEvent('mousedown', { ...mouseInit, buttons: 1 }));
+  } catch {}
+
+  // 3. Focus interactive container
+  try {
+    primary.focus();
+  } catch {}
+
+  // 4. Release
+  try {
+    dispatchTarget.dispatchEvent(new PointerEvent('pointerup', { ...pointerInit, buttons: 0, pressure: 0 }));
+    dispatchTarget.dispatchEvent(new MouseEvent('mouseup', { ...mouseInit, buttons: 0 }));
+  } catch {}
+
+  // 5. Single atomic click activation
+  // Calling primary.click() triggers the browser's native activation behavior AND fires a single bubbling click event.
+  // We NEVER dispatch a synthetic click event before or after calling primary.click(), because that would fire 2-3 clicks,
+  // causing toggle dropdowns (such as Gemini's model switcher) to immediately open and close!
+  let activated = false;
+  try {
+    if (typeof primary.click === 'function') {
+      primary.click();
+      activated = true;
+    }
+  } catch {}
+
+  if (!activated) {
+    try {
+      dispatchTarget.dispatchEvent(new MouseEvent('click', { ...mouseInit, buttons: 0 }));
+    } catch {}
+  }
 }
 
 const OPENBUA_CURSOR_BASE64 = 'data:image/png;base64,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';
@@ -1114,7 +1126,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
     }
   } else if (text) {
     const rawCandidates = Array.from(document.querySelectorAll<HTMLElement>(
-      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], [role="listitem"], [role="row"], [role="treeitem"], [role="menuitem"], [role="option"], tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip], [data-testid*="cell"], [data-testid*="list-item"], [data-testid*="chat-list-item"], span[title], div[title], [aria-label], #pane-side div[tabindex="-1"], #pane-side span'
+      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], [role="listitem"], [role="row"], [role="treeitem"], [role="menuitem"], [role="option"], [role="menuitemradio"], [role="combobox"], [aria-haspopup], mat-select, bard-mode-switcher, tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip], [data-testid*="cell"], [data-testid*="list-item"], [data-testid*="chat-list-item"], span[title], div[title], [aria-label], #pane-side div[tabindex="-1"], #pane-side span'
     )).filter((c) => {
       // Exclude search suggestions / autocomplete dropdowns so we never click search predictions accidentally
       return !c.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list');
@@ -1128,11 +1140,25 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
     });
 
     const tLower = text.toLowerCase().trim();
+    const tNormalized = tLower.replace(/\s+/g, '');
 
-    // 1. Exact match (highest priority — e.g. exact "Send" or "Comment" button)
+    const getElemText = (c: HTMLElement): string => {
+      return (
+        c.innerText ||
+        c.textContent ||
+        (c as HTMLInputElement).value ||
+        c.getAttribute('aria-label') ||
+        c.getAttribute('data-tooltip') ||
+        c.getAttribute('title') ||
+        ''
+      ).toLowerCase().trim();
+    };
+
+    // 1. Exact match (highest priority — e.g. exact "Send", "Flash", or "Gemini Flash")
     target = candidates.find(c => {
-      const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').toLowerCase().trim();
-      return val === tLower || val.startsWith(tLower);
+      const val = getElemText(c);
+      const valNorm = val.replace(/\s+/g, '');
+      return val === tLower || valNorm === tNormalized || val.startsWith(tLower) || valNorm.startsWith(tNormalized);
     }) || null;
 
     // 2. Exact word boundary match
@@ -1140,7 +1166,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
       try {
         const wordRegex = new RegExp(`(^|\\s|[^a-zA-Z0-9])${tLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\s|[^a-zA-Z0-9])`, 'i');
         target = candidates.find(c => {
-          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').trim();
+          const val = getElemText(c);
           return wordRegex.test(val);
         }) || null;
       } catch {
@@ -1152,10 +1178,11 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
     if (!target) {
       const matches = candidates
         .map(c => {
-          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').toLowerCase().trim();
-          return { elem: c, val, len: val.length };
+          const val = getElemText(c);
+          const valNorm = val.replace(/\s+/g, '');
+          return { elem: c, val, valNorm, len: val.length };
         })
-        .filter(item => item.val.includes(tLower))
+        .filter(item => item.val.includes(tLower) || item.valNorm.includes(tNormalized))
         .sort((a, b) => a.len - b.len);
       if (matches.length > 0) {
         target = matches[0].elem;

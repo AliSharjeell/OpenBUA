@@ -635,7 +635,12 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * If the user explicitly asks to use Gemini, ChatGPT, or DeepSeek, or if an AI search assistant fallback is instructed:
         a) Navigate directly to the service (e.g. 'https://gemini.google.com/app' or 'https://chatgpt.com').
         b) OpenBUA operates directly inside the user's personal desktop browser session. If a "Sign in with Google" or "Continue with Google" button appears, click it to authenticate seamlessly with the user's signed-in Google account.
-        c) Submit the query in 1 turn, read the response with 'get_page_content', and immediately return to the task.
+        c) MODEL SWITCHING ON GEMINI / CHATGPT:
+           - When asked to change or switch the model (e.g. from Flash to Pro / Advanced):
+             Turn 1: Click the model picker button at the top header: 'click_element({ text: "Flash" })' or 'click_element({ text: "Gemini Flash" })' or 'click_element({ selector: "button[aria-haspopup=\'menu\']" })'.
+             Turn 2: Click the target model from the opened dropdown: e.g. 'click_element({ text: "Pro" })' or 'click_element({ text: "Advanced" })' or 'click_element({ text: "2.5 Pro" })'.
+             Turn 3: Type the prompt into the compose box: 'fill_form_fields({ assignments: [{ selector: "div[role=\'textbox\']", value: "..." }], pressEnter: true })'.
+        d) Submit the query in 1 turn, read the response with 'get_page_content', and return the output or copy it for the user.
     - PRIMARY TASK DISCIPLINE (STAY ON TARGET):
       * When the user's instruction is an action (e.g. "read question in WhatsApp group and reply with answer", "fill application form"):
         - NEVER get distracted by research rabbit holes or verification loops.
