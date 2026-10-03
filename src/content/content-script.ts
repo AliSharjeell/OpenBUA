@@ -561,31 +561,15 @@ function setNativeValue(element: HTMLElement, value: string): void {
       document.execCommand('delete', false, undefined);
     } catch {}
 
-    // 2. Insert text via browser's native text insertion command
+    // 2. Insert text via browser's native text insertion command (single clean execution)
+    let inserted = false;
     try {
-      document.execCommand('insertText', false, value);
+      inserted = document.execCommand('insertText', false, value);
     } catch {}
 
-    // 3. Verify if value is now present; fallback ONLY if still empty
-    const currentText = (element.innerText || element.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-    const hasInsertedText = currentText.toLowerCase().includes(value.toLowerCase().trim().slice(0, 10)) || currentText.length >= value.trim().length;
-
-    if (!hasInsertedText) {
-      try {
-        const dt = new DataTransfer();
-        dt.setData('text/plain', value);
-        const pasteEvent = new ClipboardEvent('paste', {
-          clipboardData: dt,
-          bubbles: true,
-          cancelable: true,
-        });
-        element.dispatchEvent(pasteEvent);
-      } catch {}
-
-      const afterPasteText = (element.innerText || element.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-      if (!afterPasteText.toLowerCase().includes(value.toLowerCase().trim().slice(0, 10))) {
-        element.innerText = value;
-      }
+    // Fallback only if execCommand completely failed and element has no children
+    if (!inserted && !element.hasChildNodes()) {
+      element.textContent = value;
     }
 
     // Always dispatch standard input/change events once

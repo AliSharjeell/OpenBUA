@@ -454,31 +454,15 @@ function inPageFillForm(
           document.execCommand('delete', false, undefined);
         } catch {}
 
-        // 2. Insert text via browser's native text insertion command
+        // 2. Insert text via browser's native text insertion command (single clean execution)
+        let inserted = false;
         try {
-          document.execCommand('insertText', false, item.value);
+          inserted = document.execCommand('insertText', false, item.value);
         } catch {}
 
-        // 3. Verify if value is now present; fallback ONLY if still empty
-        const currentText = (target.innerText || target.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-        const hasInsertedText = currentText.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 10)) || currentText.length >= item.value.trim().length;
-
-        if (!hasInsertedText) {
-          try {
-            const dt = new DataTransfer();
-            dt.setData('text/plain', item.value);
-            const pasteEvent = new ClipboardEvent('paste', {
-              clipboardData: dt,
-              bubbles: true,
-              cancelable: true,
-            });
-            target.dispatchEvent(pasteEvent);
-          } catch {}
-
-          const afterPasteText = (target.innerText || target.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-          if (!afterPasteText.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 10))) {
-            target.innerText = item.value;
-          }
+        // Fallback only if execCommand completely failed and element has no children
+        if (!inserted && !target.hasChildNodes()) {
+          target.textContent = item.value;
         }
 
         // Always dispatch standard input/change events once
