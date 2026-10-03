@@ -481,7 +481,8 @@ function setNativeValue(
           while (n--) {
             u8arr[n] = bstr.charCodeAt(n);
           }
-          fileObj = new File([u8arr], fileData.fileName || 'upload.pdf', { type: mime });
+          const defaultName = mime.startsWith('video/') ? 'video.mp4' : mime.startsWith('image/') ? 'image.png' : 'upload.pdf';
+          fileObj = new File([u8arr], fileData.fileName || defaultName, { type: mime });
         } else if (value.startsWith('data:')) {
           const parts = value.split(',');
           const mimeMatch = parts[0]?.match(/:(.*?);/);
@@ -492,7 +493,8 @@ function setNativeValue(
           while (n--) {
             u8arr[n] = bstr.charCodeAt(n);
           }
-          fileObj = new File([u8arr], fileData?.fileName || 'upload.pdf', { type: mime });
+          const defaultName = mime.startsWith('video/') ? 'video.mp4' : mime.startsWith('image/') ? 'image.png' : 'upload.pdf';
+          fileObj = new File([u8arr], fileData?.fileName || defaultName, { type: mime });
         }
 
         if (fileObj) {
@@ -503,17 +505,14 @@ function setNativeValue(
           input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
           const dropzone =
-            input.closest('.dropzone, [class*="upload"], [class*="drop"], [role="button"]') ||
+            input.closest('.dropzone, [data-testid="dropzone"], [class*="upload"], [class*="drop"], [role="button"]') ||
+            document.querySelector('[data-testid="dropzone"], div[data-dropzone="true"]') ||
             input.parentElement;
           if (dropzone && dropzone !== input) {
             try {
-              const dropEvent = new DragEvent('drop', {
-                bubbles: true,
-                cancelable: true,
-                composed: true,
-                dataTransfer: dt,
-              });
-              dropzone.dispatchEvent(dropEvent);
+              dropzone.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
+              dropzone.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
+              dropzone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
             } catch {}
           }
           return;
@@ -1660,10 +1659,40 @@ async function uploadFileToElement(
         target = innerInput;
       }
     }
+
     if (!target || target.tagName.toLowerCase() !== 'input') {
-      const anyFileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
-      if (anyFileInput) {
-        target = anyFileInput;
+      // Check for media tab on Reddit / social post builders
+      const isVideoOrImage =
+        fileData.mimeType?.startsWith('video/') ||
+        fileData.mimeType?.startsWith('image/') ||
+        /\.(mp4|webm|mov|mkv|avi|m4v|png|jpg|jpeg|webp)$/i.test(fileData.fileName);
+      if (isVideoOrImage) {
+        const tabBtns = Array.from(
+          document.querySelectorAll<HTMLElement>('button[role="tab"], [role="tab"], button')
+        );
+        const mediaTab = tabBtns.find((b) => {
+          const txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+          return (
+            txt.includes('images & video') ||
+            txt.includes('image & video') ||
+            txt.includes('media') ||
+            txt === 'images' ||
+            txt === 'video'
+          );
+        });
+        if (mediaTab && mediaTab.getAttribute('aria-selected') !== 'true') {
+          try {
+            mediaTab.click();
+            await new Promise((r) => setTimeout(r, 400));
+          } catch {}
+        }
+      }
+
+      const fileInputCandidate = document.querySelector<HTMLInputElement>(
+        'input[type="file"], [data-testid="dropzone"] input, .dropzone input'
+      );
+      if (fileInputCandidate) {
+        target = fileInputCandidate;
       }
     }
   }

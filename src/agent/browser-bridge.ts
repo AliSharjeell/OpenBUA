@@ -1,5 +1,6 @@
 import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
 import { loadGlobalMemories, loadTabMemories, getTabKey } from '../services/storage';
+import { tryLoadFileFromLocalPath } from '../services/pdf-parser';
 
 export interface TabInfo {
   id: number;
@@ -416,7 +417,8 @@ function inPageFillForm(
               let n = bstr.length;
               const u8arr = new Uint8Array(n);
               while (n--) u8arr[n] = bstr.charCodeAt(n);
-              fileObj = new File([u8arr], fileData.fileName || 'upload.pdf', { type: mime });
+              const defaultName = mime.startsWith('video/') ? 'video.mp4' : mime.startsWith('image/') ? 'image.png' : 'upload.pdf';
+              fileObj = new File([u8arr], fileData.fileName || defaultName, { type: mime });
             } else if (item.value && item.value.startsWith('data:')) {
               const parts = item.value.split(',');
               const mimeMatch = parts[0]?.match(/:(.*?);/);
@@ -425,7 +427,8 @@ function inPageFillForm(
               let n = bstr.length;
               const u8arr = new Uint8Array(n);
               while (n--) u8arr[n] = bstr.charCodeAt(n);
-              fileObj = new File([u8arr], fileData?.fileName || 'upload.pdf', { type: mime });
+              const defaultName = mime.startsWith('video/') ? 'video.mp4' : mime.startsWith('image/') ? 'image.png' : 'upload.pdf';
+              fileObj = new File([u8arr], fileData?.fileName || defaultName, { type: mime });
             }
             if (fileObj) {
               const dt = new DataTransfer();
@@ -433,9 +436,14 @@ function inPageFillForm(
               input.files = dt.files;
               input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
               input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
-              const dropzone = input.closest('.dropzone, [class*="upload"], [class*="drop"], [role="button"]') || input.parentElement;
+              const dropzone =
+                input.closest('.dropzone, [data-testid="dropzone"], [class*="upload"], [class*="drop"], [role="button"]') ||
+                document.querySelector('[data-testid="dropzone"], div[data-dropzone="true"]') ||
+                input.parentElement;
               if (dropzone && dropzone !== input) {
                 try {
+                  dropzone.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
+                  dropzone.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
                   dropzone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
                 } catch {}
               }
@@ -1453,16 +1461,45 @@ export async function uploadFileToActiveTab(options: {
     if (requestedName) {
       match = allMems.find(
         (m) =>
-          m.dataUrl &&
+          (m.dataUrl || m.filePath) &&
           ((m.fileName && m.fileName.toLowerCase().includes(requestedName)) ||
-            m.title.toLowerCase().includes(requestedName))
+            m.title.toLowerCase().includes(requestedName) ||
+            (m.filePath && m.filePath.toLowerCase().includes(requestedName)))
       );
+
+      if (
+        !match &&
+        (requestedName.includes('video') ||
+          requestedName.includes('mp4') ||
+          requestedName.includes('promo') ||
+          requestedName.includes('demo') ||
+          requestedName.includes('trailer') ||
+          requestedName.includes('media'))
+      ) {
+        match = allMems.find(
+          (m) =>
+            (m.dataUrl || m.filePath) &&
+            (m.fileCategory === 'video' || m.type === 'video' || m.tags?.includes('video'))
+        );
+      }
+    }
+
+    if (!match) {
+      // If on Reddit, Twitter/X, or social site, check for video document first
+      const tabUrl = (activeTab.url || '').toLowerCase();
+      if (tabUrl.includes('reddit.com') || tabUrl.includes('twitter.com') || tabUrl.includes('x.com')) {
+        match = allMems.find(
+          (m) =>
+            (m.dataUrl || m.filePath) &&
+            (m.fileCategory === 'video' || m.type === 'video' || m.tags?.includes('video'))
+        );
+      }
     }
 
     if (!match) {
       match = allMems.find(
         (m) =>
-          m.dataUrl &&
+          (m.dataUrl || m.filePath) &&
           (m.fileCategory === 'resume' ||
             m.tags?.includes('resume') ||
             (m.fileName && /resume|cv/i.test(m.fileName)) ||
@@ -1471,21 +1508,41 @@ export async function uploadFileToActiveTab(options: {
     }
 
     if (!match) {
-      match = allMems.find((m) => m.dataUrl);
+      match = allMems.find((m) => m.dataUrl || m.filePath);
     }
 
-    if (!match || !match.dataUrl) {
+    if (!match) {
       return {
         success: false,
-        message: `No stored document with raw file attachment was found in Memory${
+        message: `No stored document with raw file attachment or file path was found in Memory${
           requestedName ? ` matching "${requestedName}"` : ''
-        }. Please upload your resume or file in the Memory tab first!`,
+        }. Please upload your video, resume, or file in the Memory tab first!`,
+      };
+    }
+
+    // If document has filePath but no dataUrl, try loading from local disk path
+    if (!match.dataUrl && match.filePath) {
+      const loaded = await tryLoadFileFromLocalPath(match.filePath);
+      if (loaded) {
+        match = {
+          ...match,
+          dataUrl: loaded.dataUrl,
+          mimeType: loaded.mimeType,
+          fileName: match.fileName || loaded.fileName,
+        };
+      }
+    }
+
+    if (!match.dataUrl) {
+      return {
+        success: false,
+        message: `Stored document "${match.title}" has path "${match.filePath}", but raw binary data could not be accessed directly. Please upload the file directly in the Memory tab or enable file URL access.`,
       };
     }
 
     filePayload = {
-      fileName: match.fileName || `${match.title}.${match.type === 'pdf' ? 'pdf' : 'png'}`,
-      mimeType: match.mimeType || (match.type === 'pdf' ? 'application/pdf' : 'application/octet-stream'),
+      fileName: match.fileName || `${match.title}.${match.type === 'pdf' ? 'pdf' : match.type === 'video' ? 'mp4' : 'png'}`,
+      mimeType: match.mimeType || (match.type === 'pdf' ? 'application/pdf' : match.type === 'video' ? 'video/mp4' : 'application/octet-stream'),
       dataUrl: match.dataUrl,
     };
   }
@@ -1528,7 +1585,9 @@ export async function uploadFileToActiveTab(options: {
               if (inner) target = inner;
             }
             if (!target || target.tagName.toLowerCase() !== 'input') {
-              target = document.querySelector<HTMLInputElement>('input[type="file"]');
+              target = document.querySelector<HTMLInputElement>(
+                'input[type="file"], [data-testid="dropzone"] input, .dropzone input'
+              );
             }
           }
           if (!target) {
@@ -1542,12 +1601,26 @@ export async function uploadFileToActiveTab(options: {
             let n = bstr.length;
             const u8arr = new Uint8Array(n);
             while (n--) u8arr[n] = bstr.charCodeAt(n);
-            const file = new File([u8arr], fileData.fileName || 'document.pdf', { type: mime });
+            const defaultName = mime.startsWith('video/') ? 'video.mp4' : mime.startsWith('image/') ? 'image.png' : 'document.pdf';
+            const file = new File([u8arr], fileData.fileName || defaultName, { type: mime });
             const dt = new DataTransfer();
             dt.items.add(file);
             input.files = dt.files;
             input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
             input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+
+            const dropzone =
+              input.closest('.dropzone, [data-testid="dropzone"], [class*="upload"], [class*="drop"], [role="button"]') ||
+              document.querySelector('[data-testid="dropzone"], div[data-dropzone="true"]') ||
+              input.parentElement;
+            if (dropzone && dropzone !== input) {
+              try {
+                dropzone.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
+                dropzone.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
+                dropzone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
+              } catch {}
+            }
+
             return {
               success: true,
               message: `Attached "${fileData.fileName}" to ${input.tagName.toLowerCase()} in DOM.`,
