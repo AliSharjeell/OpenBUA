@@ -375,12 +375,17 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
       ''
     ).trim();
 
-    // If it's a chat contact list item, extract the contact name cleanly
-    if (btn.closest('#pane-side, [data-testid*="chat-list"]')) {
-      const contactTitleEl = btn.querySelector('span[title], div[title]');
+    // If it's a chat contact list item, extract the contact name cleanly and bind refId directly to the contact title leaf element
+    let targetEl: HTMLElement = btn;
+    const isChatItem = Boolean(btn.closest('#pane-side, [data-testid*="chat-list"]'));
+    if (isChatItem) {
+      const contactTitleEl = btn.querySelector<HTMLElement>('span[title], div[title], [title]');
       const contactTitle = contactTitleEl?.getAttribute('title') || contactTitleEl?.textContent?.trim();
       if (contactTitle) {
         text = `Chat: ${contactTitle}`;
+        if (contactTitleEl) {
+          targetEl = contactTitleEl;
+        }
       }
     }
 
@@ -388,25 +393,23 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
 
     const lower = `${text} ${btn.getAttribute('data-tooltip') || ''} ${btn.getAttribute('title') || ''} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
     const isSubmit =
-      lower.includes('submit') ||
-      lower.includes('send') ||
-      lower.includes('comment') ||
-      lower.includes('post') ||
-      lower.includes('reply') ||
-      lower.includes('publish') ||
-      lower.includes('tweet') ||
-      lower.includes('finish') ||
-      lower.includes('complete') ||
-      lower.includes('apply');
+      !isChatItem &&
+      (/\b(submit|send|comment|post|publish|tweet|finish|complete|apply)\b/i.test(lower) ||
+        lower.includes('submit') ||
+        lower.includes('send') ||
+        lower.includes('post') ||
+        lower.includes('publish') ||
+        lower.includes('complete'));
 
     const isNext =
-      lower.includes('next') ||
-      lower.includes('continue') ||
-      lower.includes('proceed') ||
-      lower.includes('save & next') ||
-      lower.includes('save and continue');
+      !isChatItem &&
+      (lower.includes('next') ||
+        lower.includes('continue') ||
+        lower.includes('proceed') ||
+        lower.includes('save & next') ||
+        lower.includes('save and continue'));
 
-    const isPrevious = lower.includes('back') || lower.includes('prev') || lower.includes('previous');
+    const isPrevious = !isChatItem && (lower.includes('back') || lower.includes('prev') || lower.includes('previous'));
 
     const isTab = btn.getAttribute('role') === 'tab' ||
       btn.tagName.toLowerCase() === 'tp-yt-paper-tab' ||
@@ -415,11 +418,11 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
       lower.includes('latest') ||
       lower.includes('videos');
 
-    const refId = generateRefId(btn);
+    const refId = generateRefId(targetEl);
     buttons.push({
       refId,
       text,
-      type: isTab ? 'tab' : (btn.getAttribute('type') || 'button'),
+      type: isTab ? 'tab' : isChatItem ? 'chat-contact' : (btn.getAttribute('type') || 'button'),
       isSubmit,
       isNext,
       isPrevious,
@@ -483,13 +486,16 @@ function setNativeValue(element: HTMLElement, value: string): void {
 
       // For email inputs, comboboxes, and recipient fields (e.g. Gmail To / Cc / Bcc)
       // Dispatch Enter and Tab keys to trigger recipient chip creation
+      const ariaLabel = (element.getAttribute('aria-label') || '').toLowerCase();
       const isRecipientInput =
-        type === 'email' ||
-        element.getAttribute('role') === 'combobox' ||
-        (element.getAttribute('aria-label') || '').toLowerCase().includes('to') ||
-        (element.getAttribute('aria-label') || '').toLowerCase().includes('recipient') ||
-        element.hasAttribute('peoplekit-id') ||
-        element.classList.contains('agP');
+        !isContentEditable &&
+        tagName === 'input' &&
+        (type === 'email' ||
+          element.getAttribute('role') === 'combobox' ||
+          /\bto\b/i.test(ariaLabel) ||
+          /\brecipients?\b/i.test(ariaLabel) ||
+          element.hasAttribute('peoplekit-id') ||
+          element.classList.contains('agP'));
 
       if (isRecipientInput) {
         const keyInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
@@ -539,25 +545,35 @@ function setNativeValue(element: HTMLElement, value: string): void {
       select.value = value;
     }
   } else if (isContentEditable) {
-    // Rich editor (WhatsApp, YouTube, Gmail, Twitter/X, Discord, Slack, Reddit)
+    // Rich editor (WhatsApp Web Lexical, YouTube, Gmail, Twitter/X, Discord, Slack, Reddit)
     element.focus();
 
+    // Place selection inside the contenteditable or its inner paragraph
+    const selection = window.getSelection();
+    if (selection) {
+      const targetNode = element.querySelector('p.selectable-text, p, span[data-lexical-text]') || element;
+      const range = document.createRange();
+      range.selectNodeContents(targetNode);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
     // Select all existing content using native 'selectAll' command
-    let selectAllSuccess = false;
     try {
-      selectAllSuccess = document.execCommand('selectAll', false, undefined);
-    } catch {
-      selectAllSuccess = false;
-    }
-    if (!selectAllSuccess) {
-      const selection = window.getSelection();
-      if (selection) {
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-    }
+      document.execCommand('selectAll', false, undefined);
+    } catch {}
+
+    // Dispatch beforeinput event (critical for Lexical in WhatsApp Web and ProseMirror)
+    try {
+      const beforeInputEvent = new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: value,
+      });
+      element.dispatchEvent(beforeInputEvent);
+    } catch {}
 
     let insertedViaExec = false;
     try {
@@ -583,8 +599,18 @@ function setNativeValue(element: HTMLElement, value: string): void {
     element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
   } else {
-    // Standard block element or custom input
-    element.textContent = value;
+    // Check if element contains an inner input or contenteditable
+    const innerEditable = element.querySelector<HTMLElement>('input:not([type="hidden"]), textarea, [contenteditable="true"], [role="textbox"]');
+    if (innerEditable && innerEditable !== element) {
+      setNativeValue(innerEditable, value);
+      return;
+    }
+    // Only set textContent if explicitly a textbox role or data-editable
+    if (element.getAttribute('role') === 'textbox' || element.hasAttribute('data-editable')) {
+      element.textContent = value;
+    } else {
+      throw new Error(`Target element <${element.tagName.toLowerCase()}> is not an input, textarea, or contenteditable editor.`);
+    }
   }
 
   // Dispatch full event sequence to satisfy React, Vue, Angular, Svelte, Polymer, Closure
@@ -949,12 +975,15 @@ function fillFormFields(assignments: Array<{ refId?: string; selector?: string; 
       }
 
       // In Gmail and email clients, setting a recipient creates a chip and clears the input
+      const targetAriaLabel = (target.getAttribute('aria-label') || '').toLowerCase();
       const isRecipientInput =
-        (target.getAttribute('type') || '').toLowerCase() === 'email' ||
-        target.getAttribute('role') === 'combobox' ||
-        (target.getAttribute('aria-label') || '').toLowerCase().includes('to') ||
-        (target.getAttribute('aria-label') || '').toLowerCase().includes('recipient') ||
-        Boolean(target.closest('div[aria-label*="To" i], div.M9, .agP'));
+        !target.isContentEditable &&
+        target.tagName.toLowerCase() === 'input' &&
+        ((target.getAttribute('type') || '').toLowerCase() === 'email' ||
+          target.getAttribute('role') === 'combobox' ||
+          /\bto\b/i.test(targetAriaLabel) ||
+          /\brecipients?\b/i.test(targetAriaLabel) ||
+          Boolean(target.closest('div[aria-label*="To" i]:not([role="region"]), div.M9, .agP')));
 
       let isRecipientChip = false;
       if (isRecipientInput) {
@@ -1084,6 +1113,17 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
     'a[href], button, [role="button"], [role="tab"], [role="listitem"], [role="row"], [role="menuitem"], [role="option"], [role="treeitem"], div[data-testid*="cell"], div[data-testid*="list-item"], div[data-testid*="chat-list-item"], tp-yt-paper-tab, yt-tab-shape, ytd-compact-video-renderer, ytd-video-renderer, #pane-side div[tabindex="-1"], [contenteditable="true"]'
   );
 
+  // If target itself is an outer row or list item container, resolve its inner primary interactive leaf (contact name, title, button)
+  let leafTarget = target;
+  if (target.matches('[role="listitem"], [role="row"], div[data-testid*="cell"], div[data-testid*="list-item"], #pane-side div[tabindex="-1"]')) {
+    const innerLeaf = target.querySelector<HTMLElement>(
+      'span[title], div[title], [title], a[href], button, [role="button"], [role="gridcell"], .title, [class*="title" i], [class*="name" i]'
+    );
+    if (innerLeaf && isElementVisible(innerLeaf)) {
+      leafTarget = innerLeaf;
+    }
+  }
+
   const primaryTarget = container || target;
   try {
     primaryTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1092,8 +1132,8 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   // Visual highlight: highlight the full interactive container (chat row or button) so it is never clipped by overflow:hidden
   flashHighlight(primaryTarget);
 
-  // Dispatch full interactive event sequence (pointerdown, mousedown, focus, pointerup, mouseup, click)
-  simulateInteractiveClick(target, container);
+  // Dispatch full interactive event sequence starting at the leaf element, bubbling through container
+  simulateInteractiveClick(leafTarget, container);
 
   const label = (primaryTarget.textContent || primaryTarget.getAttribute('aria-label') || primaryTarget.getAttribute('data-tooltip') || target.getAttribute('title') || '').trim().slice(0, 40);
   return { success: true, message: `Clicked element successfully (${primaryTarget.tagName.toLowerCase()}: "${label}")` };

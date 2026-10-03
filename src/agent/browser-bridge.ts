@@ -611,6 +611,18 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
   const container = target.closest<HTMLElement>(
     'a[href], button, [role="button"], [role="tab"], [role="listitem"], [role="row"], [role="menuitem"], [role="option"], [role="treeitem"], div[data-testid*="cell"], div[data-testid*="list-item"], div[data-testid*="chat-list-item"], tp-yt-paper-tab, yt-tab-shape, ytd-compact-video-renderer, ytd-video-renderer, #pane-side div[tabindex="-1"], [contenteditable="true"]'
   );
+
+  // If target itself is an outer row or list item container, resolve its inner primary interactive leaf (contact name, title, button)
+  let leafTarget = target;
+  if (target.matches('[role="listitem"], [role="row"], div[data-testid*="cell"], div[data-testid*="list-item"], #pane-side div[tabindex="-1"]')) {
+    const innerLeaf = target.querySelector<HTMLElement>(
+      'span[title], div[title], [title], a[href], button, [role="button"], [role="gridcell"], .title, [class*="title" i], [class*="name" i]'
+    );
+    if (innerLeaf) {
+      leafTarget = innerLeaf;
+    }
+  }
+
   const primary = container || target;
 
   try {
@@ -636,7 +648,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
   } catch {}
 
   // Dispatch full pointer and mouse sequence to trigger React synthetic events
-  const rect = target.getBoundingClientRect();
+  const rect = leafTarget.getBoundingClientRect();
   const fallbackRect = primary.getBoundingClientRect();
   const effectiveRect = (rect.width > 0 && rect.height > 0) ? rect : fallbackRect;
   const clientX = Math.round(effectiveRect.left + (effectiveRect.width > 0 ? effectiveRect.width / 2 : 10));
@@ -685,8 +697,8 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     } catch {}
   };
 
-  dispatchCycle(target);
-  if (container && container !== target) {
+  dispatchCycle(leafTarget);
+  if (container && container !== leafTarget) {
     dispatchCycle(container);
   }
 

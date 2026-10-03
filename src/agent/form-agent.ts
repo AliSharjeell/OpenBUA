@@ -587,9 +587,9 @@ ${(this.settings.autoConfirmSubmit ?? true)
           a) Check 'get_active_tab_form' buttons/actions for 'Chat: <Name>' and click its refId, OR call 'click_element({ text: "<Name>" })' or 'click_element({ selector: "span[title*=\'<Name>\' i]" })'.
           b) If contact is not yet visible in recent chats, type the name into the search box ('fill_form_fields') and call 'press_key_combination({ key: "Enter" })' or click the search result.
       * 2-STEP ATOMIC DISPATCH:
-        - Step 1: Type the message into the active compose box using 'fill_form_fields({ refId: "...", value: "..." })'.
+        - Step 1: Type the message into the active compose box using 'fill_form_fields({ refId: "...", value: "..." })' or 'fill_form_fields({ selector: "#main div[contenteditable=\'true\'][role=\'textbox\']", value: "..." })'.
         - Step 2: Send IMMEDIATELY:
-          Call 'press_key_combination({ key: "Enter" })' OR click the Send button ('click_element({ text: "Send", selector: "button[aria-label*=\'Send\' i], span[data-icon=\'send\'], [data-icon=\'send\'], button[data-tab=\'11\']" })').
+          Dispatch Enter with 'press_key_combination({ key: "Enter", selector: "#main div[contenteditable=\'true\'][role=\'textbox\']" })' or 'press_key_combination({ key: "Enter" })'. In WhatsApp Web, pressing Enter on the compose box is 100% native, instant, and sends the message immediately without needing to guess button selectors. Alternatively click Send ('click_element({ selector: "button[aria-label*=\'Send\' i], span[data-icon=\'send\'], [data-icon=\'send\'], button[data-tab=\'11\']" })'). NEVER click random submit buttons.
       * ZERO-CYCLE COMPLETION:
         - Once 'Enter' is pressed or the Send button is clicked, THE MESSAGE IS SENT!
         - DO NOT call 'get_active_tab_form' or 'capture_tab_screenshot' to "verify" or "inspect" whether the message was sent.
