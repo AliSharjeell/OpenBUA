@@ -927,7 +927,10 @@ function findTargetElement(refId?: string, selector?: string): HTMLElement | nul
   return null;
 }
 
-async function fillFormFields(assignments: Array<{ refId?: string; selector?: string; value: string }>): Promise<FormFillResult> {
+async function fillFormFields(
+  assignments: Array<{ refId?: string; selector?: string; value: string; pressEnter?: boolean }>,
+  pressEnterAll?: boolean
+): Promise<FormFillResult> {
   let successCount = 0;
   const errors: string[] = [];
   const verifications: FieldFillVerification[] = [];
@@ -1009,6 +1012,32 @@ async function fillFormFields(assignments: Array<{ refId?: string; selector?: st
 
       if (isVerified) {
         successCount++;
+        if (item.pressEnter || pressEnterAll) {
+          try {
+            target.focus();
+            const eventInit: KeyboardEventInit = {
+              key: 'Enter',
+              code: 'Enter',
+              keyCode: 13,
+              which: 13,
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+            };
+            target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+            target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+            target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+
+            setTimeout(() => {
+              const sendBtn = document.querySelector<HTMLElement>(
+                'button[aria-label*="Send" i], span[data-icon="send"], [data-icon="send"], button[data-tab="11"]'
+              );
+              if (sendBtn) {
+                sendBtn.click();
+              }
+            }, 80);
+          } catch {}
+        }
       } else {
         errors.push(`Field ${item.refId || item.selector} was filled but DOM value remained empty/mismatched (Actual: "${actualValue.slice(0, 40)}")`);
       }
@@ -1497,7 +1526,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
 
       case 'FILL_FORM_FIELDS': {
-        fillFormFields(request.assignments || [])
+        fillFormFields(request.assignments || [], request.pressEnter)
           .then((result) => {
             sendResponse({ success: true, data: result });
           })

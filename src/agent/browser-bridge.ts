@@ -322,7 +322,10 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
 }
 
 // In-page fallback script for directly setting field values in tab
-function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; value: string }>): {
+function inPageFillForm(
+  assignments: Array<{ refId?: string; selector?: string; value: string; pressEnter?: boolean }>,
+  pressEnterAll?: boolean
+): {
   successCount: number;
   errors: string[];
   verifications: Array<{
@@ -521,6 +524,32 @@ function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; 
 
       if (verified) {
         successCount++;
+        if (item.pressEnter || pressEnterAll) {
+          try {
+            target.focus();
+            const eventInit: KeyboardEventInit = {
+              key: 'Enter',
+              code: 'Enter',
+              keyCode: 13,
+              which: 13,
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+            };
+            target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+            target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+            target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+
+            setTimeout(() => {
+              const sendBtn = document.querySelector<HTMLElement>(
+                'button[aria-label*="Send" i], span[data-icon="send"], [data-icon="send"], button[data-tab="11"]'
+              );
+              if (sendBtn) {
+                sendBtn.click();
+              }
+            }, 80);
+          } catch {}
+        }
       } else {
         errors.push(`Field ${item.refId || item.selector} DOM value remained empty or mismatch`);
       }
@@ -1133,7 +1162,8 @@ export async function inspectActiveTabForm(selector?: string): Promise<PageFormS
 
 // Fill fields on active tab
 export async function fillActiveTabFields(
-  assignments: Array<{ refId?: string; selector?: string; value: string }>
+  assignments: Array<{ refId?: string; selector?: string; value: string; pressEnter?: boolean }>,
+  pressEnterAll?: boolean
 ): Promise<FormFillResult> {
   const activeTab = await getActiveTab();
   if (!activeTab || !activeTab.id) {
@@ -1161,6 +1191,7 @@ export async function fillActiveTabFields(
     const response = await sendMessageToTab(activeTab.id, {
       action: 'FILL_FORM_FIELDS',
       assignments,
+      pressEnter: pressEnterAll,
     }, 2000);
     if (response && response.success && response.data) {
       return response.data as FormFillResult;
@@ -1175,7 +1206,7 @@ export async function fillActiveTabFields(
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPageFillForm,
-        args: [assignments],
+        args: [assignments, pressEnterAll],
       });
       if (results && results[0] && results[0].result) {
         return results[0].result as FormFillResult;
@@ -2061,7 +2092,10 @@ export async function searchWeb(
   query: string,
   limit = 5
 ): Promise<{ success: boolean; query: string; results: SearchWebResult[]; message?: string }> {
-  const cleanQuery = (query || '').trim();
+  const cleanQuery = (query || '')
+    .replace(/["'“”]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!cleanQuery) {
     return { success: false, query: '', results: [], message: 'Empty search query provided.' };
   }

@@ -88,24 +88,26 @@ const FillFormFieldsSchema = Type.Object({
       selector: Type.Optional(Type.String({ description: 'CSS selector if refId is not available' })),
       value: Type.String({ description: 'The exact value to set into the input/select/textarea' }),
       reason: Type.Optional(Type.String({ description: 'Explanation of which user data was matched to this field' })),
+      pressEnter: Type.Optional(Type.Boolean({ description: 'If true, automatically dispatches Enter immediately after typing this field (ideal for sending chat messages in 1 single turn)' })),
     }),
     { description: 'List of fields and values to fill' }
   ),
+  pressEnter: Type.Optional(Type.Boolean({ description: 'If true, automatically dispatches Enter immediately after filling the fields (ideal for sending WhatsApp/chat messages or submitting search in 1 single turn)' })),
 });
 
 export const fillFormFieldsTool: AgentTool<typeof FillFormFieldsSchema> = {
   name: 'fill_form_fields',
   label: 'Fill Form Fields',
-  description: 'Fills form fields on the active webpage with the provided values. Compatible with React, Vue, contenteditable rich text editors, and standard HTML forms.',
+  description: 'Fills form fields on the active webpage with the provided values. Compatible with React, Vue, contenteditable rich text editors, and standard HTML forms. Supports pressEnter: true to type and send messages or submit search in a single action.',
   parameters: FillFormFieldsSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
-      const result = await fillActiveTabFields(params.assignments);
+      const result = await fillActiveTabFields(params.assignments, params.pressEnter);
       
       const verificationLines = (result.verifications || []).map((v) => {
         const id = v.refId || v.selector || 'field';
         if (v.verified) {
-          return `  - [${id}]: [VERIFIED] (DOM value: "${v.actualValue.slice(0, 50)}")`;
+          return `  - [${id}]: [VERIFIED - Field successfully populated and active in DOM]`;
         } else if (!v.elementFound) {
           return `  - [${id}]: [NOT FOUND]`;
         } else {
