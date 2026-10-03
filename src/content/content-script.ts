@@ -33,11 +33,6 @@ let elementRefMap = new Map<string, HTMLElement>();
 let refCounter = 0;
 
 function generateRefId(el: HTMLElement): string {
-  // If element already has an autoform ID, return it
-  const existing = el.getAttribute('data-autoform-ref');
-  if (existing && elementRefMap.has(existing)) {
-    return existing;
-  }
   refCounter++;
   const refId = `af_${refCounter}`;
   el.setAttribute('data-autoform-ref', refId);
@@ -230,7 +225,10 @@ function getElementPriority(el: HTMLElement): number {
 }
 
 function inspectAllFormElements(containerSelector?: string): PageFormSummary {
-  // Clear stale references
+  // Clear all previous autoform attributes across the document to prevent stale ID collisions
+  document.querySelectorAll('[data-autoform-ref]').forEach((el) => {
+    el.removeAttribute('data-autoform-ref');
+  });
   elementRefMap.clear();
   refCounter = 0;
 
@@ -341,9 +339,20 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
     'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, ytd-button-renderer, yt-button-shape'
   ));
 
-  // Filter out elements inside search prediction dropdowns / hidden autocomplete popups
+  // Filter out elements inside search prediction dropdowns / hidden autocomplete popups and chat message bubbles
   const filteredButtonElements = rawButtonElements.filter((el) => {
-    return !el.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list');
+    if (el.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list')) return false;
+
+    // Filter out chat message bubbles, rows, and timestamps (WhatsApp, Telegram, Slack, Teams)
+    if (el.closest('.message-in, .message-out, [data-id*="false_"], [data-id*="true_"], [data-pre-plain-text], .chat-message, [role="row"] .copyable-text')) {
+      return false;
+    }
+
+    const t = (el.textContent || '').trim();
+    if (/^\d{1,2}:\d{2}(?:\s*(?:am|pm))?$/i.test(t)) return false;
+    if (t.startsWith('reaction ') && t.includes('View reactions')) return false;
+
+    return true;
   });
 
   // Prioritize buttons inside active dialog/modal first
@@ -367,13 +376,13 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
     ).trim();
     if (!text || text.length > 50) return;
 
-    const lower = `${text} ${btn.getAttribute('data-tooltip') || ''} ${btn.getAttribute('title') || ''}`.toLowerCase();
+    const lower = `${text} ${btn.getAttribute('data-tooltip') || ''} ${btn.getAttribute('title') || ''} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
     const isSubmit =
       lower.includes('submit') ||
+      lower.includes('send') ||
       lower.includes('comment') ||
       lower.includes('post') ||
       lower.includes('reply') ||
-      lower.includes('send') ||
       lower.includes('publish') ||
       lower.includes('tweet') ||
       lower.includes('finish') ||
@@ -520,15 +529,24 @@ function setNativeValue(element: HTMLElement, value: string): void {
       select.value = value;
     }
   } else if (isContentEditable) {
-    // Rich editor (YouTube #contenteditable-root, Gmail Message Body, Twitter/X, Discord, Slack, Reddit)
-    // Select all existing content and replace via execCommand or textContent
+    // Rich editor (WhatsApp, YouTube, Gmail, Twitter/X, Discord, Slack, Reddit)
     element.focus();
-    const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    if (selection) {
-      selection.removeAllRanges();
-      selection.addRange(range);
+
+    // Select all existing content using native 'selectAll' command
+    let selectAllSuccess = false;
+    try {
+      selectAllSuccess = document.execCommand('selectAll', false, undefined);
+    } catch {
+      selectAllSuccess = false;
+    }
+    if (!selectAllSuccess) {
+      const selection = window.getSelection();
+      if (selection) {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
     }
 
     let insertedViaExec = false;
@@ -538,34 +556,36 @@ function setNativeValue(element: HTMLElement, value: string): void {
       insertedViaExec = false;
     }
 
-    if (!insertedViaExec || !element.innerText.includes(value.trim().slice(0, 10))) {
+    if (!insertedViaExec) {
       element.innerText = value;
+      try {
+        const inputEvent = new InputEvent('input', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertText',
+          data: value,
+        });
+        element.dispatchEvent(inputEvent);
+      } catch {}
     }
 
-    // Dispatch specialized InputEvent for frameworks like Draft.js, Slate, Lexical, Polymer
-    try {
-      const inputEvent = new InputEvent('input', {
-        bubbles: true,
-        cancelable: true,
-        inputType: 'insertText',
-        data: value,
-      });
-      element.dispatchEvent(inputEvent);
-    } catch {
-      // Fallback to standard Event
-    }
+    // Notify input and change events
+    element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
   } else {
     // Standard block element or custom input
     element.textContent = value;
   }
 
   // Dispatch full event sequence to satisfy React, Vue, Angular, Svelte, Polymer, Closure
-  element.dispatchEvent(new Event('focus', { bubbles: true }));
-  element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
-  element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-  element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
-  element.dispatchEvent(new Event('change', { bubbles: true }));
-  element.dispatchEvent(new Event('blur', { bubbles: true }));
+  if (!isContentEditable) {
+    element.dispatchEvent(new Event('focus', { bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new Event('blur', { bubbles: true }));
+  }
 
   // Flash visual feedback highlight on filled element
   flashHighlight(element);
@@ -829,12 +849,29 @@ function fillFormFields(assignments: Array<{ refId?: string; selector?: string; 
       setNativeValue(target, item.value);
 
       // Verify the value in DOM immediately after setting
-      const actualValue = readElementValue(target);
+      let actualValue = readElementValue(target);
+      if (!actualValue && (target.isContentEditable || target.getAttribute('role') === 'textbox')) {
+        actualValue = (target.innerText || target.textContent || '').trim();
+        if (!actualValue) {
+          const innerP = target.querySelector('p, span, .selectable-text');
+          if (innerP) actualValue = (innerP.textContent || '').trim();
+        }
+      }
 
       // In Gmail and email clients, setting a recipient creates a chip and clears the input
-      const parentContainer = target.closest('tr, td, .form-group, div.M9, div[role="dialog"], div[aria-label*="To" i]');
-      const containerText = parentContainer ? (parentContainer.innerText || parentContainer.textContent || '') : '';
-      const isRecipientChip = containerText.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 10));
+      const isRecipientInput =
+        (target.getAttribute('type') || '').toLowerCase() === 'email' ||
+        target.getAttribute('role') === 'combobox' ||
+        (target.getAttribute('aria-label') || '').toLowerCase().includes('to') ||
+        (target.getAttribute('aria-label') || '').toLowerCase().includes('recipient') ||
+        Boolean(target.closest('div[aria-label*="To" i], div.M9, .agP'));
+
+      let isRecipientChip = false;
+      if (isRecipientInput) {
+        const parentContainer = target.closest('tr, td, .form-group, div.M9, div[role="dialog"], div[aria-label*="To" i]');
+        const containerText = parentContainer ? (parentContainer.innerText || parentContainer.textContent || '') : '';
+        isRecipientChip = containerText.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 10));
+      }
 
       const isVerified =
         isRecipientChip ||

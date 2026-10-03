@@ -151,6 +151,10 @@ export async function sendMessageToTab<T = any>(tabId: number, message: any, tim
 
 // In-page fallback script for direct DOM inspection without relying on message ports
 function inPageInspectForm(containerSelector?: string): PageFormSummary {
+  document.querySelectorAll('[data-autoform-ref]').forEach((el) => {
+    el.removeAttribute('data-autoform-ref');
+  });
+
   let root: ParentNode = document;
   if (containerSelector) {
     const customRoot = document.querySelector(containerSelector);
@@ -266,12 +270,19 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
   const buttons: Array<{ refId: string; text: string; type: string; isSubmit: boolean; isNext: boolean; isPrevious: boolean }> = [];
   const rawButtons = Array.from(document.querySelectorAll<HTMLElement>(
     'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, ytd-button-renderer, yt-button-shape'
-  )).filter((el) => !el.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list'));
+  )).filter((el) => {
+    if (el.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list')) return false;
+    if (el.closest('.message-in, .message-out, [data-id*="false_"], [data-id*="true_"], [data-pre-plain-text], .chat-message, [role="row"] .copyable-text')) return false;
+    const t = (el.textContent || '').trim();
+    if (/^\d{1,2}:\d{2}(?:\s*(?:am|pm))?$/i.test(t)) return false;
+    if (t.startsWith('reaction ') && t.includes('View reactions')) return false;
+    return true;
+  });
 
   rawButtons.forEach((btn) => {
     const text = (btn.textContent || (btn as HTMLInputElement).value || btn.getAttribute('aria-label') || '').trim();
     if (!text || text.length > 50) return;
-    const lower = text.toLowerCase();
+    const lower = `${text} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
     counter++;
     const refId = `af_btn_${counter}`;
     btn.setAttribute('data-autoform-ref', refId);
@@ -287,7 +298,7 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
       refId,
       text,
       type: isTab ? 'tab' : (btn.getAttribute('type') || 'button'),
-      isSubmit: lower.includes('submit') || lower.includes('finish') || lower.includes('complete'),
+      isSubmit: lower.includes('submit') || lower.includes('send') || lower.includes('finish') || lower.includes('complete'),
       isNext: lower.includes('next') || lower.includes('continue') || lower.includes('proceed'),
       isPrevious: lower.includes('back') || lower.includes('prev'),
     });
@@ -418,12 +429,21 @@ function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; 
         }
       } else if (isContentEditable) {
         // Selection replacement and insertText for rich text editors
-        const sel = window.getSelection();
-        const range = document.createRange();
-        range.selectNodeContents(target);
-        if (sel) {
-          sel.removeAllRanges();
-          sel.addRange(range);
+        target.focus();
+        let selectAllSuccess = false;
+        try {
+          selectAllSuccess = document.execCommand('selectAll', false, undefined);
+        } catch {
+          selectAllSuccess = false;
+        }
+        if (!selectAllSuccess) {
+          const sel = window.getSelection();
+          if (sel) {
+            const range = document.createRange();
+            range.selectNodeContents(target);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
         }
         let execSuccess = false;
         try {
@@ -431,20 +451,33 @@ function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; 
         } catch {
           execSuccess = false;
         }
-        if (!execSuccess || !target.innerText.includes(item.value.slice(0, 10))) {
+        if (!execSuccess) {
           target.innerText = item.value;
+          try {
+            const inputEvent = new InputEvent('input', {
+              bubbles: true,
+              cancelable: true,
+              inputType: 'insertText',
+              data: item.value,
+            });
+            target.dispatchEvent(inputEvent);
+          } catch {}
         }
+        target.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
       } else {
         target.textContent = item.value;
       }
 
       // Event dispatching
-      target.dispatchEvent(new Event('focus', { bubbles: true }));
-      target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
-      target.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-      target.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
-      target.dispatchEvent(new Event('change', { bubbles: true }));
-      target.dispatchEvent(new Event('blur', { bubbles: true }));
+      if (!isContentEditable) {
+        target.dispatchEvent(new Event('focus', { bubbles: true }));
+        target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
+        target.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        target.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        target.dispatchEvent(new Event('blur', { bubbles: true }));
+      }
 
       // Visual flash highlight
       target.style.outline = '2px solid #22c55e';
@@ -463,6 +496,10 @@ function inPageFillForm(assignments: Array<{ refId?: string; selector?: string; 
         actualVal = (target as HTMLSelectElement).value;
       } else {
         actualVal = target.innerText || target.textContent || '';
+        if (!actualVal && (isContentEditable || target.getAttribute('role') === 'textbox')) {
+          const innerP = target.querySelector('p, span, .selectable-text');
+          if (innerP) actualVal = (innerP.textContent || '').trim();
+        }
       }
 
       const verified = actualVal.length > 0 && (
@@ -890,22 +927,37 @@ class CaptchaGateManager {
     return new Promise<{ solved: boolean; message: string }>((resolve) => {
       this.activeResolver = resolve;
 
+      // Absolute hard safety timeout (12s) to prevent any possibility of indefinite freezing
+      const hardTimeout = setTimeout(() => {
+        if (this.activeState.isActive) {
+          this.resolveActiveGate(false, 'CAPTCHA challenge timed out after safety period. Resuming automation.');
+        }
+      }, 12000);
+
       // 1. Tick countdown every 1 second
       this.countdownTimer = setInterval(() => {
-        if (!this.activeState.isActive) return;
+        if (!this.activeState.isActive) {
+          clearTimeout(hardTimeout);
+          return;
+        }
         const nextRemaining = this.activeState.remainingSeconds - 1;
         if (nextRemaining <= 0) {
+          clearTimeout(hardTimeout);
           // Timer expired: do a final check to see if human solved it right before expiry
-          checkActiveTabCaptcha(tabId).then((check) => {
-            if (!check.detected) {
-              this.resolveActiveGate(true, 'CAPTCHA challenge solved before 10s timeout expired. Resuming automation.');
-            } else {
-              this.resolveActiveGate(
-                false,
-                'CAPTCHA challenge timed out after 10s. Human was unable to solve it or chose to pivot. Workaround activated: ABORT current domain/URL immediately and pivot to an alternate source (e.g. Google X-Ray search, web search snippet, or alternate URL). Do NOT attempt to reload this blocked URL.'
-              );
-            }
-          });
+          checkActiveTabCaptcha(tabId)
+            .then((check) => {
+              if (!check.detected) {
+                this.resolveActiveGate(true, 'CAPTCHA challenge solved before 10s timeout expired. Resuming automation.');
+              } else {
+                this.resolveActiveGate(
+                  false,
+                  'CAPTCHA challenge timed out after 10s. Human was unable to solve it or chose to pivot. Workaround activated: ABORT current domain/URL immediately and pivot to an alternate source (e.g. Google X-Ray search, web search snippet, or alternate URL). Do NOT attempt to reload this blocked URL.'
+                );
+              }
+            })
+            .catch(() => {
+              this.resolveActiveGate(false, 'CAPTCHA check failed. Resuming automation.');
+            });
         } else {
           this.activeState.remainingSeconds = nextRemaining;
           this.notify();
@@ -918,6 +970,7 @@ class CaptchaGateManager {
         try {
           const check = await checkActiveTabCaptcha(tabId);
           if (!check.detected) {
+            clearTimeout(hardTimeout);
             this.resolveActiveGate(true, 'CAPTCHA challenge solved by human in browser (DOM challenge cleared). Resuming automation.');
           }
         } catch {
@@ -1297,7 +1350,7 @@ export interface NavigationResult {
   url?: string;
 }
 
-export async function navigateActiveTab(url: string): Promise<NavigationResult> {
+export async function navigateActiveTab(url: string, timeoutMs = 8000): Promise<NavigationResult> {
   const activeTab = await getActiveTab();
   if (!activeTab || !activeTab.id || typeof chrome === 'undefined' || !chrome.tabs) {
     return { success: true, url };
@@ -1310,66 +1363,55 @@ export async function navigateActiveTab(url: string): Promise<NavigationResult> 
   }
 
   return new Promise((resolve) => {
-    let finished = false;
+    let settled = false;
 
-    const cleanup = () => {
-      if (!finished) {
-        finished = true;
+    const safeResolve = (res: NavigationResult) => {
+      if (settled) return;
+      settled = true;
+      try {
         clearTimeout(timer);
         chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-      }
+      } catch {}
+      resolve(res);
     };
 
-    const handleLoadedAndCheckCaptcha = async () => {
-      cleanup();
-      // Give client-side SPA frameworks (YouTube, React, Vue, Next.js) time to hydrate DOM
-      await new Promise((r) => setTimeout(r, 1200));
-      await ensureContentScriptInjected(tabId).catch(() => {});
-
-      // Inspect for CAPTCHA / anti-bot challenge
-      const captcha = await checkActiveTabCaptcha(tabId);
-      if (captcha.detected) {
-        const gate = await captchaManager.runGate(tabId, captcha.type || 'bot_challenge', targetUrl);
-        if (!gate.solved) {
-          resolve({
-            success: false,
-            blockedByCaptcha: true,
-            message: gate.message,
-            url: targetUrl,
-          });
-          return;
-        }
-      }
-
-      resolve({
+    // Absolute hard safety timeout (8s) - guarantees resolve even if page streams or hangs
+    const timer = setTimeout(() => {
+      safeResolve({
         success: true,
         url: targetUrl,
+        message: 'Navigation initiated (continuing without waiting indefinitely for page load event).',
       });
-    };
+    }, timeoutMs);
 
-    // 8-second safety timeout so it never hangs indefinitely on slow or streaming pages
-    const timer = setTimeout(async () => {
-      await handleLoadedAndCheckCaptcha();
-    }, 8000);
-
-    const onUpdatedListener = async (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+    const onUpdatedListener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
       if (updatedTabId === tabId && changeInfo.status === 'complete') {
-        await handleLoadedAndCheckCaptcha();
-      }
-    };
-
-    chrome.tabs.onUpdated.addListener(onUpdatedListener);
-
-    chrome.tabs.update(tabId, { url: targetUrl }, (updatedTab) => {
-      if (chrome.runtime.lastError || !updatedTab) {
-        cleanup();
-        resolve({
-          success: false,
-          message: chrome.runtime.lastError?.message || 'Failed to update tab URL',
+        safeResolve({
+          success: true,
           url: targetUrl,
         });
       }
-    });
+    };
+
+    try {
+      chrome.tabs.onUpdated.addListener(onUpdatedListener);
+
+      chrome.tabs.update(tabId, { url: targetUrl }, (updatedTab) => {
+        if (chrome.runtime.lastError || !updatedTab) {
+          safeResolve({
+            success: false,
+            message: chrome.runtime.lastError?.message || 'Failed to update tab URL',
+            url: targetUrl,
+          });
+        }
+      });
+    } catch (err: any) {
+      safeResolve({
+        success: false,
+        message: err?.message || 'Failed to navigate tab',
+        url: targetUrl,
+      });
+    }
   });
 }
 
