@@ -15,6 +15,7 @@ import {
   tryLoadFileFromLocalPath,
   detectFileType,
   detectDocumentCategory,
+  splitExtractedTextIntoSections,
 } from '../services/pdf-parser';
 import { Button } from './ui/button';
 import { Input, Textarea } from './ui/input';
@@ -82,7 +83,7 @@ export function MemoryView({
     setIsUploading(true);
     setUploadingName(file.name);
     try {
-      const parsed = await processUploadedFile(file, { runOcr: true });
+      const parsed = await processUploadedFile(file, { runOcr: false });
       const newDoc: UserDocument = {
         id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         title: parsed.title,
@@ -157,15 +158,73 @@ export function MemoryView({
     document.body.removeChild(link);
   };
 
-  const handleRunOcr = async (doc: UserDocument, e?: React.MouseEvent) => {
+  const handleExtractInfo = async (
+    doc: UserDocument,
+    mode: 'entire' | 'split' = 'entire',
+    e?: React.MouseEvent
+  ) => {
     e?.stopPropagation();
     if (!doc.dataUrl) return;
     setOcrLoadingId(doc.id);
     try {
       const extracted = await extractTextForDocument(doc);
+      const newCategory = detectDocumentCategory(doc.fileName || doc.title, extracted);
+
+      if (mode === 'split') {
+        const sections = splitExtractedTextIntoSections(extracted, doc.title);
+        if (sections.length > 1) {
+          const newDocs: UserDocument[] = sections.map((sec, idx) => ({
+            id: `mem-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+            title: sec.title,
+            type: 'markdown',
+            content: sec.content,
+            summary: `${sec.title} (${sec.content.slice(0, 80)}...)`,
+            createdAt: Date.now() + idx,
+            sizeBytes: new Blob([sec.content]).size,
+            tags: sec.tags,
+            isActiveForContext: true,
+            isGlobal: memoryScope === 'global',
+            tabUrlPattern: memoryScope === 'tab' ? currentTabKey : undefined,
+            fileCategory: sec.category,
+            ocrStatus: 'done',
+          }));
+
+          const updatedParent: UserDocument = {
+            ...doc,
+            content: extracted,
+            fileCategory: newCategory,
+            ocrStatus: 'done',
+          };
+
+          if (memoryScope === 'global') {
+            await saveGlobalMemory(updatedParent);
+            for (const nd of newDocs) await saveGlobalMemory(nd);
+            onGlobalMemoriesChange([
+              ...newDocs,
+              ...globalMemories.map((m) => (m.id === doc.id ? updatedParent : m)),
+            ]);
+          } else {
+            await saveTabMemory(currentTabKey, updatedParent);
+            for (const nd of newDocs) await saveTabMemory(currentTabKey, nd);
+            onTabMemoriesChange([
+              ...newDocs,
+              ...tabMemories.map((m) => (m.id === doc.id ? updatedParent : m)),
+            ]);
+          }
+
+          if (selectedDoc?.id === doc.id) {
+            setSelectedDoc(updatedParent);
+            setContent(extracted);
+          }
+          return;
+        }
+      }
+
+      // Default: Update this document as one entire thing
       const updatedDoc: UserDocument = {
         ...doc,
         content: extracted,
+        fileCategory: newCategory,
         ocrStatus: 'done',
       };
       if (memoryScope === 'global') {
@@ -410,8 +469,8 @@ export function MemoryView({
         <div className="p-3 rounded-2xl bg-blue-950/40 border border-blue-800/60 flex items-center gap-2.5 text-blue-200">
           <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium truncate">Processing {uploadingName}...</p>
-            <p className="text-[10px] text-blue-300/80">Saving raw file, video metadata, or OCR/VLM text</p>
+            <p className="text-xs font-medium truncate">Uploading {uploadingName}...</p>
+            <p className="text-[10px] text-blue-300/80">Saving raw document into memory</p>
           </div>
         </div>
       )}
@@ -421,7 +480,7 @@ export function MemoryView({
         <div className="p-6 rounded-3xl border-2 border-dashed border-blue-500/80 bg-blue-950/20 text-center text-blue-300">
           <Upload className="w-6 h-6 mx-auto mb-1 text-blue-400 animate-bounce" />
           <p className="text-xs font-semibold">Drop resume, PDF, video, or image files here</p>
-          <p className="text-[10px] text-blue-400/80 mt-0.5">Files will be saved as raw attachments with OCR text or video metadata</p>
+          <p className="text-[10px] text-blue-400/80 mt-0.5">Files will be saved as raw attachments. Extract info with one click.</p>
         </div>
       )}
 
@@ -480,18 +539,17 @@ export function MemoryView({
                   {(selectedDoc.type === 'image' || selectedDoc.type === 'pdf') && (
                     <Button
                       size="sm"
-                      variant="ghost"
-                      className="h-6 px-2 text-[10px] gap-1 rounded-full text-blue-400 hover:text-blue-300 hover:bg-blue-950/40"
+                      className="h-6 px-2.5 text-[10px] gap-1 rounded-full bg-[#007AFF] text-white hover:bg-[#0071EB] shadow-xs cursor-pointer border-0"
                       disabled={ocrLoadingId === selectedDoc.id}
-                      onClick={(e) => handleRunOcr(selectedDoc, e)}
-                      title="Re-run VLM OCR text extraction"
+                      onClick={(e) => handleExtractInfo(selectedDoc, 'entire', e)}
+                      title="Extract readable text and details into memory"
                     >
                       {ocrLoadingId === selectedDoc.id ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <Loader2 className="w-3 h-3 animate-spin text-white" />
                       ) : (
-                        <Sparkles className="w-3 h-3" />
+                        <Sparkles className="w-3 h-3 text-white" />
                       )}
-                      OCR
+                      Extract info into memory
                     </Button>
                   )}
 
@@ -661,13 +719,6 @@ export function MemoryView({
                           </span>
                         )}
 
-                        {/* File Format Badge */}
-                        {hasRawFile && (
-                          <span className="text-[9px] uppercase font-mono bg-zinc-800 text-zinc-400 px-1.5 py-0.2 rounded-full">
-                            {doc.type}
-                          </span>
-                        )}
-
                         {/* File Size */}
                         {doc.sizeBytes > 0 && (
                           <span className="text-[9px] text-zinc-500">
@@ -717,48 +768,50 @@ export function MemoryView({
                         </div>
                       </div>
 
-                      {/* Raw File Actions Bar (Download & OCR trigger) */}
+                      {/* Raw File Actions Bar (Download & Extract info) */}
                       {(hasRawFile || doc.filePath) && (
                         <div
                           className="flex items-center gap-2 mt-2 pt-2 border-t border-zinc-800/60"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {/* Raw file indicator */}
-                          <span className="text-[10px] text-zinc-500 flex items-center gap-1 font-mono truncate max-w-[130px]">
-                            {isVideo ? (
-                              <Video className="w-3 h-3 text-purple-400 shrink-0" />
-                            ) : doc.type === 'image' ? (
-                              <ImageIcon className="w-3 h-3 text-zinc-400 shrink-0" />
-                            ) : (
-                              <File className="w-3 h-3 text-zinc-400 shrink-0" />
-                            )}
-                            {doc.fileName || (doc.filePath ? doc.filePath.split(/[/\\]/).pop() : 'raw file')}
-                          </span>
-
-                          <div className="flex items-center gap-1 ml-auto">
+                          <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">
                             {/* OCR Extraction Button */}
                             {(doc.type === 'image' || doc.type === 'pdf') && (
-                              <button
-                                type="button"
-                                className="flex items-center gap-1 text-[10px] font-medium text-blue-400 hover:text-blue-300 bg-blue-950/40 hover:bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-900/50 transition-colors cursor-pointer"
-                                disabled={isOcrLoading}
-                                onClick={(e) => handleRunOcr(doc, e)}
-                                title="Extract text using VLM OCR"
-                              >
-                                {isOcrLoading ? (
-                                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                                ) : (
-                                  <Sparkles className="w-2.5 h-2.5" />
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  className="flex items-center gap-1.5 text-[11px] font-medium bg-[#007AFF] text-white hover:bg-[#0071EB] active:bg-[#006ee6] px-3 py-1 rounded-full shadow-xs transition-colors cursor-pointer disabled:opacity-50 border-0"
+                                  disabled={isOcrLoading}
+                                  onClick={(e) => handleExtractInfo(doc, 'entire', e)}
+                                  title="Extract readable text and details into memory"
+                                >
+                                  {isOcrLoading ? (
+                                    <Loader2 className="w-3 h-3 animate-spin text-white" />
+                                  ) : (
+                                    <Sparkles className="w-3 h-3 text-white" />
+                                  )}
+                                  {isOcrLoading ? 'Extracting info...' : 'Extract info into memory'}
+                                </button>
+
+                                {/* Option to split into multiple memory cards for easy retrieval */}
+                                {doc.ocrStatus === 'done' && doc.content && (
+                                  <button
+                                    type="button"
+                                    className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 hover:bg-zinc-800 px-2 py-1 rounded-full border border-zinc-700/60 transition-colors cursor-pointer"
+                                    onClick={(e) => handleExtractInfo(doc, 'split', e)}
+                                    title="Split extracted sections into separate memory cards for granular retrieval"
+                                  >
+                                    Split into cards
+                                  </button>
                                 )}
-                                {isOcrLoading ? 'Extracting...' : 'OCR Text'}
-                              </button>
+                              </div>
                             )}
 
                             {/* Download Button */}
                             {hasRawFile && (
                               <button
                                 type="button"
-                                className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 px-2 py-0.5 rounded-full border border-zinc-700/50 transition-colors cursor-pointer"
+                                className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 px-2.5 py-1 rounded-full border border-zinc-700/50 transition-colors cursor-pointer"
                                 onClick={(e) => handleDownloadFile(doc, e)}
                                 title="Download raw file"
                               >
