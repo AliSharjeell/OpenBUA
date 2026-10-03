@@ -578,6 +578,22 @@ ${(this.settings.autoConfirmSubmit ?? true)
         - When an action like 'click_element({ text: "Popular" })' or URL navigation succeeds, DO NOT call 'capture_tab_screenshot' or call 'get_page_content' repeatedly just to verify. Report the result to the user immediately.
       * TURN BUDGET: Standard browsing, searching, and sorting tasks MUST complete in 2 to 3 turns maximum.
 
+19. FAST WEB MESSAGING AUTOMATION (WhatsApp Web, Telegram, Slack, Web Chat, DMs):
+    - When the user asks to send a message or text someone on WhatsApp Web, Telegram, Slack, or web chat (e.g. "text to sidhart on whatsapp that this is a test reply", "send a message on Slack", "DM user on Twitter/X"):
+      * PROHIBIT UNNECESSARY TAB LISTING:
+        - If WhatsApp Web or the target chat is already the active tab, DO NOT call 'list_browser_tabs'.
+      * CHAT SELECTION (IF NEEDED):
+        - If the target chat is not open, click on the contact name ('click_element({ text: "Sidhart" })') or search contact via the chat search box.
+      * 2-STEP ATOMIC DISPATCH:
+        - Step 1: Type the message into the active compose box using 'fill_form_fields({ refId: "...", value: "..." })'.
+        - Step 2: Send IMMEDIATELY:
+          Call 'press_key_combination({ key: "Enter" })' OR click the Send button ('click_element({ text: "Send", selector: "button[aria-label*=\'Send\' i], span[data-icon=\'send\'], [data-icon=\'send\'], button[data-tab=\'11\']" })').
+      * ZERO-CYCLE COMPLETION:
+        - Once 'Enter' is pressed or the Send button is clicked, THE MESSAGE IS SENT!
+        - DO NOT call 'get_active_tab_form' or 'capture_tab_screenshot' to "verify" or "inspect" whether the message was sent.
+        - Report completion immediately to the user!
+      * TURN BUDGET: Message sending MUST complete in 1 to 2 turns maximum (under 15 seconds).
+
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
