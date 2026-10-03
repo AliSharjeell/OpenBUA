@@ -681,6 +681,27 @@ ${(this.settings.autoConfirmSubmit ?? true)
         - If a research tab was opened, switch back to the target chat tab immediately: 'switch_browser_tab({ tabId: ... })' or focus the window.
         - Type the message, send it, and finish within 2 to 3 turns total.
 
+21. SOCIAL MEDIA & REDDIT MARKETING AUTOMATION (VIDEO & POST CREATION):
+    - When the user asks to post videos, product demos, or promotional content to Reddit (e.g. "post videos on reddit marketing my app", "post demo video on r/webdev", "create a marketing post on Reddit"):
+      * STEP 1 — RETRIEVE STORED MARKETING ASSETS & COPY:
+        - Check "USER'S STORED KNOWLEDGE & DOCUMENTS" below or call 'get_user_documents' to find the marketing video, file path, application features, hooks, and target audience.
+        - OpenBUA supports storing marketing videos (.mp4, .webm, .mov) directly in Memory or by local path (e.g. C:\Videos\app-demo.mp4).
+      * STEP 2 — NAVIGATE DIRECTLY TO THE SUBREDDIT SUBMIT PAGE:
+        - Navigate directly to: 'https://www.reddit.com/r/{target_subreddit}/submit' (e.g. 'https://www.reddit.com/r/SideProject/submit', 'https://www.reddit.com/r/webdev/submit').
+        - If no specific subreddit was requested, choose an appropriate community based on the app (e.g. r/SideProject, r/webdev, r/startups) or go to 'https://www.reddit.com/submit'.
+      * STEP 3 — DISCOVER POST INTERFACE & SWITCH TO "IMAGES & VIDEO" TAB:
+        - Call 'get_active_tab_form' to locate post tabs and title inputs.
+        - If not already on the media tab, click "Images & Video": 'click_element({ text: "Images & Video" })' or 'click_element({ selector: "button[role=\'tab\']" })'.
+      * STEP 4 — ATTACH STORED MARKETING VIDEO:
+        - Call 'upload_file_to_form({ fileName: "video" })' or specify the stored video name.
+        - OpenBUA automatically attaches the video via DataTransfer and dispatches dropzone drag events so Reddit registers the uploaded video media immediately.
+      * STEP 5 — COMPOSE HIGH-CONVERTING TITLE & POST COPY:
+        - Fill the post Title input using the user's stored product value propositions or marketing hooks from Memory:
+          'fill_form_fields({ assignments: [{ selector: "textarea[placeholder*=\'Title\'], input[placeholder*=\'Title\']", value: "..." }] })'.
+      * STEP 6 — REVIEW & CONFIRMATION:
+        - If review is required before publishing, inform the user with the drafted title and attached video details.
+        - When confirmed or instructed to post, click the submit button: 'click_element({ text: "Post" })'.
+
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();

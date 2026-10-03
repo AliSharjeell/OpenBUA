@@ -226,6 +226,8 @@ export const getUserDocumentsTool: AgentTool<typeof GetUserDocumentsSchema> = {
         let meta = `${doc.type}`;
         if (doc.fileCategory) meta += `, category: ${doc.fileCategory}`;
         if (doc.fileName) meta += `, filename: "${doc.fileName}"`;
+        if (doc.filePath) meta += `, path: "${doc.filePath}"`;
+        if (doc.videoDuration) meta += `, duration: ${doc.videoDuration}s`;
         if (doc.dataUrl) meta += `, raw file attachment available for form upload`;
         formatted += `### Document ${idx + 1}: ${doc.title} (${meta})\n${doc.content}\n\n`;
       });
@@ -239,6 +241,8 @@ export const getUserDocumentsTool: AgentTool<typeof GetUserDocumentsSchema> = {
             type: d.type,
             fileName: d.fileName,
             fileCategory: d.fileCategory,
+            filePath: d.filePath,
+            videoDuration: d.videoDuration,
             hasRawFile: Boolean(d.dataUrl),
           })),
         },
@@ -857,9 +861,9 @@ const UploadFileToFormSchema = Type.Object({
 
 export const uploadFileToFormTool: AgentTool<typeof UploadFileToFormSchema> = {
   name: 'upload_file_to_form',
-  label: 'Upload File / Resume to Form',
+  label: 'Upload File / Video / Resume to Form',
   description:
-    'Programmatically attaches a stored raw file (such as resume.pdf, PNG photo, or document) from the user\'s Memory to a file input (<input type="file">) or dropzone on the active tab using DataTransfer. Use this whenever an application or form asks for a resume, CV, ID, or file upload.',
+    'Programmatically attaches a stored raw file (such as a marketing video mp4/webm/mov, resume.pdf, PNG/JPG photo, or document) from the user\'s Memory to a file input (<input type="file">) or dropzone on the active tab using DataTransfer. Use this whenever an application or form asks for a file upload, or when posting marketing videos/images to platforms like Reddit, Twitter/X, or social media.',
   parameters: UploadFileToFormSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
