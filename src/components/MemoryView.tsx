@@ -12,6 +12,9 @@ import {
   processUploadedFile,
   extractTextForDocument,
   formatFileSize,
+  tryLoadFileFromLocalPath,
+  detectFileType,
+  detectDocumentCategory,
 } from '../services/pdf-parser';
 import { Button } from './ui/button';
 import { Input, Textarea } from './ui/input';
@@ -27,6 +30,8 @@ import {
   Loader2,
   File,
   Image as ImageIcon,
+  Video,
+  Film,
 } from 'lucide-react';
 
 interface MemoryViewProps {
@@ -61,6 +66,7 @@ export function MemoryView({
   // New Memory Form
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [filePath, setFilePath] = useState('');
 
   const activeMemories = memoryScope === 'global' ? globalMemories : tabMemories;
 
@@ -94,6 +100,9 @@ export function MemoryView({
         dataUrl: parsed.dataUrl,
         ocrStatus: parsed.ocrStatus,
         fileCategory: parsed.fileCategory,
+        thumbnailUrl: parsed.thumbnailUrl,
+        videoDuration: parsed.videoDuration,
+        filePath: parsed.filePath,
       };
 
       if (memoryScope === 'global') {
@@ -179,25 +188,61 @@ export function MemoryView({
   };
 
   const handleSaveMemory = async () => {
-    if (!title.trim() || !content.trim()) return;
+    if (!title.trim() && !filePath.trim() && !content.trim()) return;
+
+    let attachedDataUrl = selectedDoc?.dataUrl;
+    let attachedMime = selectedDoc?.mimeType;
+    let attachedSize = selectedDoc?.sizeBytes || 0;
+    let attachedFileName = selectedDoc?.fileName;
+    let attachedThumb = selectedDoc?.thumbnailUrl;
+    let attachedDuration = selectedDoc?.videoDuration;
+
+    // If local path is provided and no dataUrl is attached, attempt loading
+    if (filePath.trim() && !attachedDataUrl) {
+      try {
+        const loaded = await tryLoadFileFromLocalPath(filePath.trim());
+        if (loaded) {
+          attachedDataUrl = loaded.dataUrl;
+          attachedMime = loaded.mimeType;
+          attachedSize = loaded.sizeBytes;
+          attachedFileName = loaded.fileName;
+        }
+      } catch (err) {
+        console.warn('[AutoForm AI] Local path load attempt failed:', err);
+      }
+    }
+
+    const detectedType = detectFileType(attachedFileName || filePath || `${title}.txt`, attachedMime);
+    const finalType = selectedDoc?.type || (detectedType !== 'text' ? detectedType : 'markdown');
+    const finalCategory = detectDocumentCategory(attachedFileName || filePath || title, content);
+
+    const effectiveTitle = title.trim() || attachedFileName || (finalType === 'video' ? 'Marketing Video' : 'Saved Memory');
+    const effectiveContent =
+      content.trim() ||
+      (finalType === 'video'
+        ? `[Video Media: ${attachedFileName || filePath.trim()}] Marketing video ready for Reddit, YouTube, or social upload.`
+        : `[File Attachment: ${attachedFileName || filePath.trim()}]`);
 
     const newDoc: UserDocument = {
       id: selectedDoc?.id || `mem-${Date.now()}`,
-      title: title.trim(),
-      type: selectedDoc?.type || 'markdown',
-      content: content.trim(),
-      summary: selectedDoc?.summary || `${title.trim()} (${content.trim().slice(0, 80)}...)`,
+      title: effectiveTitle,
+      type: finalType,
+      content: effectiveContent,
+      summary: selectedDoc?.summary || `${effectiveTitle} (${effectiveContent.slice(0, 80)}...)`,
       createdAt: selectedDoc?.createdAt || Date.now(),
-      sizeBytes: selectedDoc?.sizeBytes || new Blob([content]).size,
-      tags: selectedDoc?.tags || ['custom'],
+      sizeBytes: attachedSize || new Blob([effectiveContent]).size,
+      tags: selectedDoc?.tags || [finalCategory !== 'other' ? finalCategory : 'custom'],
       isActiveForContext: selectedDoc ? selectedDoc.isActiveForContext : true,
       isGlobal: memoryScope === 'global',
       tabUrlPattern: memoryScope === 'tab' ? currentTabKey : undefined,
-      fileName: selectedDoc?.fileName,
-      mimeType: selectedDoc?.mimeType,
-      dataUrl: selectedDoc?.dataUrl,
-      ocrStatus: selectedDoc?.ocrStatus,
-      fileCategory: selectedDoc?.fileCategory,
+      fileName: attachedFileName,
+      mimeType: attachedMime,
+      dataUrl: attachedDataUrl,
+      ocrStatus: selectedDoc?.ocrStatus || 'done',
+      fileCategory: finalCategory,
+      filePath: filePath.trim() || selectedDoc?.filePath || undefined,
+      thumbnailUrl: attachedThumb,
+      videoDuration: attachedDuration,
     };
 
     if (memoryScope === 'global') {
@@ -248,12 +293,14 @@ export function MemoryView({
     setSelectedDoc(null);
     setTitle('');
     setContent('');
+    setFilePath('');
   };
 
   const openEdit = (doc: UserDocument) => {
     setSelectedDoc(doc);
     setTitle(doc.title);
     setContent(doc.content);
+    setFilePath(doc.filePath || '');
     setIsEditing(true);
     setIsAddingNew(true);
   };
@@ -267,12 +314,12 @@ export function MemoryView({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Hidden File Input for uploading resumes, images, PDFs, docs */}
+      {/* Hidden File Input for uploading resumes, images, videos, PDFs, docs */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.md,.markdown,.json,.txt,.doc,.docx"
+        accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.mov,.mkv,.avi,.m4v,.md,.markdown,.json,.txt,.doc,.docx"
         className="hidden"
         onChange={handleFileUpload}
       />
@@ -290,7 +337,7 @@ export function MemoryView({
               disabled={isUploading}
               className="h-7 px-2.5 text-[11px] gap-1.5 rounded-full border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 hover:text-white font-medium shadow-xs transition-colors cursor-pointer"
               onClick={() => fileInputRef.current?.click()}
-              title="Upload resume.pdf, image, or document"
+              title="Upload resume.pdf, video, image, or document"
             >
               {isUploading ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
@@ -364,7 +411,7 @@ export function MemoryView({
           <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium truncate">Processing {uploadingName}...</p>
-            <p className="text-[10px] text-blue-300/80">Saving raw file and extracting OCR/VLM text</p>
+            <p className="text-[10px] text-blue-300/80">Saving raw file, video metadata, or OCR/VLM text</p>
           </div>
         </div>
       )}
@@ -373,8 +420,8 @@ export function MemoryView({
       {isDragging && (
         <div className="p-6 rounded-3xl border-2 border-dashed border-blue-500/80 bg-blue-950/20 text-center text-blue-300">
           <Upload className="w-6 h-6 mx-auto mb-1 text-blue-400 animate-bounce" />
-          <p className="text-xs font-semibold">Drop resume, PDF, or image files here</p>
-          <p className="text-[10px] text-blue-400/80 mt-0.5">Files will be saved as raw attachments with OCR text</p>
+          <p className="text-xs font-semibold">Drop resume, PDF, video, or image files here</p>
+          <p className="text-[10px] text-blue-400/80 mt-0.5">Files will be saved as raw attachments with OCR text or video metadata</p>
         </div>
       )}
 
@@ -400,12 +447,20 @@ export function MemoryView({
             {selectedDoc?.dataUrl && (
               <div className="p-2.5 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  {selectedDoc.type === 'image' && selectedDoc.dataUrl ? (
+                  {selectedDoc.thumbnailUrl ? (
+                    <img
+                      src={selectedDoc.thumbnailUrl}
+                      alt={selectedDoc.fileName || 'video thumbnail'}
+                      className="w-8 h-8 rounded-lg object-cover border border-zinc-800 shrink-0"
+                    />
+                  ) : selectedDoc.type === 'image' && selectedDoc.dataUrl ? (
                     <img
                       src={selectedDoc.dataUrl}
                       alt={selectedDoc.fileName || 'file'}
                       className="w-8 h-8 rounded-lg object-cover border border-zinc-800 shrink-0"
                     />
+                  ) : selectedDoc.type === 'video' ? (
+                    <Video className="w-5 h-5 text-purple-400 shrink-0" />
                   ) : (
                     <File className="w-5 h-5 text-blue-400 shrink-0" />
                   )}
@@ -414,7 +469,8 @@ export function MemoryView({
                       {selectedDoc.fileName || selectedDoc.title}
                     </p>
                     <p className="text-[10px] text-zinc-400">
-                      {formatFileSize(selectedDoc.sizeBytes)} • {selectedDoc.mimeType || selectedDoc.type}
+                      {selectedDoc.sizeBytes > 0 ? formatFileSize(selectedDoc.sizeBytes) : 'Media file'} • {selectedDoc.mimeType || selectedDoc.type}
+                      {selectedDoc.videoDuration ? ` • ${selectedDoc.videoDuration}s` : ''}
                     </p>
                   </div>
                 </div>
@@ -457,7 +513,7 @@ export function MemoryView({
             <div>
               <label className="text-[10px] font-medium text-zinc-400 block mb-1">Title</label>
               <Input
-                placeholder="e.g. Resume, Personal Profile, Address"
+                placeholder="e.g. Resume, Marketing Video, Personal Profile"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className="h-8 rounded-xl bg-zinc-950/80 border-zinc-800 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600"
@@ -465,19 +521,34 @@ export function MemoryView({
             </div>
 
             <div>
+              <label className="text-[10px] font-medium text-zinc-400 block mb-1">
+                Local File Path / Video Path (Optional)
+              </label>
+              <Input
+                placeholder="e.g. C:\Videos\promo.mp4 or /path/to/demo.mp4"
+                value={filePath}
+                onChange={(e) => setFilePath(e.target.value)}
+                className="h-8 rounded-xl bg-zinc-950/80 border-zinc-800 text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600"
+              />
+              <p className="text-[9px] text-zinc-500 mt-1">
+                Specify local path for videos or large assets so OpenBUA can attach them to Reddit, social media, or file forms.
+              </p>
+            </div>
+
+            <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-[10px] font-medium text-zinc-400 block">
-                  Extracted Content / Form Context
+                  Extracted Content / Marketing Copy & Context
                 </label>
                 {selectedDoc?.dataUrl && (
                   <span className="text-[10px] text-zinc-500">
-                    Used by AI agent to fill matching text fields
+                    Used by AI agent to fill forms or post copy
                   </span>
                 )}
               </div>
               <Textarea
                 rows={6}
-                placeholder="Personal details, resume text, or form answers..."
+                placeholder="Personal details, resume text, marketing post copy, hooks, or form answers..."
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 className="font-sans text-[11px] leading-relaxed rounded-xl bg-zinc-950/80 border-zinc-800 text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-600"
@@ -497,7 +568,7 @@ export function MemoryView({
                 size="sm"
                 className="h-7 text-[11px] rounded-full bg-[#007AFF] text-white hover:bg-[#0071EB] font-medium px-4 shadow-xs transition-colors cursor-pointer"
                 onClick={handleSaveMemory}
-                disabled={!title.trim() || !content.trim()}
+                disabled={!title.trim() && !filePath.trim() && !content.trim()}
               >
                 {isEditing ? 'Save Changes' : 'Save Memory'}
               </Button>
@@ -534,6 +605,7 @@ export function MemoryView({
             const isOcrLoading = ocrLoadingId === doc.id;
             const hasRawFile = Boolean(doc.dataUrl);
             const isResume = doc.fileCategory === 'resume' || doc.tags?.includes('resume');
+            const isVideo = doc.type === 'video' || doc.fileCategory === 'video' || doc.tags?.includes('video');
 
             return (
               <div
@@ -575,6 +647,13 @@ export function MemoryView({
                           {doc.title}
                         </span>
 
+                        {/* Video Category Badge */}
+                        {isVideo && (
+                          <span className="text-[9px] font-medium bg-purple-500/10 text-purple-400 px-1.5 py-0.2 rounded-full border border-purple-500/20">
+                            Video
+                          </span>
+                        )}
+
                         {/* Resume Category Badge */}
                         {isResume && (
                           <span className="text-[9px] font-medium bg-blue-500/10 text-blue-400 px-1.5 py-0.2 rounded-full border border-blue-500/20">
@@ -599,32 +678,61 @@ export function MemoryView({
 
                       {/* Content snippet & thumbnail preview */}
                       <div className="flex items-start gap-2 mt-1.5">
-                        {doc.type === 'image' && doc.dataUrl && (
+                        {doc.thumbnailUrl ? (
+                          <div className="relative w-12 h-12 rounded-xl overflow-hidden border border-zinc-800 shrink-0 bg-zinc-950">
+                            <img
+                              src={doc.thumbnailUrl}
+                              alt={doc.fileName || 'video thumbnail'}
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                              <Video className="w-4 h-4 text-white drop-shadow" />
+                            </div>
+                            {doc.videoDuration ? (
+                              <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[8px] font-mono text-zinc-300 px-1 rounded">
+                                {doc.videoDuration}s
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : doc.type === 'image' && doc.dataUrl ? (
                           <img
                             src={doc.dataUrl}
                             alt={doc.fileName || 'thumbnail'}
                             className="w-10 h-10 rounded-xl object-cover border border-zinc-800 shrink-0"
                           />
-                        )}
-                        <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed flex-1">
-                          {doc.content || doc.summary}
-                        </p>
+                        ) : isVideo ? (
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center border border-zinc-800 shrink-0 bg-purple-950/30">
+                            <Video className="w-5 h-5 text-purple-400" />
+                          </div>
+                        ) : null}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] text-zinc-400 line-clamp-2 leading-relaxed">
+                            {doc.content || doc.summary}
+                          </p>
+                          {doc.filePath && (
+                            <p className="text-[10px] text-zinc-500 font-mono truncate mt-0.5" title={doc.filePath}>
+                              {doc.filePath}
+                            </p>
+                          )}
+                        </div>
                       </div>
 
                       {/* Raw File Actions Bar (Download & OCR trigger) */}
-                      {hasRawFile && (
+                      {(hasRawFile || doc.filePath) && (
                         <div
                           className="flex items-center gap-2 mt-2 pt-2 border-t border-zinc-800/60"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {/* Raw file indicator */}
                           <span className="text-[10px] text-zinc-500 flex items-center gap-1 font-mono truncate max-w-[130px]">
-                            {doc.type === 'image' ? (
+                            {isVideo ? (
+                              <Video className="w-3 h-3 text-purple-400 shrink-0" />
+                            ) : doc.type === 'image' ? (
                               <ImageIcon className="w-3 h-3 text-zinc-400 shrink-0" />
                             ) : (
                               <File className="w-3 h-3 text-zinc-400 shrink-0" />
                             )}
-                            {doc.fileName || 'raw file'}
+                            {doc.fileName || (doc.filePath ? doc.filePath.split(/[/\\]/).pop() : 'raw file')}
                           </span>
 
                           <div className="flex items-center gap-1 ml-auto">
@@ -647,15 +755,17 @@ export function MemoryView({
                             )}
 
                             {/* Download Button */}
-                            <button
-                              type="button"
-                              className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 px-2 py-0.5 rounded-full border border-zinc-700/50 transition-colors cursor-pointer"
-                              onClick={(e) => handleDownloadFile(doc, e)}
-                              title="Download raw file"
-                            >
-                              <Download className="w-2.5 h-2.5" />
-                              Download
-                            </button>
+                            {hasRawFile && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 px-2 py-0.5 rounded-full border border-zinc-700/50 transition-colors cursor-pointer"
+                                onClick={(e) => handleDownloadFile(doc, e)}
+                                title="Download raw file"
+                              >
+                                <Download className="w-2.5 h-2.5" />
+                                Download
+                              </button>
+                            )}
                           </div>
                         </div>
                       )}
