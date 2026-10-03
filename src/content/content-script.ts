@@ -554,7 +554,6 @@ function setNativeValue(element: HTMLElement, value: string): void {
       const targetNode = element.querySelector('p.selectable-text, p, span[data-lexical-text]') || element;
       const range = document.createRange();
       range.selectNodeContents(targetNode);
-      range.collapse(false);
       selection.removeAllRanges();
       selection.addRange(range);
     }
@@ -562,17 +561,6 @@ function setNativeValue(element: HTMLElement, value: string): void {
     // Select all existing content using native 'selectAll' command
     try {
       document.execCommand('selectAll', false, undefined);
-    } catch {}
-
-    // Dispatch beforeinput event (critical for Lexical in WhatsApp Web and ProseMirror)
-    try {
-      const beforeInputEvent = new InputEvent('beforeinput', {
-        bubbles: true,
-        cancelable: true,
-        inputType: 'insertText',
-        data: value,
-      });
-      element.dispatchEvent(beforeInputEvent);
     } catch {}
 
     let insertedViaExec = false;
@@ -939,7 +927,7 @@ function findTargetElement(refId?: string, selector?: string): HTMLElement | nul
   return null;
 }
 
-function fillFormFields(assignments: Array<{ refId?: string; selector?: string; value: string }>): FormFillResult {
+async function fillFormFields(assignments: Array<{ refId?: string; selector?: string; value: string }>): Promise<FormFillResult> {
   let successCount = 0;
   const errors: string[] = [];
   const verifications: FieldFillVerification[] = [];
@@ -964,7 +952,10 @@ function fillFormFields(assignments: Array<{ refId?: string; selector?: string; 
     try {
       setNativeValue(target, item.value);
 
-      // Verify the value in DOM immediately after setting
+      // Yield briefly to let rich-text frameworks (Lexical, React, ProseMirror, Slate) flush DOM reconciliations
+      await new Promise((resolve) => setTimeout(resolve, 60));
+
+      // Verify the value in DOM after setting
       let actualValue = readElementValue(target);
       if (!actualValue && (target.isContentEditable || target.getAttribute('role') === 'textbox')) {
         actualValue = (target.innerText || target.textContent || '').trim();
@@ -973,6 +964,8 @@ function fillFormFields(assignments: Array<{ refId?: string; selector?: string; 
           if (innerP) actualValue = (innerP.textContent || '').trim();
         }
       }
+      // Clean zero-width whitespace and normalize
+      actualValue = actualValue.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
 
       // In Gmail and email clients, setting a recipient creates a chip and clears the input
       const targetAriaLabel = (target.getAttribute('aria-label') || '').toLowerCase();
@@ -992,12 +985,15 @@ function fillFormFields(assignments: Array<{ refId?: string; selector?: string; 
         isRecipientChip = containerText.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 10));
       }
 
+      const cleanActual = actualValue.toLowerCase();
+      const cleanRequested = item.value.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase();
+
       const isVerified =
         isRecipientChip ||
-        (actualValue.length > 0 && (
-          actualValue.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 15)) ||
-          item.value.toLowerCase().includes(actualValue.toLowerCase().trim().slice(0, 15)) ||
-          actualValue === item.value ||
+        (cleanActual.length > 0 && (
+          cleanActual.includes(cleanRequested.slice(0, 15)) ||
+          cleanRequested.includes(cleanActual.slice(0, 15)) ||
+          cleanActual === cleanRequested ||
           (target as HTMLInputElement).type === 'checkbox' ||
           (target as HTMLInputElement).type === 'radio'
         ));
@@ -1306,8 +1302,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
 
       case 'FILL_FORM_FIELDS': {
-        const result = fillFormFields(request.assignments || []);
-        sendResponse({ success: true, data: result });
+        fillFormFields(request.assignments || [])
+          .then((result) => {
+            sendResponse({ success: true, data: result });
+          })
+          .catch((err) => {
+            sendResponse({ success: false, error: err?.message || String(err) });
+          });
         break;
       }
 
