@@ -525,26 +525,31 @@ export async function processUploadedFile(
       ocrStatus = 'done';
     }
   } else if (type === 'pdf') {
-    try {
-      content = await extractTextFromPdf(file);
-      ocrStatus = 'done';
-    } catch (err: any) {
-      console.warn('[AutoForm AI] PDF text extraction failed:', err);
-      content = `[PDF Document: ${file.name}] Raw file stored. Click Extract Text to re-run OCR.`;
-      ocrStatus = 'failed';
+    if (options?.runOcr === true) {
+      try {
+        content = await extractTextFromPdf(file);
+        ocrStatus = 'done';
+      } catch (err: any) {
+        console.warn('[AutoForm AI] PDF text extraction failed:', err);
+        content = `[PDF Document: ${file.name}] Raw file stored. Click "Extract info into memory" to process.`;
+        ocrStatus = 'failed';
+      }
+    } else {
+      content = `[PDF Document: ${file.name}] Raw PDF file stored. Click "Extract info into memory" to extract readable text.`;
+      ocrStatus = 'pending';
     }
   } else if (type === 'image') {
-    if (options?.runOcr !== false) {
+    if (options?.runOcr === true) {
       try {
         content = await extractTextWithVlm(dataUrl, mimeType);
         ocrStatus = 'done';
       } catch (err: any) {
         console.warn('[AutoForm AI] Image VLM OCR failed:', err);
-        content = `[Image: ${file.name}] Raw image file stored. Click Extract Text (OCR) to extract readable text.`;
+        content = `[Image: ${file.name}] Raw image file stored. Click "Extract info into memory" to process.`;
         ocrStatus = 'failed';
       }
     } else {
-      content = `[Image: ${file.name}] Raw image file stored. Click Extract Text (OCR) to extract readable text.`;
+      content = `[Image: ${file.name}] Raw image file stored. Click "Extract info into memory" to extract readable text.`;
       ocrStatus = 'pending';
     }
   } else if (type === 'markdown' || type === 'json' || type === 'text') {
@@ -602,6 +607,90 @@ export async function extractTextForDocument(doc: UserDocument): Promise<string>
   }
 
   throw new Error(`Text extraction not supported for file type: ${doc.type}`);
+}
+
+export interface ExtractedMemorySection {
+  title: string;
+  content: string;
+  category: 'resume' | 'id_card' | 'photo' | 'video' | 'document' | 'other';
+  tags: string[];
+}
+
+/**
+ * Splits extracted Markdown/OCR text into logical sections (e.g. Personal Info, Experience, Education, Skills)
+ * so the user can save them as individual granular memory cards for easier AI retrieval.
+ */
+export function splitExtractedTextIntoSections(
+  rawText: string,
+  baseTitle: string
+): ExtractedMemorySection[] {
+  const trimmed = (rawText || '').trim();
+  if (!trimmed) return [];
+
+  // Match Markdown headings: #, ##, ###, #### or bold headers like **Experience**
+  const headingRegex = /(?:^|\n)(#{1,4}\s+[^\n]+|\*\*[A-Z][A-Za-z0-9\s,&/-]{2,40}\*\*:?)/g;
+  const matches: { index: number; heading: string }[] = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = headingRegex.exec(trimmed)) !== null) {
+    matches.push({ index: m.index, heading: m[1].replace(/^[#*\s]+|[#*\s:]+$/g, '').trim() });
+  }
+
+  // If fewer than 2 distinct headings found, return as a single section
+  if (matches.length < 2) {
+    return [
+      {
+        title: baseTitle,
+        content: trimmed,
+        category: detectDocumentCategory(baseTitle, trimmed),
+        tags: ['extracted'],
+      },
+    ];
+  }
+
+  const sections: ExtractedMemorySection[] = [];
+
+  // Check if there is introductory text before the first heading
+  if (matches[0].index > 0) {
+    const introText = trimmed.slice(0, matches[0].index).trim();
+    if (introText.length > 20) {
+      sections.push({
+        title: `${baseTitle}: Overview`,
+        content: introText,
+        category: detectDocumentCategory(baseTitle, introText),
+        tags: ['overview', 'profile'],
+      });
+    }
+  }
+
+  for (let i = 0; i < matches.length; i++) {
+    const cur = matches[i];
+    const startIndex = cur.index;
+    const endIndex = i + 1 < matches.length ? matches[i + 1].index : trimmed.length;
+    const sectionBody = trimmed.slice(startIndex, endIndex).trim();
+
+    if (sectionBody.length > 10) {
+      const headingClean = cur.heading;
+      const sectionCategory = detectDocumentCategory(headingClean, sectionBody);
+      sections.push({
+        title: `${baseTitle}: ${headingClean}`,
+        content: sectionBody,
+        category: sectionCategory,
+        tags: [headingClean.toLowerCase().replace(/[^a-z0-9]+/g, '-'), 'extracted'],
+      });
+    }
+  }
+
+  return sections.length > 0
+    ? sections
+    : [
+        {
+          title: baseTitle,
+          content: trimmed,
+          category: detectDocumentCategory(baseTitle, trimmed),
+          tags: ['extracted'],
+        },
+      ];
 }
 
 /**
