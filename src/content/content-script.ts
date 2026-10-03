@@ -1034,13 +1034,34 @@ async function fillFormFields(
             target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
 
             setTimeout(() => {
-              const sendBtn = document.querySelector<HTMLElement>(
-                'button[aria-label*="Send" i], span[data-icon="send"], [data-icon="send"], button[data-tab="11"]'
-              );
-              if (sendBtn) {
-                sendBtn.click();
+              // 1. If target text is already cleared, Enter already sent the message! Never click anything.
+              const remaining = (
+                (target as HTMLInputElement).value !== undefined
+                  ? (target as HTMLInputElement).value
+                  : (target.innerText || target.textContent || '')
+              ).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+
+              if (remaining.length === 0) {
+                return; // Message already sent and compose box cleared
               }
-            }, 80);
+
+              // 2. Only look for genuine Send buttons (NEVER match data-tab="11" or voice buttons)
+              const sendBtn = document.querySelector<HTMLElement>(
+                'button[aria-label*="Send" i], span[data-icon="send"], [data-icon="send"], button[data-testid*="send" i]'
+              );
+              if (!sendBtn) return;
+
+              // 3. Absolute safety: NEVER click microphone, voice note, or PTT buttons!
+              const isVoiceOrMic =
+                Boolean(sendBtn.querySelector('[data-icon="ptt"], [data-icon="mic"], [aria-label*="voice" i], [aria-label*="record" i]')) ||
+                sendBtn.matches('[data-icon="ptt"], [data-icon="mic"]') ||
+                /\b(voice|record|ptt|mic|microphone)\b/i.test(sendBtn.getAttribute('aria-label') || '');
+
+              if (isVoiceOrMic) return;
+
+              const clickTarget = sendBtn.closest('button') || sendBtn;
+              clickTarget.click();
+            }, 100);
           } catch {}
         }
       } else {

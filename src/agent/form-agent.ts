@@ -600,6 +600,7 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * ZERO-CYCLE COMPLETION:
         - Once 'fill_form_fields' (with pressEnter) or Enter is pressed, THE MESSAGE IS SENT!
         - DO NOT call 'get_active_tab_form' or 'capture_tab_screenshot' to "verify" or "inspect" whether the message was sent.
+        - NEVER attempt to click microphone, voice note, or PTT buttons on WhatsApp Web, Telegram, Slack, or any chat app.
         - Report completion immediately to the user!
       * CHAT READING & SCROLLING (WhatsApp Web, Telegram, Slack, Web Chat):
         - When the user asks to read, check, summarize, or inspect chat messages (or scroll up/down to see conversation history):
