@@ -36,10 +36,12 @@ export interface AppSettings {
   systemInstruction?: string;
 }
 
+export type DocumentFileType = 'pdf' | 'markdown' | 'text' | 'json' | 'image' | 'file';
+
 export interface UserDocument {
   id: string;
   title: string;
-  type: 'pdf' | 'markdown' | 'text' | 'json';
+  type: DocumentFileType;
   content: string;
   summary?: string;
   createdAt: number;
@@ -48,6 +50,11 @@ export interface UserDocument {
   isActiveForContext: boolean;
   isGlobal?: boolean; // true for General/Global memory consistent across all tabs
   tabUrlPattern?: string; // Optional domain or URL pattern for tab-specific memory
+  fileName?: string; // Raw filename, e.g. "resume.pdf", "profile.png"
+  mimeType?: string; // MIME type, e.g. "application/pdf", "image/png"
+  dataUrl?: string; // Base64 data URL for raw binary storage and programmatic form uploads
+  ocrStatus?: 'pending' | 'processing' | 'done' | 'failed';
+  fileCategory?: 'resume' | 'id_card' | 'photo' | 'document' | 'other';
 }
 
 export interface ChatSession {
