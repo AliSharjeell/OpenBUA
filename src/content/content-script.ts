@@ -980,8 +980,32 @@ async function fillFormFields(
       const cleanActual = actualValue.toLowerCase();
       const cleanRequested = item.value.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase();
 
+      // Check digits equality for formatted phone numbers, SSNs, credit cards, dates, zip codes
+      const digitsActual = cleanActual.replace(/\D/g, '');
+      const digitsRequested = cleanRequested.replace(/\D/g, '');
+      const isDigitsMatch = digitsActual.length > 2 && digitsRequested.length > 2 && digitsActual === digitsRequested;
+
+      // Select element verification: match by value, label, or valid selection
+      let isSelectMatch = false;
+      if (target.tagName.toLowerCase() === 'select') {
+        const sel = target as HTMLSelectElement;
+        const curOpt = sel.options[sel.selectedIndex];
+        const curVal = (curOpt?.value || sel.value || '').toLowerCase().trim();
+        const curText = (curOpt?.text || '').toLowerCase().trim();
+        isSelectMatch =
+          curVal === cleanRequested ||
+          curText === cleanRequested ||
+          curText.includes(cleanRequested) ||
+          cleanRequested.includes(curText) ||
+          curVal.includes(cleanRequested) ||
+          cleanRequested.includes(curVal) ||
+          (sel.selectedIndex > 0 && !cleanRequested.includes('select'));
+      }
+
       const isVerified =
         isRecipientChip ||
+        isDigitsMatch ||
+        isSelectMatch ||
         (cleanActual.length > 0 && (
           cleanActual.includes(cleanRequested.slice(0, 15)) ||
           cleanRequested.includes(cleanActual.slice(0, 15)) ||

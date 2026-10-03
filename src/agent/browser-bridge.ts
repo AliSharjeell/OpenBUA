@@ -496,7 +496,9 @@ function inPageFillForm(
       } else if (tagName === 'textarea') {
         actualVal = (target as HTMLTextAreaElement).value;
       } else if (tagName === 'select') {
-        actualVal = (target as HTMLSelectElement).value;
+        const sel = target as HTMLSelectElement;
+        const curOpt = sel.options[sel.selectedIndex];
+        actualVal = curOpt?.text || sel.value || '';
       } else {
         actualVal = target.innerText || target.textContent || '';
         if (!actualVal && (isContentEditable || target.getAttribute('role') === 'textbox')) {
@@ -505,13 +507,41 @@ function inPageFillForm(
         }
       }
 
-      const verified = actualVal.length > 0 && (
-        actualVal.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 15)) ||
-        item.value.toLowerCase().includes(actualVal.toLowerCase().trim().slice(0, 15)) ||
-        actualVal === item.value ||
-        (target as HTMLInputElement).type === 'checkbox' ||
-        (target as HTMLInputElement).type === 'radio'
-      );
+      const cleanActual = actualVal.toLowerCase().trim();
+      const cleanRequested = item.value.toLowerCase().trim();
+
+      // Check digits equality for formatted phone numbers, SSNs, credit cards, dates, zip codes
+      const digitsActual = cleanActual.replace(/\D/g, '');
+      const digitsRequested = cleanRequested.replace(/\D/g, '');
+      const isDigitsMatch = digitsActual.length > 2 && digitsRequested.length > 2 && digitsActual === digitsRequested;
+
+      // Select element verification: match by value, label, or valid selection
+      let isSelectMatch = false;
+      if (tagName === 'select') {
+        const sel = target as HTMLSelectElement;
+        const curOpt = sel.options[sel.selectedIndex];
+        const curVal = (curOpt?.value || sel.value || '').toLowerCase().trim();
+        const curText = (curOpt?.text || '').toLowerCase().trim();
+        isSelectMatch =
+          curVal === cleanRequested ||
+          curText === cleanRequested ||
+          curText.includes(cleanRequested) ||
+          cleanRequested.includes(curText) ||
+          curVal.includes(cleanRequested) ||
+          cleanRequested.includes(curVal) ||
+          (sel.selectedIndex > 0 && !cleanRequested.includes('select'));
+      }
+
+      const verified =
+        isDigitsMatch ||
+        isSelectMatch ||
+        (cleanActual.length > 0 && (
+          cleanActual.includes(cleanRequested.slice(0, 15)) ||
+          cleanRequested.includes(cleanActual.slice(0, 15)) ||
+          cleanActual === cleanRequested ||
+          (target as HTMLInputElement).type === 'checkbox' ||
+          (target as HTMLInputElement).type === 'radio'
+        ));
 
       verifications.push({
         refId: item.refId || '',
@@ -1207,13 +1237,23 @@ export async function fillActiveTabFields(
     throw new Error(`Chrome restricts extensions from accessing internal pages (${activeTab.url}). Please open a regular webpage or form (such as test-form.html) in your browser!`);
   }
 
+  const cleanAssignments = (assignments || []).map((a) => ({
+    refId: a.refId || '',
+    selector: a.selector || '',
+    value: String(a.value ?? ''),
+    pressEnter: Boolean(a.pressEnter),
+  }));
+
+  // Generous timeout for large forms (e.g. 40+ fields on test pages)
+  const fillTimeoutMs = Math.max(12000, cleanAssignments.length * 300);
+
   // 1. Try sendMessageToTab
   try {
     const response = await sendMessageToTab(activeTab.id, {
       action: 'FILL_FORM_FIELDS',
-      assignments,
-      pressEnter: pressEnterAll,
-    }, 2000);
+      assignments: cleanAssignments,
+      pressEnter: Boolean(pressEnterAll),
+    }, fillTimeoutMs);
     if (response && response.success && response.data) {
       return response.data as FormFillResult;
     }
@@ -1227,7 +1267,7 @@ export async function fillActiveTabFields(
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPageFillForm,
-        args: [assignments, pressEnterAll],
+        args: [cleanAssignments, Boolean(pressEnterAll)],
       });
       if (results && results[0] && results[0].result) {
         return results[0].result as FormFillResult;
@@ -1274,7 +1314,7 @@ export async function clickActiveTabElement(options: {
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPageClickElement,
-        args: [options.refId, options.selector, options.text],
+        args: [options.refId || '', options.selector || '', options.text || ''],
       });
       if (results && results[0] && results[0].result) {
         return results[0].result as { success: boolean; message: string };
@@ -1522,7 +1562,7 @@ export async function scrollActiveTab(
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPageScrollPage,
-        args: [direction, selector],
+        args: [direction, selector || ''],
       });
       if (results && results[0] && results[0].result) {
         return results[0].result as { success: boolean; message?: string };
@@ -2012,10 +2052,18 @@ export async function pressKeyCombination(options: {
 
   if (typeof chrome !== 'undefined' && chrome.scripting) {
     try {
+      const cleanOptions = {
+        key: options.key,
+        ctrlKey: Boolean(options.ctrlKey),
+        shiftKey: Boolean(options.shiftKey),
+        altKey: Boolean(options.altKey),
+        metaKey: Boolean(options.metaKey),
+        selector: options.selector || '',
+      };
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPagePressKey,
-        args: [options],
+        args: [cleanOptions],
       });
       if (results && results[0] && results[0].result) {
         return results[0].result as { success: boolean; message: string };
