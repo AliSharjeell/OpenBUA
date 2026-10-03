@@ -36,7 +36,7 @@ export interface AppSettings {
   systemInstruction?: string;
 }
 
-export type DocumentFileType = 'pdf' | 'markdown' | 'text' | 'json' | 'image' | 'file';
+export type DocumentFileType = 'pdf' | 'markdown' | 'text' | 'json' | 'image' | 'video' | 'file';
 
 export interface UserDocument {
   id: string;
@@ -50,11 +50,14 @@ export interface UserDocument {
   isActiveForContext: boolean;
   isGlobal?: boolean; // true for General/Global memory consistent across all tabs
   tabUrlPattern?: string; // Optional domain or URL pattern for tab-specific memory
-  fileName?: string; // Raw filename, e.g. "resume.pdf", "profile.png"
-  mimeType?: string; // MIME type, e.g. "application/pdf", "image/png"
+  fileName?: string; // Raw filename, e.g. "resume.pdf", "app_demo.mp4", "profile.png"
+  filePath?: string; // Local disk path or media URL, e.g. "C:/Videos/openbua_demo.mp4"
+  mimeType?: string; // MIME type, e.g. "application/pdf", "video/mp4", "image/png"
   dataUrl?: string; // Base64 data URL for raw binary storage and programmatic form uploads
   ocrStatus?: 'pending' | 'processing' | 'done' | 'failed';
-  fileCategory?: 'resume' | 'id_card' | 'photo' | 'document' | 'other';
+  fileCategory?: 'resume' | 'id_card' | 'photo' | 'video' | 'document' | 'other';
+  videoDuration?: number; // Video duration in seconds
+  thumbnailUrl?: string; // Media/video frame thumbnail data URL
 }
 
 export interface ChatSession {
