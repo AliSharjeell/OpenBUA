@@ -1702,26 +1702,177 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
 
         // 2b. Extract active chat conversation messages (WhatsApp Web, Slack, Telegram, Discord)
         let chatExcerpt = '';
-        const chatNodes = Array.from(document.querySelectorAll<HTMLElement>(
-          '#main .copyable-text[data-pre-plain-text], #main .message-in, #main .message-out, [role="log"] [role="row"], [data-qa="message_content"]'
-        ));
-        if (chatNodes.length > 0) {
-          const lines: string[] = [];
-          chatNodes.forEach((node) => {
-            const pre = node.getAttribute('data-pre-plain-text') || '';
-            const txt = (node.innerText || node.textContent || '').trim();
-            if (txt) {
-              lines.push(pre ? `${pre}${txt}` : txt);
+        const mainPane = document.querySelector<HTMLElement>('#main');
+
+        if (mainPane) {
+          // WhatsApp Web active chat window detected
+          try {
+            // Auto-click "scroll to bottom" button if unread / new messages arrived below viewport
+            const scrollDownBtn = mainPane.querySelector<HTMLElement>(
+              'button[aria-label*="down" i], button[aria-label*="scroll" i], button[aria-label*="unread" i], [data-testid="down-context"], [data-icon="down"]'
+            );
+            if (scrollDownBtn) {
+              try { scrollDownBtn.click(); } catch {}
+            }
+
+            // Ensure messages panel scroll container is scrolled to the bottom to mount virtualized rows
+            const whatsappScrollSels = [
+              '#main div[data-testid="conversation-panel-messages"]',
+              '#main div[role="application"]',
+              '#main .copyable-area > div[tabindex="0"]',
+              '#main .copyable-area > div:nth-child(2)',
+              '#main .copyable-area > div',
+            ];
+            for (const sel of whatsappScrollSels) {
+              const el = document.querySelector<HTMLElement>(sel);
+              if (el && el.scrollHeight > el.clientHeight + 20) {
+                if (el.scrollHeight - el.scrollTop - el.clientHeight > 150) {
+                  el.scrollTop = el.scrollHeight;
+                }
+                break;
+              }
+            }
+          } catch {}
+
+          // Extract Chat Title / Partner Name from header
+          const headerEl = mainPane.querySelector('header');
+          const titleEl = headerEl?.querySelector('span[title], [dir="auto"], div[role="button"] span');
+          const chatTitle = (titleEl?.getAttribute('title') || titleEl?.textContent || '').trim() || 'Chat Contact';
+
+          // Collect message bubbles (avoiding parent-child duplicate selection)
+          let candidateBubbles = Array.from(mainPane.querySelectorAll<HTMLElement>(
+            '.message-in, .message-out'
+          ));
+          if (candidateBubbles.length === 0) {
+            candidateBubbles = Array.from(mainPane.querySelectorAll<HTMLElement>(
+              'div[role="row"], [data-testid="msg-container"]'
+            ));
+          }
+
+          // Filter out elements that enclose other candidate elements (prevents row wrapping .message-in duplication)
+          const distinctBubbles = candidateBubbles.filter((bubble) => {
+            return !candidateBubbles.some((other) => other !== bubble && bubble.contains(other));
+          });
+
+          interface ParsedMessage {
+            direction: 'incoming' | 'outgoing';
+            author: string;
+            time: string;
+            text: string;
+            status: string;
+          }
+
+          const parsedList: ParsedMessage[] = [];
+
+          distinctBubbles.forEach((bubble) => {
+            const isIncoming = bubble.classList.contains('message-in') ||
+              !!bubble.closest('.message-in') ||
+              bubble.getAttribute('data-id')?.startsWith('false_') ||
+              (!bubble.classList.contains('message-out') && !bubble.closest('.message-out') && !bubble.getAttribute('data-id')?.startsWith('true_') && !!bubble.querySelector('.message-in'));
+            const isOutgoing = bubble.classList.contains('message-out') ||
+              !!bubble.closest('.message-out') ||
+              bubble.getAttribute('data-id')?.startsWith('true_');
+
+            const direction: 'incoming' | 'outgoing' = isOutgoing ? 'outgoing' : 'incoming';
+
+            const copyable = bubble.querySelector<HTMLElement>('.copyable-text[data-pre-plain-text]') ||
+              (bubble.hasAttribute('data-pre-plain-text') ? bubble : null);
+            const pre = copyable?.getAttribute('data-pre-plain-text') || '';
+
+            let author = isOutgoing ? 'You' : chatTitle;
+            let time = '';
+
+            if (pre) {
+              const preMatch = pre.match(/\[(\d{1,2}:\d{2}(?:\s*[ap]m)?)[^\]]*\]\s*([^:]+):/i);
+              if (preMatch) {
+                time = preMatch[1];
+                if (!isOutgoing) {
+                  author = preMatch[2].trim() || chatTitle;
+                }
+              }
+            }
+
+            if (!time) {
+              const metaEl = bubble.querySelector<HTMLElement>('[data-testid="msg-meta"], .x1c4vz4f, span[dir="auto"]');
+              const metaText = metaEl?.textContent?.trim() || '';
+              const timeMatch = metaText.match(/\b\d{1,2}:\d{2}(?:\s*[ap]m)?\b/i);
+              if (timeMatch) time = timeMatch[0];
+            }
+
+            if (!isOutgoing && author === chatTitle) {
+              const authorEl = bubble.querySelector<HTMLElement>('[data-testid="author"], span._ao3e, span[color]');
+              if (authorEl && authorEl.textContent?.trim()) {
+                author = authorEl.textContent.trim();
+              }
+            }
+
+            const textEl = bubble.querySelector<HTMLElement>(
+              '.selectable-text.copyable-text, .selectable-text, [data-testid="selectable-text"], span[dir="ltr"], span[dir="rtl"]'
+            );
+            let text = (textEl ? (textEl.innerText || textEl.textContent || '') : (bubble.innerText || bubble.textContent || '')).trim();
+            text = text.replace(/\n\d{1,2}:\d{2}(?:\s*[ap]m)?(?:\s*✔+)?$/i, '').trim();
+
+            if (!text) {
+              if (bubble.querySelector('[data-testid="audio-play"], [data-icon="audio-play"]')) {
+                text = '[Voice Message / Audio Note]';
+              } else if (bubble.querySelector('img[src*="blob:"], [data-testid="image-thumb"]')) {
+                text = '[Image / Photo Attachment]';
+              } else if (bubble.querySelector('[data-testid="document-thumb"], [data-icon="document"]')) {
+                text = '[Document Attachment]';
+              } else if (bubble.querySelector('[data-testid="sticker"]')) {
+                text = '[Sticker]';
+              }
+            }
+
+            let status = '';
+            if (isOutgoing) {
+              const isRead = !!bubble.querySelector('[data-icon="msg-dblcheck-ack"], [data-testid="msg-dblcheck-ack"]');
+              const isDelivered = !isRead && !!bubble.querySelector('[data-icon="msg-dblcheck"], [data-testid="msg-dblcheck"]');
+              status = isRead ? ' [Read]' : isDelivered ? ' [Delivered]' : ' [Sent]';
+            }
+
+            if (text) {
+              const prev = parsedList[parsedList.length - 1];
+              if (!prev || prev.text !== text || prev.direction !== direction) {
+                parsedList.push({ direction, author, time, text, status });
+              }
             }
           });
-          if (lines.length > 0) {
-            chatExcerpt = lines.slice(-60).join('\n');
+
+          if (parsedList.length > 0) {
+            const formattedMsgs = parsedList.slice(-25).map((m) => {
+              const timeTag = m.time ? `[${m.time}] ` : '';
+              const dirTag = m.direction === 'outgoing' ? '[Outgoing (You)]' : `[Incoming from ${m.author}]`;
+              return `${timeTag}${dirTag}: ${m.text}${m.status}`;
+            });
+
+            const lastMsg = parsedList[parsedList.length - 1];
+            const isWaitingForUs = lastMsg.direction === 'incoming';
+
+            chatExcerpt = `Active WhatsApp Chat: "${chatTitle}"\n` +
+              formattedMsgs.join('\n') +
+              `\n\n>>> CURRENT CHAT STATE with "${chatTitle}":\n` +
+              `- Latest Message: [${lastMsg.direction.toUpperCase()} from ${lastMsg.author}${lastMsg.time ? ` at ${lastMsg.time}` : ''}]: "${lastMsg.text}"\n` +
+              `- Status: ${isWaitingForUs ? 'WAITING FOR YOUR REPLY (Friend has replied! Formulate your response now)' : 'WAITING FOR CONTACT TO REPLY (You sent the last message. Use wait_seconds before checking again)'}`;
+          }
+        } else {
+          // Generic chat container (Slack, Telegram, Discord, web chat)
+          const genericChatNodes = Array.from(document.querySelectorAll<HTMLElement>(
+            '[role="log"] [role="row"], [data-qa="message_content"], .message-list-item, [data-testid*="message" i]'
+          ));
+          if (genericChatNodes.length > 0) {
+            const lines = genericChatNodes
+              .map((n) => (n.innerText || n.textContent || '').trim())
+              .filter(Boolean);
+            if (lines.length > 0) {
+              chatExcerpt = lines.slice(-25).join('\n');
+            }
           }
         }
 
         // 3. Clean excerpt of page content (up to 10,000 characters for rich model context)
         let mainText = '';
-        const mainEl = document.querySelector('main, #main, article, #content, [role="main"]') || document.body;
+        const mainEl = document.querySelector('#main, main, article, #content, [role="main"]') || document.body;
         if (mainEl) {
           mainText = (mainEl as HTMLElement).innerText || '';
         } else if (document.body) {

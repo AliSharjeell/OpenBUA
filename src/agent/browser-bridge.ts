@@ -1606,8 +1606,281 @@ export async function scrollActiveTab(
   return { success: false, message: 'Could not scroll active tab' };
 }
 
+// In-page fallback script for extracting complete page and chat content directly without content script messaging
+function inPageExtractPageContent(): { title: string; url: string; text: string } {
+  try {
+    const title = document.title || '';
+    const url = window.location.href;
+
+    const isVisible = (el: HTMLElement | null): boolean => {
+      if (!el) return false;
+      const s = window.getComputedStyle(el);
+      if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+
+    // 1. Active dialogs / popups / compose modals
+    let modalExcerpt = '';
+    const activeModals = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[role="dialog"], [role="alertdialog"], .modal.show, .modal-open, .M9, [aria-modal="true"]'
+      )
+    ).filter(isVisible);
+    if (activeModals.length > 0) {
+      modalExcerpt = activeModals
+        .map((m) => (m.innerText || m.textContent || '').trim())
+        .filter((t) => t.length > 0)
+        .join('\n\n');
+    }
+
+    // 2. Interactive links / videos
+    const links: string[] = [];
+    const seenLinks = new Set<string>();
+    document.querySelectorAll<HTMLAnchorElement>('a[href], a#video-title, [role="link"]').forEach((a) => {
+      const text = (a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+      const href = a.getAttribute('href') || '';
+      if (!href) return;
+      if (text && text.length > 2 && text.length < 100 && !seenLinks.has(text.toLowerCase())) {
+        seenLinks.add(text.toLowerCase());
+        if (links.length < 30) {
+          const fullUrl = href.startsWith('http') ? href : window.location.origin + href;
+          links.push(`- Link/Video: "${text}" (${fullUrl})`);
+        }
+      }
+    });
+
+    // 2b. Visible tabs
+    const tabs: string[] = [];
+    const seenTabs = new Set<string>();
+    document.querySelectorAll<HTMLElement>('[role="tab"], tp-yt-paper-tab, yt-tab-shape, [role="tablist"] [role="tab"]').forEach((t) => {
+      if (!isVisible(t)) return;
+      const text = (t.textContent || t.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+      if (text && text.length > 1 && text.length < 50 && !seenTabs.has(text.toLowerCase())) {
+        seenTabs.add(text.toLowerCase());
+        if (tabs.length < 15) {
+          tabs.push(`- Tab: "${text}"`);
+        }
+      }
+    });
+
+    // 2c. Interactive Buttons
+    const buttons: string[] = [];
+    const seenButtons = new Set<string>();
+    document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], input[type="button"], ytd-button-renderer').forEach((b) => {
+      const text = (b.textContent || b.getAttribute('aria-label') || (b as HTMLInputElement).value || '').replace(/\s+/g, ' ').trim();
+      if (text && text.length > 1 && text.length < 40 && !seenButtons.has(text.toLowerCase())) {
+        seenButtons.add(text.toLowerCase());
+        if (buttons.length < 20) {
+          buttons.push(`- Button: "${text}"`);
+        }
+      }
+    });
+
+    // 2d. Extract active chat conversation messages (WhatsApp Web, Slack, Telegram, Discord)
+    let chatExcerpt = '';
+    const mainPane = document.querySelector<HTMLElement>('#main');
+
+    if (mainPane) {
+      // WhatsApp Web active chat window detected
+      try {
+        const scrollDownBtn = mainPane.querySelector<HTMLElement>(
+          'button[aria-label*="down" i], button[aria-label*="scroll" i], button[aria-label*="unread" i], [data-testid="down-context"], [data-icon="down"]'
+        );
+        if (scrollDownBtn) {
+          try { scrollDownBtn.click(); } catch {}
+        }
+
+        const whatsappScrollSels = [
+          '#main div[data-testid="conversation-panel-messages"]',
+          '#main div[role="application"]',
+          '#main .copyable-area > div[tabindex="0"]',
+          '#main .copyable-area > div:nth-child(2)',
+          '#main .copyable-area > div',
+        ];
+        for (const sel of whatsappScrollSels) {
+          const el = document.querySelector<HTMLElement>(sel);
+          if (el && el.scrollHeight > el.clientHeight + 20) {
+            if (el.scrollHeight - el.scrollTop - el.clientHeight > 150) {
+              el.scrollTop = el.scrollHeight;
+            }
+            break;
+          }
+        }
+      } catch {}
+
+      const headerEl = mainPane.querySelector('header');
+      const titleEl = headerEl?.querySelector('span[title], [dir="auto"], div[role="button"] span');
+      const chatTitle = (titleEl?.getAttribute('title') || titleEl?.textContent || '').trim() || 'Chat Contact';
+
+      let candidateBubbles = Array.from(mainPane.querySelectorAll<HTMLElement>(
+        '.message-in, .message-out'
+      ));
+      if (candidateBubbles.length === 0) {
+        candidateBubbles = Array.from(mainPane.querySelectorAll<HTMLElement>(
+          'div[role="row"], [data-testid="msg-container"]'
+        ));
+      }
+
+      const distinctBubbles = candidateBubbles.filter((bubble) => {
+        return !candidateBubbles.some((other) => other !== bubble && bubble.contains(other));
+      });
+
+      interface ParsedMessage {
+        direction: 'incoming' | 'outgoing';
+        author: string;
+        time: string;
+        text: string;
+        status: string;
+      }
+
+      const parsedList: ParsedMessage[] = [];
+
+      distinctBubbles.forEach((bubble) => {
+        const isIncoming = bubble.classList.contains('message-in') ||
+          !!bubble.closest('.message-in') ||
+          bubble.getAttribute('data-id')?.startsWith('false_') ||
+          (!bubble.classList.contains('message-out') && !bubble.closest('.message-out') && !bubble.getAttribute('data-id')?.startsWith('true_') && !!bubble.querySelector('.message-in'));
+        const isOutgoing = bubble.classList.contains('message-out') ||
+          !!bubble.closest('.message-out') ||
+          bubble.getAttribute('data-id')?.startsWith('true_');
+
+        const direction: 'incoming' | 'outgoing' = isOutgoing ? 'outgoing' : 'incoming';
+
+        const copyable = bubble.querySelector<HTMLElement>('.copyable-text[data-pre-plain-text]') ||
+          (bubble.hasAttribute('data-pre-plain-text') ? bubble : null);
+        const pre = copyable?.getAttribute('data-pre-plain-text') || '';
+
+        let author = isOutgoing ? 'You' : chatTitle;
+        let time = '';
+
+        if (pre) {
+          const preMatch = pre.match(/\[(\d{1,2}:\d{2}(?:\s*[ap]m)?)[^\]]*\]\s*([^:]+):/i);
+          if (preMatch) {
+            time = preMatch[1];
+            if (!isOutgoing) {
+              author = preMatch[2].trim() || chatTitle;
+            }
+          }
+        }
+
+        if (!time) {
+          const metaEl = bubble.querySelector<HTMLElement>('[data-testid="msg-meta"], .x1c4vz4f, span[dir="auto"]');
+          const metaText = metaEl?.textContent?.trim() || '';
+          const timeMatch = metaText.match(/\b\d{1,2}:\d{2}(?:\s*[ap]m)?\b/i);
+          if (timeMatch) time = timeMatch[0];
+        }
+
+        if (!isOutgoing && author === chatTitle) {
+          const authorEl = bubble.querySelector<HTMLElement>('[data-testid="author"], span._ao3e, span[color]');
+          if (authorEl && authorEl.textContent?.trim()) {
+            author = authorEl.textContent.trim();
+          }
+        }
+
+        const textEl = bubble.querySelector<HTMLElement>(
+          '.selectable-text.copyable-text, .selectable-text, [data-testid="selectable-text"], span[dir="ltr"], span[dir="rtl"]'
+        );
+        let text = (textEl ? (textEl.innerText || textEl.textContent || '') : (bubble.innerText || bubble.textContent || '')).trim();
+        text = text.replace(/\n\d{1,2}:\d{2}(?:\s*[ap]m)?(?:\s*✔+)?$/i, '').trim();
+
+        if (!text) {
+          if (bubble.querySelector('[data-testid="audio-play"], [data-icon="audio-play"]')) {
+            text = '[Voice Message / Audio Note]';
+          } else if (bubble.querySelector('img[src*="blob:"], [data-testid="image-thumb"]')) {
+            text = '[Image / Photo Attachment]';
+          } else if (bubble.querySelector('[data-testid="document-thumb"], [data-icon="document"]')) {
+            text = '[Document Attachment]';
+          } else if (bubble.querySelector('[data-testid="sticker"]')) {
+            text = '[Sticker]';
+          }
+        }
+
+        let status = '';
+        if (isOutgoing) {
+          const isRead = !!bubble.querySelector('[data-icon="msg-dblcheck-ack"], [data-testid="msg-dblcheck-ack"]');
+          const isDelivered = !isRead && !!bubble.querySelector('[data-icon="msg-dblcheck"], [data-testid="msg-dblcheck"]');
+          status = isRead ? ' [Read]' : isDelivered ? ' [Delivered]' : ' [Sent]';
+        }
+
+        if (text) {
+          const prev = parsedList[parsedList.length - 1];
+          if (!prev || prev.text !== text || prev.direction !== direction) {
+            parsedList.push({ direction, author, time, text, status });
+          }
+        }
+      });
+
+      if (parsedList.length > 0) {
+        const formattedMsgs = parsedList.slice(-25).map((m) => {
+          const timeTag = m.time ? `[${m.time}] ` : '';
+          const dirTag = m.direction === 'outgoing' ? '[Outgoing (You)]' : `[Incoming from ${m.author}]`;
+          return `${timeTag}${dirTag}: ${m.text}${m.status}`;
+        });
+
+        const lastMsg = parsedList[parsedList.length - 1];
+        const isWaitingForUs = lastMsg.direction === 'incoming';
+
+        chatExcerpt = `Active WhatsApp Chat: "${chatTitle}"\n` +
+          formattedMsgs.join('\n') +
+          `\n\n>>> CURRENT CHAT STATE with "${chatTitle}":\n` +
+          `- Latest Message: [${lastMsg.direction.toUpperCase()} from ${lastMsg.author}${lastMsg.time ? ` at ${lastMsg.time}` : ''}]: "${lastMsg.text}"\n` +
+          `- Status: ${isWaitingForUs ? 'WAITING FOR YOUR REPLY (Friend has replied! Formulate your response now)' : 'WAITING FOR CONTACT TO REPLY (You sent the last message. Use wait_seconds before checking again)'}`;
+      }
+    } else {
+      const genericChatNodes = Array.from(document.querySelectorAll<HTMLElement>(
+        '[role="log"] [role="row"], [data-qa="message_content"], .message-list-item, [data-testid*="message" i]'
+      ));
+      if (genericChatNodes.length > 0) {
+        const lines = genericChatNodes
+          .map((n) => (n.innerText || n.textContent || '').trim())
+          .filter(Boolean);
+        if (lines.length > 0) {
+          chatExcerpt = lines.slice(-25).join('\n');
+        }
+      }
+    }
+
+    // 3. Clean excerpt of page content (up to 10,000 characters)
+    let mainText = '';
+    const mainEl = document.querySelector('#main, main, article, #content, [role="main"]') || document.body;
+    if (mainEl) {
+      mainText = (mainEl as HTMLElement).innerText || '';
+    } else if (document.body) {
+      mainText = document.body.innerText || '';
+    }
+    mainText = mainText.replace(/\n\s*\n\s*\n/g, '\n\n').slice(0, 10000);
+
+    let formatted = `Title: ${title}\nURL: ${url}\n\n`;
+    if (chatExcerpt) {
+      formatted += `### Active Chat Conversation Messages:\n${chatExcerpt}\n\n`;
+    }
+    if (modalExcerpt) {
+      formatted += `### Active Dialog / Compose Window Content:\n${modalExcerpt}\n\n`;
+    }
+    if (tabs.length > 0) {
+      formatted += `### Tabs on Page:\n${tabs.join('\n')}\n\n`;
+    }
+    if (links.length > 0) {
+      formatted += `### Key Links / Videos on Page:\n${links.join('\n')}\n\n`;
+    }
+    if (buttons.length > 0) {
+      formatted += `### Interactive Buttons:\n${buttons.join('\n')}\n\n`;
+    }
+    formatted += `### Page Text Excerpt:\n${mainText}`;
+
+    return { title, url, text: formatted };
+  } catch (err: any) {
+    return {
+      title: document.title || '',
+      url: window.location.href,
+      text: (document.body?.innerText || '').slice(0, 5000),
+    };
+  }
+}
+
 // Get Page Text — wrapped in a hard timeout and direct scripting fallback to prevent hanging
-export async function getActiveTabPageContent(timeoutMs = 4000): Promise<{ text: string; title: string; url: string }> {
+export async function getActiveTabPageContent(timeoutMs = 5000): Promise<{ text: string; title: string; url: string }> {
   const activeTab = await getActiveTab(1500);
   if (!activeTab || !activeTab.id) {
     return {
@@ -1651,7 +1924,7 @@ export async function getActiveTabPageContent(timeoutMs = 4000): Promise<{ text:
       // Step A: Try content script messaging first
       try {
         await ensureContentScriptInjected(activeTab.id!, 1500).catch(() => {});
-        const response = await sendMessageToTab(activeTab.id!, { action: 'GET_PAGE_TEXT' }, 2200).catch(() => null);
+        const response = await sendMessageToTab(activeTab.id!, { action: 'GET_PAGE_TEXT' }, 3500).catch(() => null);
         if (response && response.success && response.text) {
           return {
             text: captchaNotice + response.text,
@@ -1668,13 +1941,7 @@ export async function getActiveTabPageContent(timeoutMs = 4000): Promise<{ text:
         try {
           const directScriptResults = await chrome.scripting.executeScript({
             target: { tabId: activeTab.id! },
-            func: () => {
-              const title = document.title || '';
-              const url = window.location.href;
-              const mainEl = document.querySelector('main, article, #content, [role="main"]') || document.body;
-              const text = (mainEl ? (mainEl as HTMLElement).innerText || '' : '').replace(/\n\s*\n\s*\n/g, '\n\n').slice(0, 10000);
-              return { title, url, text };
-            },
+            func: inPageExtractPageContent,
           });
           if (directScriptResults && directScriptResults[0] && directScriptResults[0].result) {
             const data = directScriptResults[0].result as { title: string; url: string; text: string };
