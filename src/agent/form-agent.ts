@@ -583,7 +583,9 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * PROHIBIT UNNECESSARY TAB LISTING:
         - If WhatsApp Web or the target chat is already the active tab, DO NOT call 'list_browser_tabs'.
       * CHAT SELECTION (IF NEEDED):
-        - If the target chat is not open, click on the contact name ('click_element({ text: "Sidhart" })') or search contact via the chat search box.
+        - If the target chat is not open:
+          a) Check 'get_active_tab_form' buttons/actions for 'Chat: <Name>' and click its refId, OR call 'click_element({ text: "<Name>" })' or 'click_element({ selector: "span[title*=\'<Name>\' i]" })'.
+          b) If contact is not yet visible in recent chats, type the name into the search box ('fill_form_fields') and call 'press_key_combination({ key: "Enter" })' or click the search result.
       * 2-STEP ATOMIC DISPATCH:
         - Step 1: Type the message into the active compose box using 'fill_form_fields({ refId: "...", value: "..." })'.
         - Step 2: Send IMMEDIATELY:

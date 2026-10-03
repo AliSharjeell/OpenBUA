@@ -562,7 +562,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
   }
   if (!target && text) {
     const rawCandidates = Array.from(document.querySelectorAll<HTMLElement>(
-      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip]'
+      'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], [role="listitem"], [role="row"], [role="treeitem"], [role="menuitem"], [role="option"], tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip], [data-testid*="cell"], [data-testid*="list-item"], [data-testid*="chat-list-item"], span[title], div[title], [aria-label], #pane-side div[tabindex="-1"], #pane-side span'
     ));
     // Filter out search prediction dropdowns / hidden autocomplete popups so we never accidentally click search suggestions
     const candidates = rawCandidates.filter((c) => {
@@ -574,8 +574,8 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
 
     // 1. Exact match (highest priority)
     target = candidates.find((c) => {
-      const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').toLowerCase().trim();
-      return val === tLower;
+      const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').toLowerCase().trim();
+      return val === tLower || val.startsWith(tLower);
     }) || null;
 
     // 2. Exact word boundary match
@@ -583,7 +583,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
       try {
         const wordRegex = new RegExp(`(^|\\s|[^a-zA-Z0-9])${tLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\s|[^a-zA-Z0-9])`, 'i');
         target = candidates.find((c) => {
-          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').trim();
+          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').trim();
           return wordRegex.test(val);
         }) || null;
       } catch {}
@@ -593,7 +593,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     if (!target) {
       const matches = candidates
         .map((c) => {
-          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('title') || '').toLowerCase().trim();
+          const val = (c.textContent || (c as HTMLInputElement).value || c.getAttribute('aria-label') || c.getAttribute('data-tooltip') || c.getAttribute('title') || '').toLowerCase().trim();
           return { elem: c, val, len: val.length };
         })
         .filter((item) => item.val.includes(tLower))
@@ -608,11 +608,94 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     return { success: false, message: `Button or element not found: ${refId || selector || text}` };
   }
 
-  const clickable = target.closest<HTMLElement>('a[href], button, [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"]') || target;
-  clickable.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  clickable.focus();
-  clickable.click();
-  return { success: true, message: `Clicked element "${(clickable.textContent || clickable.getAttribute('aria-label') || '').trim().slice(0, 30)}"` };
+  const container = target.closest<HTMLElement>(
+    'a[href], button, [role="button"], [role="tab"], [role="listitem"], [role="row"], [role="menuitem"], [role="option"], [role="treeitem"], div[data-testid*="cell"], div[data-testid*="list-item"], div[data-testid*="chat-list-item"], tp-yt-paper-tab, yt-tab-shape, ytd-compact-video-renderer, ytd-video-renderer, #pane-side div[tabindex="-1"], [contenteditable="true"]'
+  );
+  const primary = container || target;
+
+  try {
+    primary.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch {}
+
+  // Inset visual outline and glowing shadow on container
+  try {
+    const prevOutline = primary.style.outline;
+    const prevOffset = primary.style.outlineOffset;
+    const prevShadow = primary.style.boxShadow;
+    const prevTransition = primary.style.transition;
+    primary.style.transition = 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+    primary.style.outline = '3px solid #22c55e';
+    primary.style.outlineOffset = '-2px';
+    primary.style.boxShadow = '0 0 0 2px #22c55e, 0 0 16px rgba(34, 197, 94, 0.7)';
+    setTimeout(() => {
+      primary.style.outline = prevOutline;
+      primary.style.outlineOffset = prevOffset;
+      primary.style.boxShadow = prevShadow;
+      primary.style.transition = prevTransition;
+    }, 1200);
+  } catch {}
+
+  // Dispatch full pointer and mouse sequence to trigger React synthetic events
+  const rect = target.getBoundingClientRect();
+  const fallbackRect = primary.getBoundingClientRect();
+  const effectiveRect = (rect.width > 0 && rect.height > 0) ? rect : fallbackRect;
+  const clientX = Math.round(effectiveRect.left + (effectiveRect.width > 0 ? effectiveRect.width / 2 : 10));
+  const clientY = Math.round(effectiveRect.top + (effectiveRect.height > 0 ? effectiveRect.height / 2 : 10));
+
+  const mouseInit: MouseEventInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    detail: 1,
+    screenX: window.screenX + clientX,
+    screenY: window.screenY + clientY,
+    clientX,
+    clientY,
+    button: 0,
+    buttons: 1,
+  };
+
+  const pointerInit: PointerEventInit = {
+    ...mouseInit,
+    pointerId: 1,
+    pointerType: 'mouse',
+    isPrimary: true,
+    width: 1,
+    height: 1,
+    pressure: 0.5,
+  };
+
+  const dispatchCycle = (el: HTMLElement) => {
+    try {
+      el.dispatchEvent(new PointerEvent('pointerover', { ...pointerInit, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent('mouseover', { ...mouseInit, buttons: 0 }));
+      el.dispatchEvent(new PointerEvent('pointerdown', pointerInit));
+      el.dispatchEvent(new MouseEvent('mousedown', mouseInit));
+    } catch {}
+
+    try {
+      el.focus();
+    } catch {}
+
+    try {
+      el.dispatchEvent(new PointerEvent('pointerup', { ...pointerInit, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent('mouseup', { ...mouseInit, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent('click', { ...mouseInit, buttons: 0 }));
+    } catch {}
+  };
+
+  dispatchCycle(target);
+  if (container && container !== target) {
+    dispatchCycle(container);
+  }
+
+  try {
+    primary.click();
+  } catch {}
+
+  const label = (primary.textContent || primary.getAttribute('aria-label') || target.getAttribute('title') || '').trim().slice(0, 30);
+  return { success: true, message: `Clicked element "${label}"` };
 }
 
 // --- Audio Alerts for Human-in-the-Loop Intercept Gate ---
