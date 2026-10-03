@@ -319,9 +319,13 @@ export class FormAgentHarness {
     let docsSummary = '';
 
     if (activeDocs.length > 0) {
-      docsSummary = `\n\n### USER'S STORED KNOWLEDGE & DOCUMENTS:\nAll user documents, personal profile, resume, and data are stored below. Use this exact data to fill matching web forms:\n`;
+      docsSummary = `\n\n### USER'S STORED KNOWLEDGE & DOCUMENTS:\nAll user documents, personal profile, resume, and raw file attachments are stored below. Use this exact data to fill matching web forms and attach stored files to file upload inputs:\n`;
       activeDocs.forEach((doc, idx) => {
-        docsSummary += `\n--- Document [${idx + 1}]: ${doc.title} (${doc.type}) ---\n${doc.content}\n`;
+        let meta = `${doc.type}`;
+        if (doc.fileCategory) meta += `, category: ${doc.fileCategory}`;
+        if (doc.fileName) meta += `, filename: "${doc.fileName}"`;
+        if (doc.dataUrl) meta += `, raw file attachment available for form upload`;
+        docsSummary += `\n--- Document [${idx + 1}]: ${doc.title} (${meta}) ---\n${doc.content}\n`;
       });
     } else {
       docsSummary = `\n\nNo user documents are currently active in storage. If you need data, call get_user_documents or ask user.`;
@@ -427,8 +431,15 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
      e. Only claim it was posted after clicking the submit button. Never fabricate timestamps or fake usernames (e.g. "@Alex Mercer 20 minutes ago").
 5. MANDATORY WORKFLOW WHEN USER ASKS TO FILL OR COMMENT:
    - Step 1: Call 'get_active_tab_form' to find all inputs, contenteditable elements, textareas, selects, and buttons.
-   - Step 2: Match each form field with the user's stored documents or user's instructions.
-   - Step 3: Call 'fill_form_fields' with the assignments.
+   - Step 2: Match each form field with the user's stored documents or user's instructions:
+     * RESUME & FILE UPLOADS:
+       - When a form field is an upload or file input (<input type="file">, dropzone, "Upload Resume", "Attach CV", "Attach Photo"):
+         Use 'upload_file_to_form({ fileName: "resume.pdf", refId: "..." })' or 'upload_file_to_form({ selector: "input[type=\'file\']" })'.
+         Alternatively, specify the file input assignment in 'fill_form_fields' with value: "resume.pdf" or "resume".
+         OpenBUA will automatically attach the user's stored raw binary file into the file input using DataTransfer!
+     * TEXT FIELDS (Name, Email, Phone, Experience, Education, Skills, LinkedIn, GitHub):
+       - Use the extracted resume text stored in "USER'S STORED KNOWLEDGE & DOCUMENTS" to fill all matching fields accurately.
+   - Step 3: Call 'fill_form_fields' with the assignments (and/or 'upload_file_to_form').
    - Step 4: For multi-step forms or submission, click the relevant button using 'click_element'.
    - Step 5: Inform the user honestly of the outcome based on tool results.
 6. TABLE & DATA EXTRACTION FORMATTING:

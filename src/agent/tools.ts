@@ -17,6 +17,7 @@ import {
   sendWebEmailDirect,
   checkUrlReachable,
   searchWeb,
+  uploadFileToActiveTab,
 } from './browser-bridge';
 import {
   loadDocuments,
@@ -222,13 +223,24 @@ export const getUserDocumentsTool: AgentTool<typeof GetUserDocumentsSchema> = {
 
       let formatted = `Found ${activeDocs.length} active documents in user storage:\n\n`;
       activeDocs.forEach((doc, idx) => {
-        formatted += `### Document ${idx + 1}: ${doc.title} (${doc.type})\n${doc.content}\n\n`;
+        let meta = `${doc.type}`;
+        if (doc.fileCategory) meta += `, category: ${doc.fileCategory}`;
+        if (doc.fileName) meta += `, filename: "${doc.fileName}"`;
+        if (doc.dataUrl) meta += `, raw file attachment available for form upload`;
+        formatted += `### Document ${idx + 1}: ${doc.title} (${meta})\n${doc.content}\n\n`;
       });
 
       return {
         content: [{ type: 'text', text: formatted }],
         details: {
-          documents: activeDocs.map(d => ({ id: d.id, title: d.title, type: d.type })),
+          documents: activeDocs.map(d => ({
+            id: d.id,
+            title: d.title,
+            type: d.type,
+            fileName: d.fileName,
+            fileCategory: d.fileCategory,
+            hasRawFile: Boolean(d.dataUrl),
+          })),
         },
       };
     } catch (err: any) {
@@ -822,11 +834,60 @@ export const waitSecondsTool: AgentTool<typeof WaitSecondsSchema> = {
   },
 };
 
+// 19. Upload Raw Stored File (Resume, Image, PDF) to Active Form
+const UploadFileToFormSchema = Type.Object({
+  fileName: Type.Optional(
+    Type.String({
+      description:
+        'The filename or keyword of the stored file to attach (e.g. "resume.pdf", "resume", "profile.png"). If omitted or "resume", OpenBUA automatically selects the user\'s stored resume or primary document from Memory.',
+    })
+  ),
+  refId: Type.Optional(
+    Type.String({
+      description: 'The refId of the file input element from get_active_tab_form (e.g. "af_2")',
+    })
+  ),
+  selector: Type.Optional(
+    Type.String({
+      description:
+        'CSS selector of the file input or upload dropzone (e.g. "input[type=\'file\']" or ".upload-dropzone")',
+    })
+  ),
+});
+
+export const uploadFileToFormTool: AgentTool<typeof UploadFileToFormSchema> = {
+  name: 'upload_file_to_form',
+  label: 'Upload File / Resume to Form',
+  description:
+    'Programmatically attaches a stored raw file (such as resume.pdf, PNG photo, or document) from the user\'s Memory to a file input (<input type="file">) or dropzone on the active tab using DataTransfer. Use this whenever an application or form asks for a resume, CV, ID, or file upload.',
+  parameters: UploadFileToFormSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      const res = await uploadFileToActiveTab({
+        refId: params.refId,
+        selector: params.selector,
+        fileName: params.fileName,
+      });
+
+      return {
+        content: [{ type: 'text', text: res.message }],
+        details: res,
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Failed to upload file to form: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string): AgentTool<any>[] {
   return [
     getActiveTabFormTool,
     fillFormFieldsTool,
+    uploadFileToFormTool,
     clickElementTool,
     scrollPageTool,
     getUserDocumentsTool,
