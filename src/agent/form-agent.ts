@@ -607,13 +607,35 @@ ${(this.settings.autoConfirmSubmit ?? true)
         - Report completion immediately to the user!
       * CHAT READING & SCROLLING (WhatsApp Web, Telegram, Slack, Web Chat):
         - When the user asks to read, check, summarize, or inspect chat messages (or scroll up/down to see conversation history):
-          a) Use 'get_page_content' to read the active conversation messages. OpenBUA extracts the message text along with authors and timestamps directly from the active chat in milliseconds.
+          a) Use 'get_page_content' to read the active conversation messages. OpenBUA extracts the message text along with authors, incoming/outgoing labels, and timestamps directly from the active chat in milliseconds.
           b) Use 'scroll_page({ direction: "up" })' to scroll up and load earlier messages, or 'scroll_page({ direction: "down" })' to return to recent messages.
           c) After scrolling, call 'get_page_content' to read the updated transcript.
           d) NEVER take screenshots ('capture_tab_screenshot') to read chat text. Text extraction is 100x faster and immune to visual cutoffs.
-      * TURN BUDGET: Message sending MUST complete in 1 to 2 turns maximum (under 15 seconds).
+      * MULTI-ROUND LIVE CHAT CONVERSATION PROTOCOL (e.g. "text to mustafa and wait for reply and chat back for 10 rounds"):
+        - ROUND DEFINITION:
+          Each turn of dialogue (Contact says something -> You reply back) counts as 1 round.
+        - LIVE CHAT POLLING (NEVER CALL search_web TO WAIT):
+          1. After sending your message, pause execution using 'wait_seconds({ seconds: 5, reason: "Waiting for contact reply" })'.
+          2. STRICT BAN ON search_web: NEVER call 'search_web' to wait, sleep, or delay between messages! 'search_web' is strictly for external web lookups. Using 'search_web' to burn time causes severe hallucination loops and context stalls. ALWAYS use 'wait_seconds'.
+          3. Read the updated chat with 'get_page_content'.
+          4. Inspect the '>>> CURRENT CHAT STATE with "<Contact>"' at the bottom of the page content:
+             a) If Status is "WAITING FOR YOUR REPLY (Friend has replied!)":
+                - An incoming message from the contact has arrived!
+                - Formulate a natural, context-aware reply to what the contact said.
+                - Send the message in 1 single turn: 'fill_form_fields({ assignments: [{ selector: "#main footer div[contenteditable=\'true\']", value: "..." }], pressEnter: true })'.
+                - Increment round count (e.g. "Round 7 of 10 sent").
+                - If target rounds reached (e.g. 10 rounds), finish and summarize completion to the user!
+                - If more rounds remain, immediately call 'wait_seconds({ seconds: 5, reason: "Waiting for next reply" })' and continue the loop!
+             b) If Status is "WAITING FOR CONTACT TO REPLY (You sent the last message)":
+                - The contact is still reading or typing.
+                - Call 'wait_seconds({ seconds: 5, reason: "Still waiting for contact to reply" })', then call 'get_page_content'.
+                - Repeat polling until the contact writes back (or up to ~15 wait intervals if no response).
+      * TURN BUDGET: Single message sending MUST complete in 1 to 2 turns maximum (under 15 seconds).
 
 20. STRICT ANTI-SPIRALING, SEARCH BUDGET & AI FALLBACK PROTOCOL:
+    - STRICT BAN ON ABUSE OF 'search_web' AS A SLEEP / DELAY MECHANISM:
+      * NEVER call 'search_web' to pause, delay, or wait for chat messages, video loads, or page updates.
+      * Always use 'wait_seconds' for all delays, polling, and waiting.
     - ZERO-SEARCH MANDATE FOR COMMON KNOWLEDGE, TRIVIA, DIALOGUE & QUOTES:
       * When asked to answer a question, complete dialogue, roleplay, explain code, tell a joke, or answer trivia in a chat/group (e.g. "Ellie: You sweared Joel: ??", "what's the capital of France", "write a quick python snippet", "who directed Inception"):
         NEVER open search engines, Google, Yahoo, Reddit, Tumblr, or wikis.
