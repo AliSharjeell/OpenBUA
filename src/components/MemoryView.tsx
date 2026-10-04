@@ -27,7 +27,6 @@ import {
   Check,
   Upload,
   Download,
-  Sparkles,
   Loader2,
   File,
   Image as ImageIcon,
@@ -158,11 +157,7 @@ export function MemoryView({
     document.body.removeChild(link);
   };
 
-  const handleExtractInfo = async (
-    doc: UserDocument,
-    mode: 'entire' | 'split' = 'entire',
-    e?: React.MouseEvent
-  ) => {
+  const handleExtractInfo = async (doc: UserDocument, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!doc.dataUrl) return;
     setOcrLoadingId(doc.id);
@@ -170,57 +165,56 @@ export function MemoryView({
       const extracted = await extractTextForDocument(doc);
       const newCategory = detectDocumentCategory(doc.fileName || doc.title, extracted);
 
-      if (mode === 'split') {
-        const sections = splitExtractedTextIntoSections(extracted, doc.title);
-        if (sections.length > 1) {
-          const newDocs: UserDocument[] = sections.map((sec, idx) => ({
-            id: `mem-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-            title: sec.title,
-            type: 'markdown',
-            content: sec.content,
-            summary: `${sec.title} (${sec.content.slice(0, 80)}...)`,
-            createdAt: Date.now() + idx,
-            sizeBytes: new Blob([sec.content]).size,
-            tags: sec.tags,
-            isActiveForContext: true,
-            isGlobal: memoryScope === 'global',
-            tabUrlPattern: memoryScope === 'tab' ? currentTabKey : undefined,
-            fileCategory: sec.category,
-            ocrStatus: 'done',
-          }));
+      // Split extracted text into per-section memory cards when headings exist
+      const sections = splitExtractedTextIntoSections(extracted, doc.title);
+      if (sections.length > 1) {
+        const newDocs: UserDocument[] = sections.map((sec, idx) => ({
+          id: `mem-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+          title: sec.title,
+          type: 'markdown',
+          content: sec.content,
+          summary: `${sec.title} (${sec.content.slice(0, 80)}...)`,
+          createdAt: Date.now() + idx,
+          sizeBytes: new Blob([sec.content]).size,
+          tags: sec.tags,
+          isActiveForContext: true,
+          isGlobal: memoryScope === 'global',
+          tabUrlPattern: memoryScope === 'tab' ? currentTabKey : undefined,
+          fileCategory: sec.category,
+          ocrStatus: 'done',
+        }));
 
-          const updatedParent: UserDocument = {
-            ...doc,
-            content: extracted,
-            fileCategory: newCategory,
-            ocrStatus: 'done',
-          };
+        const updatedParent: UserDocument = {
+          ...doc,
+          content: extracted,
+          fileCategory: newCategory,
+          ocrStatus: 'done',
+        };
 
-          if (memoryScope === 'global') {
-            await saveGlobalMemory(updatedParent);
-            for (const nd of newDocs) await saveGlobalMemory(nd);
-            onGlobalMemoriesChange([
-              ...newDocs,
-              ...globalMemories.map((m) => (m.id === doc.id ? updatedParent : m)),
-            ]);
-          } else {
-            await saveTabMemory(currentTabKey, updatedParent);
-            for (const nd of newDocs) await saveTabMemory(currentTabKey, nd);
-            onTabMemoriesChange([
-              ...newDocs,
-              ...tabMemories.map((m) => (m.id === doc.id ? updatedParent : m)),
-            ]);
-          }
-
-          if (selectedDoc?.id === doc.id) {
-            setSelectedDoc(updatedParent);
-            setContent(extracted);
-          }
-          return;
+        if (memoryScope === 'global') {
+          await saveGlobalMemory(updatedParent);
+          for (const nd of newDocs) await saveGlobalMemory(nd);
+          onGlobalMemoriesChange([
+            ...newDocs,
+            ...globalMemories.map((m) => (m.id === doc.id ? updatedParent : m)),
+          ]);
+        } else {
+          await saveTabMemory(currentTabKey, updatedParent);
+          for (const nd of newDocs) await saveTabMemory(currentTabKey, nd);
+          onTabMemoriesChange([
+            ...newDocs,
+            ...tabMemories.map((m) => (m.id === doc.id ? updatedParent : m)),
+          ]);
         }
+
+        if (selectedDoc?.id === doc.id) {
+          setSelectedDoc(updatedParent);
+          setContent(extracted);
+        }
+        return;
       }
 
-      // Default: Update this document as one entire thing
+      // No sections found: Update this document as one entire thing
       const updatedDoc: UserDocument = {
         ...doc,
         content: extracted,
@@ -535,21 +529,20 @@ export function MemoryView({
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {/* OCR trigger button */}
-                  {(selectedDoc.type === 'image' || selectedDoc.type === 'pdf') && (
+                  {/* OCR trigger button (hidden once extraction is done) */}
+                  {(selectedDoc.type === 'image' || selectedDoc.type === 'pdf') &&
+                    selectedDoc.ocrStatus !== 'done' && (
                     <Button
                       size="sm"
                       className="h-6 px-2.5 text-[10px] gap-1 rounded-full bg-[#007AFF] text-white hover:bg-[#0071EB] shadow-xs cursor-pointer border-0"
                       disabled={ocrLoadingId === selectedDoc.id}
-                      onClick={(e) => handleExtractInfo(selectedDoc, 'entire', e)}
-                      title="Extract readable text and details into memory"
+                      onClick={(e) => handleExtractInfo(selectedDoc, e)}
+                      title="Extract readable text and split into memory cards"
                     >
-                      {ocrLoadingId === selectedDoc.id ? (
+                      {ocrLoadingId === selectedDoc.id && (
                         <Loader2 className="w-3 h-3 animate-spin text-white" />
-                      ) : (
-                        <Sparkles className="w-3 h-3 text-white" />
                       )}
-                      Extract info into memory
+                      {ocrLoadingId === selectedDoc.id ? 'Extracting...' : 'Extract info into memory'}
                     </Button>
                   )}
 
@@ -775,35 +768,22 @@ export function MemoryView({
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">
-                            {/* OCR Extraction Button */}
-                            {(doc.type === 'image' || doc.type === 'pdf') && (
+                            {/* OCR Extraction Button (hidden once extraction is done) */}
+                            {(doc.type === 'image' || doc.type === 'pdf') &&
+                              doc.ocrStatus !== 'done' && (
                               <div className="flex items-center gap-1.5">
                                 <button
                                   type="button"
                                   className="flex items-center gap-1.5 text-[11px] font-medium bg-[#007AFF] text-white hover:bg-[#0071EB] active:bg-[#006ee6] px-3 py-1 rounded-full shadow-xs transition-colors cursor-pointer disabled:opacity-50 border-0"
                                   disabled={isOcrLoading}
-                                  onClick={(e) => handleExtractInfo(doc, 'entire', e)}
-                                  title="Extract readable text and details into memory"
+                                  onClick={(e) => handleExtractInfo(doc, e)}
+                                  title="Extract readable text and split into memory cards"
                                 >
-                                  {isOcrLoading ? (
+                                  {isOcrLoading && (
                                     <Loader2 className="w-3 h-3 animate-spin text-white" />
-                                  ) : (
-                                    <Sparkles className="w-3 h-3 text-white" />
                                   )}
                                   {isOcrLoading ? 'Extracting info...' : 'Extract info into memory'}
                                 </button>
-
-                                {/* Option to split into multiple memory cards for easy retrieval */}
-                                {doc.ocrStatus === 'done' && doc.content && (
-                                  <button
-                                    type="button"
-                                    className="flex items-center gap-1 text-[10px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 hover:bg-zinc-800 px-2 py-1 rounded-full border border-zinc-700/60 transition-colors cursor-pointer"
-                                    onClick={(e) => handleExtractInfo(doc, 'split', e)}
-                                    title="Split extracted sections into separate memory cards for granular retrieval"
-                                  >
-                                    Split into cards
-                                  </button>
-                                )}
                               </div>
                             )}
 
