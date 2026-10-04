@@ -53,7 +53,8 @@ export interface UserDocument {
   fileName?: string; // Raw filename, e.g. "resume.pdf", "app_demo.mp4", "profile.png"
   filePath?: string; // Local disk path or media URL, e.g. "C:/Videos/openbua_demo.mp4"
   mimeType?: string; // MIME type, e.g. "application/pdf", "video/mp4", "image/png"
-  dataUrl?: string; // Base64 data URL for raw binary storage and programmatic form uploads
+  dataUrl?: string; // Base64 data URL for raw binary storage. Omitted for large media stored as a blob.
+  blobKey?: string; // IndexedDB key for raw bytes. Set instead of dataUrl for videos/large files.
   ocrStatus?: 'pending' | 'processing' | 'done' | 'failed';
   fileCategory?: 'resume' | 'id_card' | 'photo' | 'video' | 'document' | 'other';
   videoDuration?: number; // Video duration in seconds
