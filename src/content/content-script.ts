@@ -1720,6 +1720,262 @@ async function uploadFileToElement(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Chunked file transfer
+//
+// Large media (videos) cannot be handed to a page in one message: Chrome
+// serializes every message and rejects oversized payloads. Instead the extension
+// streams the file as bounded base64 chunks, which we buffer here and
+// reassemble into a real File on commit. Nothing is ever base64-encoded as one
+// giant string on either side.
+// ---------------------------------------------------------------------------
+
+interface PendingFileTransfer {
+  fileName: string;
+  mimeType: string;
+  totalChunks: number;
+  chunks: (string | undefined)[];
+  startedAt: number;
+}
+
+function getTransferStore(): Map<string, PendingFileTransfer> {
+  const w = window as any;
+  if (!w.__OPENBUA_FILE_TRANSFERS__) w.__OPENBUA_FILE_TRANSFERS__ = new Map();
+  return w.__OPENBUA_FILE_TRANSFERS__ as Map<string, PendingFileTransfer>;
+}
+
+function base64ChunkToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function beginFileTransfer(
+  transferId: string,
+  fileName: string,
+  mimeType: string,
+  totalChunks: number
+): { success: boolean; message: string } {
+  const store = getTransferStore();
+  // Drop stale transfers so an abandoned upload cannot pin memory forever.
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [key, tx] of store) {
+    if (tx.startedAt < cutoff) store.delete(key);
+  }
+  store.set(transferId, { fileName, mimeType, totalChunks, chunks: new Array(totalChunks), startedAt: Date.now() });
+  return { success: true, message: `Receiving "${fileName}" in ${totalChunks} chunk(s).` };
+}
+
+function pushFileChunk(
+  transferId: string,
+  index: number,
+  data: string
+): { success: boolean; message: string; received: number } {
+  const tx = getTransferStore().get(transferId);
+  if (!tx) {
+    return { success: false, message: 'No active file transfer for this chunk.', received: 0 };
+  }
+  if (index < 0 || index >= tx.totalChunks) {
+    return { success: false, message: `Chunk index ${index} out of range.`, received: 0 };
+  }
+  tx.chunks[index] = data;
+  const received = tx.chunks.reduce<number>((n, c) => (c !== undefined ? n + 1 : n), 0);
+  return { success: true, message: `Chunk ${index + 1}/${tx.totalChunks} received.`, received };
+}
+
+function commitFileTransfer(
+  transferId: string,
+  refId?: string,
+  selector?: string,
+  dropEvents = true
+): { success: boolean; message: string; fileName?: string; attached?: boolean; bytes?: number } {
+  const store = getTransferStore();
+  const tx = store.get(transferId);
+  if (!tx) {
+    return { success: false, message: 'No active file transfer to commit.' };
+  }
+
+  const missing = tx.chunks.findIndex((c) => c === undefined);
+  if (missing >= 0) {
+    store.delete(transferId);
+    return {
+      success: false,
+      message: `File transfer incomplete: chunk ${missing + 1} of ${tx.totalChunks} never arrived.`,
+    };
+  }
+
+  try {
+    const parts = tx.chunks.map((c) => base64ChunkToBytes(c as string));
+    const total = parts.reduce((sum, p) => sum + p.length, 0);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const part of parts) {
+      merged.set(part, offset);
+      offset += part.length;
+    }
+    store.delete(transferId);
+
+    const file = new File([merged], tx.fileName, {
+      type: tx.mimeType || 'application/octet-stream',
+    });
+
+    const result = attachFileToComposer(file, refId, selector, dropEvents);
+    return {
+      success: result.success,
+      message: result.message,
+      fileName: tx.fileName,
+      attached: result.attached,
+      bytes: total,
+    };
+  } catch (err: any) {
+    store.delete(transferId);
+    return { success: false, message: `Failed to build file from transfer: ${err?.message || err}` };
+  }
+}
+
+/**
+ * Attach a File to the right file input and fire the events that React/Vue/Svelte
+ * composers listen for. Prefers the file input inside the visible modal, which
+ * is the composer the user actually has open (X, LinkedIn and Reddit all render
+ * one behind a home page that also has a hidden input).
+ */
+function attachFileToComposer(
+  file: File,
+  refId?: string,
+  selector?: string,
+  dropEvents = true
+): { success: boolean; message: string; attached: boolean } {
+  let input: HTMLInputElement | null = null;
+
+  if (refId) {
+    input =
+      document.querySelector<HTMLInputElement>(`[data-autoform-ref="${CSS.escape(refId)}"]`) ||
+      (document.getElementById(refId) as HTMLInputElement | null);
+    if (input && input.type !== 'file') {
+      const inner = input.querySelector<HTMLInputElement>('input[type="file"]');
+      input = inner || input;
+    }
+  }
+  if (!input && selector) {
+    try {
+      input = document.querySelector<HTMLInputElement>(selector);
+    } catch {
+      input = null;
+    }
+  }
+
+  const isVisible = (el: HTMLElement): boolean => {
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 1 && rect.height > 1) return true;
+    // File inputs are frequently visually hidden yet still the live control.
+    return el.offsetParent !== null;
+  };
+
+  if (!input) {
+    const candidates = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]'));
+    const inVisibleDialog = candidates.filter((el) => {
+      const dialog = el.closest('[role="dialog"], dialog, [aria-modal="true"]');
+      return Boolean(dialog) && isVisible(dialog as HTMLElement);
+    });
+    const visible = candidates.filter((el) => isVisible(el));
+    input = inVisibleDialog[0] || visible[0] || candidates[0] || null;
+  }
+
+  if (!input) {
+    // Last resort: platform media tabs (Reddit "Images & Video", etc.) that
+    // only reveal their input once the media tab is opened.
+    const isMedia = file.type.startsWith('video/') || file.type.startsWith('image/');
+    if (isMedia) {
+      const tabButton = Array.from(
+        document.querySelectorAll<HTMLElement>('button[role="tab"], [role="tab"], button')
+      ).find((b) => {
+        const txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+        return (
+          txt.includes('images & video') ||
+          txt.includes('image & video') ||
+          txt === 'media' ||
+          txt === 'images' ||
+          txt === 'video'
+        );
+      });
+      if (tabButton && tabButton.getAttribute('aria-selected') !== 'true') {
+        tabButton.click();
+      }
+    }
+    input = document.querySelector<HTMLInputElement>('input[type="file"]');
+  }
+
+  if (!input) {
+    return {
+      success: false,
+      attached: false,
+      message: 'No file input found. Open the post composer (for example click "Post" on X, or "Start a post" on LinkedIn) and try again.',
+    };
+  }
+
+  try {
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+
+    // Assign via the native setter so React's value tracker does not swallow
+    // the change (React overrides the `value`/`files` property descriptor).
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'files');
+      if (descriptor?.set) {
+        descriptor.set.call(input, transfer.files);
+      } else {
+        input.files = transfer.files;
+      }
+    } catch {
+      input.files = transfer.files;
+    }
+
+    input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+
+    if (dropEvents) {
+      const dropzone =
+        input.closest('[data-dropzone], [data-testid="dropzone"], .dropzone, [class*="dropzone"]') ||
+        input.parentElement;
+      if (dropzone && dropzone !== input) {
+        for (const type of ['dragenter', 'dragover', 'drop']) {
+          try {
+            dropzone.dispatchEvent(
+              new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer: transfer })
+            );
+          } catch {
+            /* DragEvent unsupported */
+          }
+        }
+      }
+    }
+
+    try {
+      flashHighlight(input);
+    } catch {
+      /* non-fatal */
+    }
+
+    const attached = Boolean(input.files && input.files.length > 0);
+    const accepts = input.getAttribute('accept') || '';
+    const warning =
+      accepts && file.type && !accepts.includes(file.type.split('/')[1])
+        ? ` Note: this input declares accept="${accepts}" which may not include ${file.type}.`
+        : '';
+
+    return {
+      success: true,
+      attached,
+      message: attached
+        ? `Attached "${file.name}" (${file.size} bytes, ${file.type}) to the composer file input.${warning}`
+        : `Set "${file.name}" on the file input but the page reported no file.`,
+    };
+  } catch (err: any) {
+    return { success: false, attached: false, message: `Failed to attach file: ${err?.message || err}` };
+  }
+}
+
 // Listen for messages from the Side Panel / Extension
 if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
   (window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__ = true;
@@ -1757,6 +2013,32 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
           .catch((err) => {
             sendResponse({ success: false, message: err?.message || String(err) });
           });
+        break;
+      }
+
+      // Chunked media transfer: BEGIN -> N chunks -> COMMIT. Used for anything
+      // too large to send in a single message (videos, big images).
+      case 'PREPARE_FILE_UPLOAD': {
+        sendResponse(
+          beginFileTransfer(request.transferId, request.fileName, request.mimeType, request.totalChunks)
+        );
+        break;
+      }
+
+      case 'FILE_UPLOAD_CHUNK': {
+        sendResponse(pushFileChunk(request.transferId, request.index, request.data));
+        break;
+      }
+
+      case 'COMMIT_FILE_UPLOAD': {
+        sendResponse(
+          commitFileTransfer(
+            request.transferId,
+            request.refId,
+            request.selector,
+            request.dropEvents !== false
+          )
+        );
         break;
       }
 
