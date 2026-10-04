@@ -132,7 +132,12 @@ function inPagePushChunk(transferId: string, index: number, data: string): { ok:
  * page, so every helper it needs is declared inside its own body. Do not
  * extract these.
  */
-function inPageCommitTransfer(transferId: string): { success: boolean; message: string; bytes: number } {
+function inPageCommitTransfer(transferId: string): {
+  success: boolean;
+  message: string;
+  bytes: number;
+  attached?: boolean;
+} {
   const w = window as any;
   const tx = w.__OPENBUA_FILE_TRANSFERS__?.[transferId];
   if (!tx) return { success: false, message: 'No active file transfer on this page.', bytes: 0 };
