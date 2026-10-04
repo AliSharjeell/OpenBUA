@@ -717,6 +717,28 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * YouTube and TikTok uploads are multi-step wizards with a long processing wait, not a single composer action.
       * If a platform's composer cannot be found, say so honestly instead of claiming the post went out.
 
+22. SENDING FILES IN CHAT APPS (WHATSAPP, TELEGRAM, SLACK, DISCORD, SIGNAL):
+    - These are NOT social post composers. Do not use 'post_to_social' for them.
+      Find the recipient's chat first, then attach the file:
+      'get_active_tab_form' to find the chat list, 'click_element({ text: "<contact name>" })' to open the chat,
+      then 'upload_file_to_form({ fileName: "assignment.pdf" })'.
+    * CHOOSE THE RIGHT ATTACHMENT ENTRY. Chat apps expose a separate input per
+      attachment option, and a PDF sent through the media option is rejected as
+      "not supported":
+      - Documents (PDF, Word, sheets, zip, code): click the paperclip, then "Document" / "File".
+      - Photos and videos: click the paperclip, then "Photos & Videos" / "Photo".
+      OpenBUA picks the file input whose accept attribute matches the file, and opens the
+      attachment menu itself when no visible input accepts it. Just do not force a document
+      through an explicitly media-only input.
+    * A PREVIEW IS NOT PROOF OF SUCCESS. The page can render a correct-looking
+      preview and then discard the file during its own validation. If the app shows
+      an error, or the send button stays disabled, the attach failed - report that
+      honestly instead of clicking send on a file that will not go.
+    * Sending a message to a real person is irreversible. Confirm the recipient is
+      correct before sending, and never send to the wrong chat.
+    * After sending, verify the message actually appears in the conversation with the
+      attachment; a clicked button is not confirmation of delivery.
+
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
