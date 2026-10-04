@@ -1,6 +1,7 @@
 import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
 import { loadGlobalMemories, loadTabMemories, getTabKey } from '../services/storage';
 import { tryLoadFileFromLocalPath } from '../services/pdf-parser';
+import { injectFileIntoTab, resolveFileSource, type FileSource } from './file-injection';
 
 export interface TabInfo {
   id: number;
@@ -1434,7 +1435,147 @@ export async function fillActiveTabFields(
   throw new Error('Failed to fill form fields on active tab');
 }
 
-// Programmatically upload a stored raw file (resume, image, PDF, doc) to a file input or dropzone on active tab
+// Programmatically upload a stored raw file (resume, image, PDF, video) to a file input or dropzone on active tab
+
+/** A stored document counts as usable when its raw bytes are reachable. */
+function hasRawBytes(m: UserDocument): boolean {
+  return Boolean(m.blobKey || m.dataUrl || m.filePath);
+}
+
+export interface ResolvedStoredFile {
+  doc: UserDocument;
+  source: FileSource;
+  fileName: string;
+  mimeType: string;
+}
+
+/**
+ * Find the stored document the user means and turn it into bytes we can inject.
+ * Videos and other large media come from the blob store, so nothing large is
+ * ever held as a base64 string.
+ */
+export async function resolveStoredFile(options: {
+  fileName?: string;
+  /** Current tab URL, used to bias toward media when nothing was named. */
+  tabUrl?: string;
+}): Promise<ResolvedStoredFile | null> {
+  const tabKey = getTabKey(await getActiveTab());
+  const [globalMems, tabMems] = await Promise.all([
+    loadGlobalMemories().catch(() => []),
+    loadTabMemories(tabKey).catch(() => []),
+  ]);
+  const allMems = [...globalMems, ...tabMems];
+  const requestedName = (options.fileName || '').toLowerCase().trim();
+
+  const isVideoDoc = (m: UserDocument) =>
+    hasRawBytes(m) && (m.fileCategory === 'video' || m.type === 'video' || m.tags?.includes('video'));
+
+  let match: UserDocument | undefined;
+  if (requestedName) {
+    match = allMems.find(
+      (m) =>
+        hasRawBytes(m) &&
+        ((m.fileName && m.fileName.toLowerCase().includes(requestedName)) ||
+          m.title.toLowerCase().includes(requestedName) ||
+          (m.filePath && m.filePath.toLowerCase().includes(requestedName)))
+    );
+
+    if (
+      !match &&
+      (requestedName.includes('video') ||
+        requestedName.includes('mp4') ||
+        requestedName.includes('promo') ||
+        requestedName.includes('demo') ||
+        requestedName.includes('trailer') ||
+        requestedName.includes('media'))
+    ) {
+      match = allMems.find(isVideoDoc);
+    }
+  }
+
+  if (!match) {
+    // On a social platform with nothing named, prefer stored video media.
+    const tabUrl = (options.tabUrl || '').toLowerCase();
+    if (SOCIAL_MEDIA_HOST_HINTS.some((hint) => tabUrl.includes(hint))) {
+      match = allMems.find(isVideoDoc);
+    }
+  }
+
+  if (!match) {
+    match = allMems.find(
+      (m) =>
+        hasRawBytes(m) &&
+        (m.fileCategory === 'resume' ||
+          m.tags?.includes('resume') ||
+          (m.fileName && /resume|cv/i.test(m.fileName)) ||
+          /resume|cv/i.test(m.title))
+    );
+  }
+
+  if (!match) {
+    match = allMems.find(hasRawBytes);
+  }
+
+  if (!match) return null;
+
+  // Last resort for documents that only have a local path on disk.
+  if (!match.blobKey && !match.dataUrl && match.filePath) {
+    const loaded = await tryLoadFileFromLocalPath(match.filePath);
+    if (loaded) {
+      match = {
+        ...match,
+        dataUrl: loaded.dataUrl,
+        mimeType: loaded.mimeType,
+        fileName: match.fileName || loaded.fileName,
+      };
+    }
+  }
+
+  const source = await resolveFileSource(match);
+  if (!source) return null;
+
+  return {
+    doc: match,
+    source,
+    fileName: match.fileName || `${match.title}.${extensionForDoc(match)}`,
+    mimeType:
+      match.mimeType ||
+      (match.type === 'pdf'
+        ? 'application/pdf'
+        : match.type === 'video'
+          ? 'video/mp4'
+          : match.type === 'image'
+            ? 'image/png'
+            : 'application/octet-stream'),
+  };
+}
+
+function extensionForDoc(doc: UserDocument): string {
+  if (doc.type === 'pdf') return 'pdf';
+  if (doc.type === 'video') return 'mp4';
+  if (doc.type === 'image') return 'png';
+  if (doc.type === 'markdown') return 'md';
+  if (doc.type === 'json') return 'json';
+  return 'txt';
+}
+
+/** Hosts where a stored video is the media the user most likely means. */
+const SOCIAL_MEDIA_HOST_HINTS = [
+  'reddit.com',
+  'twitter.com',
+  'x.com',
+  'linkedin.com',
+  'facebook.com',
+  'instagram.com',
+  'threads.net',
+  'youtube.com',
+  'tiktok.com',
+  'bsky.app',
+  'mastodon.social',
+  'pinterest.com',
+  'tumblr.com',
+];
+
 export async function uploadFileToActiveTab(options: {
   refId?: string;
   selector?: string;
@@ -1446,201 +1587,52 @@ export async function uploadFileToActiveTab(options: {
     return { success: false, message: 'No active browser tab found to upload file to.' };
   }
 
-  let filePayload = options.fileData;
+  // Legacy inline payload from fill_form_fields.
+  if (options.fileData?.dataUrl) {
+    const result = await injectFileIntoTab(
+      activeTab.id,
+      {
+        fileName: options.fileData.fileName,
+        mimeType: options.fileData.mimeType || 'application/octet-stream',
+        source: { kind: 'dataUrl', dataUrl: options.fileData.dataUrl },
+        refId: options.refId,
+        selector: options.selector,
+      },
+      sendMessageToTab
+    );
+    return { success: result.success, message: result.message, fileName: options.fileData.fileName };
+  }
 
-  if (!filePayload) {
-    const tabKey = getTabKey(activeTab);
-    const [globalMems, tabMems] = await Promise.all([
-      loadGlobalMemories().catch(() => []),
-      loadTabMemories(tabKey).catch(() => []),
-    ]);
-    const allMems = [...globalMems, ...tabMems];
-    const requestedName = (options.fileName || '').toLowerCase().trim();
-
-    let match: UserDocument | undefined;
-    if (requestedName) {
-      match = allMems.find(
-        (m) =>
-          (m.dataUrl || m.filePath) &&
-          ((m.fileName && m.fileName.toLowerCase().includes(requestedName)) ||
-            m.title.toLowerCase().includes(requestedName) ||
-            (m.filePath && m.filePath.toLowerCase().includes(requestedName)))
-      );
-
-      if (
-        !match &&
-        (requestedName.includes('video') ||
-          requestedName.includes('mp4') ||
-          requestedName.includes('promo') ||
-          requestedName.includes('demo') ||
-          requestedName.includes('trailer') ||
-          requestedName.includes('media'))
-      ) {
-        match = allMems.find(
-          (m) =>
-            (m.dataUrl || m.filePath) &&
-            (m.fileCategory === 'video' || m.type === 'video' || m.tags?.includes('video'))
-        );
-      }
-    }
-
-    if (!match) {
-      // If on Reddit, Twitter/X, or social site, check for video document first
-      const tabUrl = (activeTab.url || '').toLowerCase();
-      if (tabUrl.includes('reddit.com') || tabUrl.includes('twitter.com') || tabUrl.includes('x.com')) {
-        match = allMems.find(
-          (m) =>
-            (m.dataUrl || m.filePath) &&
-            (m.fileCategory === 'video' || m.type === 'video' || m.tags?.includes('video'))
-        );
-      }
-    }
-
-    if (!match) {
-      match = allMems.find(
-        (m) =>
-          (m.dataUrl || m.filePath) &&
-          (m.fileCategory === 'resume' ||
-            m.tags?.includes('resume') ||
-            (m.fileName && /resume|cv/i.test(m.fileName)) ||
-            /resume|cv/i.test(m.title))
-      );
-    }
-
-    if (!match) {
-      match = allMems.find((m) => m.dataUrl || m.filePath);
-    }
-
-    if (!match) {
-      return {
-        success: false,
-        message: `No stored document with raw file attachment or file path was found in Memory${
-          requestedName ? ` matching "${requestedName}"` : ''
-        }. Please upload your video, resume, or file in the Memory tab first!`,
-      };
-    }
-
-    // If document has filePath but no dataUrl, try loading from local disk path
-    if (!match.dataUrl && match.filePath) {
-      const loaded = await tryLoadFileFromLocalPath(match.filePath);
-      if (loaded) {
-        match = {
-          ...match,
-          dataUrl: loaded.dataUrl,
-          mimeType: loaded.mimeType,
-          fileName: match.fileName || loaded.fileName,
-        };
-      }
-    }
-
-    if (!match.dataUrl) {
-      return {
-        success: false,
-        message: `Stored document "${match.title}" has path "${match.filePath}", but raw binary data could not be accessed directly. Please upload the file directly in the Memory tab or enable file URL access.`,
-      };
-    }
-
-    filePayload = {
-      fileName: match.fileName || `${match.title}.${match.type === 'pdf' ? 'pdf' : match.type === 'video' ? 'mp4' : 'png'}`,
-      mimeType: match.mimeType || (match.type === 'pdf' ? 'application/pdf' : match.type === 'video' ? 'video/mp4' : 'application/octet-stream'),
-      dataUrl: match.dataUrl,
+  const requestedName = (options.fileName || '').toLowerCase().trim();
+  const resolved = await resolveStoredFile({ fileName: options.fileName, tabUrl: activeTab.url });
+  if (!resolved) {
+    return {
+      success: false,
+      message: `No stored document with raw file attachment or file path was found in Memory${
+        requestedName ? ` matching "${requestedName}"` : ''
+      }. Please upload your video, resume, or file in the Memory tab first!`,
     };
   }
 
-  // 1. Send message to tab content script
-  try {
-    const res = await sendMessageToTab(
-      activeTab.id,
-      {
-        action: 'UPLOAD_FILE_TO_ELEMENT',
-        refId: options.refId,
-        selector: options.selector || 'input[type="file"]',
-        fileData: filePayload,
-      },
-      8000
-    );
-    if (res && (res.success || res.message)) {
-      return res;
-    }
-  } catch (msgErr) {
-    console.warn('[OpenBUA] uploadFile sendMessageToTab notice:', msgErr);
-  }
+  const result = await injectFileIntoTab(
+    activeTab.id,
+    {
+      fileName: resolved.fileName,
+      mimeType: resolved.mimeType,
+      source: resolved.source,
+      refId: options.refId,
+      selector: options.selector,
+    },
+    sendMessageToTab
+  );
 
-  // 2. Direct executeScript fallback
-  if (typeof chrome !== 'undefined' && chrome.scripting) {
-    try {
-      const scriptRes = await chrome.scripting.executeScript({
-        target: { tabId: activeTab.id },
-        func: (refId, selector, fileData) => {
-          let target: HTMLElement | null = null;
-          if (refId) {
-            target = document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`) || document.getElementById(refId);
-          }
-          if (!target && selector) {
-            try { target = document.querySelector(selector); } catch {}
-          }
-          if (!target || target.tagName.toLowerCase() !== 'input' || (target as HTMLInputElement).type !== 'file') {
-            if (target) {
-              const inner = target.querySelector<HTMLInputElement>('input[type="file"]');
-              if (inner) target = inner;
-            }
-            if (!target || target.tagName.toLowerCase() !== 'input') {
-              target = document.querySelector<HTMLInputElement>(
-                'input[type="file"], [data-testid="dropzone"] input, .dropzone input'
-              );
-            }
-          }
-          if (!target) {
-            return { success: false, message: 'No file input or dropzone found on page.' };
-          }
-          try {
-            const input = target as HTMLInputElement;
-            const parts = fileData.dataUrl.split(',');
-            const mime = fileData.mimeType || 'application/octet-stream';
-            const bstr = atob(parts[1] || '');
-            let n = bstr.length;
-            const u8arr = new Uint8Array(n);
-            while (n--) u8arr[n] = bstr.charCodeAt(n);
-            const defaultName = mime.startsWith('video/') ? 'video.mp4' : mime.startsWith('image/') ? 'image.png' : 'document.pdf';
-            const file = new File([u8arr], fileData.fileName || defaultName, { type: mime });
-            const dt = new DataTransfer();
-            dt.items.add(file);
-            input.files = dt.files;
-            input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
-
-            const dropzone =
-              input.closest('.dropzone, [data-testid="dropzone"], [class*="upload"], [class*="drop"], [role="button"]') ||
-              document.querySelector('[data-testid="dropzone"], div[data-dropzone="true"]') ||
-              input.parentElement;
-            if (dropzone && dropzone !== input) {
-              try {
-                dropzone.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
-                dropzone.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
-                dropzone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt }));
-              } catch {}
-            }
-
-            return {
-              success: true,
-              message: `Attached "${fileData.fileName}" to ${input.tagName.toLowerCase()} in DOM.`,
-              fileName: fileData.fileName,
-            };
-          } catch (e: any) {
-            return { success: false, message: `Failed to attach file: ${e?.message || e}` };
-          }
-        },
-        args: [options.refId, options.selector, filePayload],
-      });
-      if (scriptRes && scriptRes[0]?.result) {
-        return scriptRes[0].result;
-      }
-    } catch (e: any) {
-      return { success: false, message: `Script execution error: ${e?.message || e}` };
-    }
-  }
-
-  return { success: false, message: 'Could not attach file to page.' };
+  return {
+    success: result.success,
+    message: result.success
+      ? `${result.message} Source: stored memory "${resolved.doc.title}".`
+      : `${result.message} (Tried stored memory "${resolved.doc.title}".)`,
+    fileName: resolved.fileName,
+  };
 }
 
 // Click element on active tab
