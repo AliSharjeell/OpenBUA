@@ -4,6 +4,7 @@ import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS, createAgentTools } from './tools';
 import { createCustomModel, createStreamFn } from './stream-adapter';
 import { getActiveTab, isExtensionPage } from './browser-bridge';
+import { describePlatforms } from './social-platforms';
 import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
 import { setActiveSessionIdState, getScratchpad, appendToScratchpad, loadSuggestedMemories, saveSuggestedMemory } from '../services/storage';
 
@@ -436,7 +437,7 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
        - When a form field is an upload or file input (<input type="file">, dropzone, "Upload Resume", "Attach CV", "Attach Photo"):
          Use 'upload_file_to_form({ fileName: "resume.pdf", refId: "..." })' or 'upload_file_to_form({ selector: "input[type=\'file\']" })'.
          Alternatively, specify the file input assignment in 'fill_form_fields' with value: "resume.pdf" or "resume".
-         OpenBUA will automatically attach the user's stored raw binary file into the file input using DataTransfer!
+         OpenBUA attaches the user's stored raw file using DataTransfer and streams it in chunks, so files of any size work.
      * TEXT FIELDS (Name, Email, Phone, Experience, Education, Skills, LinkedIn, GitHub):
        - Use the extracted resume text stored in "USER'S STORED KNOWLEDGE & DOCUMENTS" to fill all matching fields accurately.
    - Step 3: Call 'fill_form_fields' with the assignments (and/or 'upload_file_to_form').
@@ -681,26 +682,40 @@ ${(this.settings.autoConfirmSubmit ?? true)
         - If a research tab was opened, switch back to the target chat tab immediately: 'switch_browser_tab({ tabId: ... })' or focus the window.
         - Type the message, send it, and finish within 2 to 3 turns total.
 
-21. SOCIAL MEDIA & REDDIT MARKETING AUTOMATION (VIDEO & POST CREATION):
-    - When the user asks to post videos, product demos, or promotional content to Reddit (e.g. "post videos on reddit marketing my app", "post demo video on r/webdev", "create a marketing post on Reddit"):
-      * STEP 1 — RETRIEVE STORED MARKETING ASSETS & COPY:
-        - Check "USER'S STORED KNOWLEDGE & DOCUMENTS" below or call 'get_user_documents' to find the marketing video, file path, application features, hooks, and target audience.
-        - OpenBUA supports storing marketing videos (.mp4, .webm, .mov) directly in Memory or by local path (e.g. C:\Videos\app-demo.mp4).
-      * STEP 2 — NAVIGATE DIRECTLY TO THE SUBREDDIT SUBMIT PAGE:
-        - Navigate directly to: 'https://www.reddit.com/r/{target_subreddit}/submit' (e.g. 'https://www.reddit.com/r/SideProject/submit', 'https://www.reddit.com/r/webdev/submit').
-        - If no specific subreddit was requested, choose an appropriate community based on the app (e.g. r/SideProject, r/webdev, r/startups) or go to 'https://www.reddit.com/submit'.
-      * STEP 3 — DISCOVER POST INTERFACE & SWITCH TO "IMAGES & VIDEO" TAB:
-        - Call 'get_active_tab_form' to locate post tabs and title inputs.
-        - If not already on the media tab, click "Images & Video": 'click_element({ text: "Images & Video" })' or 'click_element({ selector: "button[role=\'tab\']" })'.
-      * STEP 4 — ATTACH STORED MARKETING VIDEO:
-        - Call 'upload_file_to_form({ fileName: "video" })' or specify the stored video name.
-        - OpenBUA automatically attaches the video via DataTransfer and dispatches dropzone drag events so Reddit registers the uploaded video media immediately.
-      * STEP 5 — COMPOSE HIGH-CONVERTING TITLE & POST COPY:
-        - Fill the post Title input using the user's stored product value propositions or marketing hooks from Memory:
-          'fill_form_fields({ assignments: [{ selector: "textarea[placeholder*=\'Title\'], input[placeholder*=\'Title\']", value: "..." }] })'.
-      * STEP 6 — REVIEW & CONFIRMATION:
-        - If review is required before publishing, inform the user with the drafted title and attached video details.
-        - When confirmed or instructed to post, click the submit button: 'click_element({ text: "Post" })'.
+21. SOCIAL MEDIA POSTING (ANY PLATFORM — X, LINKEDIN, REDDIT, FACEBOOK, INSTAGRAM, THREADS, BLUESKY, MASTODON, YOUTUBE, PINTEREST, TUMBLR, TIKTOK):
+    - PREFER THE ONE-CALL TOOL. When the user asks to post media or a caption to a social platform, call 'post_to_social' first:
+      'post_to_social({ platform: "x", media: ["consistnet.mp4"], text: "..." })'
+      It detects the platform, opens the composer, attaches the stored media, types the caption, and returns the composer state.
+      Supported platform values: ${describePlatforms()}
+    - WHEN TO USE THE MANUAL PATH. Use the steps below when 'post_to_social' reports a failure, when the user asks for a
+      specific subreddit, or when the platform is doing something unusual (e.g. Reddit's title field, Instagram's aspect ratio).
+      * STEP 1 — GET THE ASSET: call 'get_user_documents' to find the stored video/image and any marketing copy in Memory.
+        Videos can be stored in Memory or referenced by local path. All file sizes are supported — media is streamed in
+        chunks, so a 200MB video works exactly like a small file.
+      * STEP 2 — OPEN THE COMPOSER:
+        - X: 'https://x.com/compose/post' (or click "Post" in the left sidebar)
+        - LinkedIn: open the feed, then click "Start a post" (the composer is a dialog)
+        - Reddit: 'https://www.reddit.com/r/{subreddit}/submit'
+        - Bluesky: the composer is already inline at the top of bsky.app
+      * STEP 3 — PICK THE RIGHT MEDIA TAB when the platform has one:
+        Reddit: 'click_element({ text: "Images & Video" })' · LinkedIn: switch the composer to the "Video"/"Media" tab.
+      * STEP 4 — ATTACH THE MEDIA: call 'upload_file_to_form({ fileName: "consistnet.mp4" })'.
+        Do NOT pass a selector - OpenBUA finds the composer file input automatically and prefers the one inside the
+        visible dialog, which is the open composer rather than the hidden input behind the home page.
+      * STEP 5 — COMPOSE THE COPY: 'fill_form_fields({ assignments: [{ selector: "div[role=\'textbox\']", value: "..." }] })'.
+        On Reddit also fill the Title field, and pick the correct subreddit.
+      * STEP 6 — VERIFY BEFORE SUBMITTING. After attaching, confirm the media preview actually rendered and the caption
+        landed. A successful attach means the file is on the input, not that the platform finished uploading it.
+        Long videos keep uploading in the background; wait and re-check before clicking Post.
+      * STEP 7 — SUBMIT: click the platform's button — 'click_element({ text: "Post" })' on X and Reddit,
+        "Share" on Facebook and LinkedIn, "Post" on Instagram/Threads/Bluesky.
+        NEVER submit if any media failed to attach. If the user asked you to post, submit; otherwise report back first.
+    - PLATFORM GOTCHAS:
+      * Instagram web only accepts square or 4:5 media; Reels are 9:16. A 16:9 desktop video may be rejected.
+      * LinkedIn may open the composer on the document tab — switch to "Video"/"Media" first.
+      * Reddit needs a subreddit and a title; a link post must be switched to the "Text" (self post) tab.
+      * YouTube and TikTok uploads are multi-step wizards with a long processing wait, not a single composer action.
+      * If a platform's composer cannot be found, say so honestly instead of claiming the post went out.
 
 ${docsSummary}
 
