@@ -21,6 +21,7 @@ import {
   getActiveTab,
   clickAtPosition,
   typeActiveTabText,
+  getActiveTabViewport,
 } from './browser-bridge';
 import {
   findPlatform,
@@ -272,7 +273,8 @@ const CaptureTabScreenshotSchema = Type.Object({});
 export const captureTabScreenshotTool: AgentTool<typeof CaptureTabScreenshotSchema> = {
   name: 'capture_tab_screenshot',
   label: 'Capture Screenshot',
-  description: 'Captures a screenshot of the visible area of the current active browser tab for visual inspection.',
+  description:
+    'Captures a screenshot of the visible area of the current active browser tab for visual inspection. The result also reports the page\'s CSS viewport size and device pixel ratio. Screenshot pixels may be larger than CSS pixels on a HiDPI display; click_at_position takes screenshot pixel coordinates and converts them for you, so just read the position off the image and pass it straight through.',
   parameters: CaptureTabScreenshotSchema,
   execute: async (): Promise<AgentToolResult> => {
     try {
@@ -281,12 +283,27 @@ export const captureTabScreenshotTool: AgentTool<typeof CaptureTabScreenshotSche
       const mimeType = match ? match[1] : 'image/jpeg';
       const base64Data = match ? match[2] : dataUrl;
 
+      // Report the real CSS viewport so coordinate arithmetic is never guesswork.
+      const viewport = await getActiveTabViewport().catch(() => null);
+      const geometry = viewport
+        ? ` CSS viewport: ${viewport.width}x${viewport.height}px, devicePixelRatio ${viewport.devicePixelRatio}.` +
+          (viewport.devicePixelRatio !== 1
+            ? ` This screenshot is ${viewport.devicePixelRatio}x the CSS viewport; click_at_position converts coordinates for you.`
+            : '')
+        : '';
+
       return {
         content: [
-          { type: 'text', text: 'Screenshot captured successfully of current browser tab.' },
+          { type: 'text', text: `Screenshot captured successfully of current browser tab.${geometry}` },
           { type: 'image', data: base64Data, mimeType } as any,
         ],
-        details: { dataUrl: dataUrl.slice(0, 100) + '...', size: base64Data.length },
+        details: {
+          dataUrl: dataUrl.slice(0, 100) + '...',
+          size: base64Data.length,
+          viewport: viewport
+            ? { width: viewport.width, height: viewport.height, devicePixelRatio: viewport.devicePixelRatio }
+            : undefined,
+        } as any,
       };
     } catch (err: any) {
       return {
@@ -1112,7 +1129,18 @@ export const clickAtPositionTool: AgentTool<typeof ClickAtPositionSchema> = {
         clickCount: params.clickCount,
         button: params.button,
       });
-      return { content: [{ type: 'text', text: res.message }], details: res };
+      return {
+        content: [{ type: 'text', text: res.message }],
+        details: {
+          success: res.success,
+          element: res.element,
+          cssX: res.cssX,
+          cssY: res.cssY,
+          viewport: res.viewport
+            ? { width: res.viewport.width, height: res.viewport.height, devicePixelRatio: res.viewport.devicePixelRatio }
+            : undefined,
+        } as any,
+      };
     } catch (err: any) {
       return {
         content: [{ type: 'text', text: `Failed to click at position: ${err?.message || err}` }],

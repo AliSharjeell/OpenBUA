@@ -2004,18 +2004,35 @@ function clickAtPoint(
   x: number,
   y: number,
   opts: { clickCount?: number; button?: number } = {}
-): { success: boolean; message: string; element: string; canvasEditor: string | null } {
+): {
+  success: boolean;
+  message: string;
+  element: string;
+  canvasEditor: string | null;
+  viewport?: { width: number; height: number; devicePixelRatio: number };
+} {
   try {
     const clickCount = Math.max(1, opts.clickCount || 1);
     const button = opts.button ?? 0;
+    // Always report the viewport so a miss is diagnosable without guessing.
+    const viewport = {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+    };
     const target = document.elementFromPoint(x, y) as HTMLElement | null;
 
     if (!target) {
       return {
         success: false,
-        message: `Nothing at (${Math.round(x)}, ${Math.round(y)}). The point is outside the page content - check the coordinates against a screenshot.`,
+        message:
+          `Nothing at (${Math.round(x)}, ${Math.round(y)}) in CSS pixels. ` +
+          `The viewport is only ${viewport.width}x${viewport.height} CSS px at devicePixelRatio ${viewport.devicePixelRatio}. ` +
+          `If you read these coordinates from a screenshot, remember screenshots are ${viewport.devicePixelRatio}x larger. ` +
+          `Either re-read the coordinate and retry, or scroll the target into the visible area first.`,
         element: 'none',
         canvasEditor: null,
+        viewport,
       };
     }
 
@@ -2068,9 +2085,10 @@ function clickAtPoint(
 
     return {
       success: true,
-      message: `Clicked at (${Math.round(x)}, ${Math.round(y)}) on <${tag}>${clickCount > 1 ? ` (${clickCount} clicks)` : ''}.${hint} Now use type_text to write at the caret.`,
+      message: `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>${clickCount > 1 ? ` (${clickCount} clicks)` : ''}.${hint} Now use type_text to write at the caret.`,
       element: tag,
       canvasEditor: editor.isCanvas ? editor.name : null,
+      viewport,
     };
   } catch (err: any) {
     return {
@@ -2569,6 +2587,15 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
           .catch((err) => {
             sendResponse({ success: false, message: err?.message || String(err) });
           });
+        break;
+      }
+
+      case 'GET_VIEWPORT': {
+        sendResponse({
+          width: window.innerWidth,
+          height: window.innerHeight,
+          dpr: window.devicePixelRatio || 1,
+        });
         break;
       }
 

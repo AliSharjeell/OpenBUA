@@ -1697,15 +1697,26 @@ function inPageClickAtPoint(
   y: number,
   clickCount: number,
   button: number
-): { success: boolean; message: string; element: string } {
+): { success: boolean; message: string; element: string; viewport?: { width: number; height: number; devicePixelRatio: number } } {
   const count = Math.max(1, clickCount || 1);
   const btn = button ?? 0;
+  // Always report the viewport so a miss is diagnosable without guessing.
+  const viewport = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio || 1,
+  };
   const target = document.elementFromPoint(x, y) as HTMLElement | null;
   if (!target) {
     return {
       success: false,
-      message: `Nothing at (${Math.round(x)}, ${Math.round(y)}). Check the coordinates against a screenshot of the page.`,
+      message:
+        `Nothing at (${Math.round(x)}, ${Math.round(y)}) in CSS pixels. ` +
+        `The viewport is only ${viewport.width}x${viewport.height} CSS px at devicePixelRatio ${viewport.devicePixelRatio}. ` +
+        `If you read these coordinates from a screenshot, remember screenshots are ${viewport.devicePixelRatio}x larger. ` +
+        `Either re-read the coordinate and retry, or scroll the target into the visible area first.`,
       element: 'none',
+      viewport,
     };
   }
 
@@ -1747,8 +1758,9 @@ function inPageClickAtPoint(
   const tag = target.tagName.toLowerCase();
   return {
     success: true,
-    message: `Clicked at (${Math.round(x)}, ${Math.round(y)}) on <${tag}>${count > 1 ? ` (${count} clicks)` : ''}. Now use type_text to write at the caret.`,
+    message: `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>. Now use type_text to write at the caret.`,
     element: tag,
+    viewport,
   };
 }
 
@@ -1899,28 +1911,63 @@ export async function detectActiveTabEditor(): Promise<CanvasEditorInfo | null> 
   }
 }
 
-/** Place the caret (or click) at viewport coordinates on the active tab. */
+/**
+ * Place the caret (or click) at viewport coordinates on the active tab.
+ *
+ * Coordinates are accepted in the same pixel space as a screenshot from
+ * capture_tab_screenshot, and are converted to CSS viewport pixels using the
+ * tab's device pixel ratio. That matters because captureVisibleTab returns
+ * image pixels, which on a HiDPI display are larger than the CSS viewport: a
+ * click at the y the agent read off the screenshot would otherwise land well
+ * below the intended element, or off the page entirely.
+ */
 export async function clickAtPosition(
-  options: { x: number; y: number; clickCount?: number; button?: number; tabId?: number }
-): Promise<{ success: boolean; message: string; element?: string }> {
+  options: { x: number; y: number; clickCount?: number; button?: number; tabId?: number; viewport?: TabViewport | null }
+): Promise<{ success: boolean; message: string; element?: string; viewport?: TabViewport; cssX?: number; cssY?: number }> {
   const activeTab = options.tabId ? { id: options.tabId } : await getActiveTab();
   if (!activeTab || !activeTab.id) {
     return { success: false, message: 'No active browser tab found to click.' };
   }
 
+  // Resolve the viewport so screenshot pixels can be mapped to CSS pixels.
+  let viewport = options.viewport || null;
+  if (!viewport) {
+    viewport = await getActiveTabViewport().catch(() => null);
+  }
+  const dpr = viewport?.devicePixelRatio || 1;
+  const cssX = Math.round(options.x / dpr);
+  const cssY = Math.round(options.y / dpr);
+  const scaleNote =
+    dpr !== 1
+      ? ` Screenshot pixels converted to CSS pixels at devicePixelRatio ${dpr}: (${Math.round(options.x)}, ${Math.round(options.y)}) -> (${cssX}, ${cssY}).`
+      : '';
+
   try {
-    const response = await sendMessageToTab<{ success: boolean; message: string; element?: string }>(
+    const response = await sendMessageToTab<{
+      success: boolean;
+      message: string;
+      element?: string;
+      viewport?: TabViewport;
+    }>(
       activeTab.id,
       {
         action: 'CLICK_AT_POSITION',
-        x: options.x,
-        y: options.y,
+        x: cssX,
+        y: cssY,
         clickCount: options.clickCount || 1,
         button: options.button ?? 0,
       },
       2000
     );
-    if (response && response.success !== undefined) return response;
+    if (response && response.success !== undefined) {
+      return {
+        ...response,
+        message: `${response.message}${scaleNote}`,
+        viewport: response.viewport || viewport || undefined,
+        cssX,
+        cssY,
+      };
+    }
   } catch {
     // Fall through to direct injection.
   }
@@ -1930,15 +1977,31 @@ export async function clickAtPosition(
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPageClickAtPoint,
-        args: [options.x, options.y, options.clickCount || 1, options.button ?? 0],
+        args: [cssX, cssY, options.clickCount || 1, options.button ?? 0],
       });
-      if (results?.[0]?.result) return results[0].result;
+      if (results?.[0]?.result) {
+        return {
+          ...(results[0].result as any),
+          message: `${results[0].result.message}${scaleNote}`,
+          viewport: viewport || undefined,
+          cssX,
+          cssY,
+        };
+      }
     } catch (err: any) {
-      return { success: false, message: `Coordinate click failed: ${err?.message || err}` };
+      return {
+        success: false,
+        message: `Coordinate click failed: ${err?.message || err}${scaleNote}`,
+        viewport: viewport || undefined,
+      };
     }
   }
 
-  return { success: false, message: 'Could not click at those coordinates.' };
+  return {
+    success: false,
+    message: `Could not click at those coordinates.${scaleNote}`,
+    viewport: viewport || undefined,
+  };
 }
 
 /** Type text at the current caret on the active tab. */
@@ -2768,6 +2831,54 @@ export async function navigateActiveTab(url: string, timeoutMs = 8000): Promise<
       });
     }
   });
+}
+
+export interface TabViewport {
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+}
+
+/**
+ * Read the active tab's CSS viewport and device pixel ratio.
+ *
+ * chrome.tabs.captureVisibleTab returns image pixels, which on a HiDPI display
+ * are larger than the page's CSS viewport. Without this, an agent reading
+ * coordinates off a screenshot clicks the wrong place - or gets "nothing at
+ * (x, y)" and has no way to work out why.
+ */
+export async function getActiveTabViewport(): Promise<TabViewport | null> {
+  const activeTab = await getActiveTab();
+  if (!activeTab || !activeTab.id) return null;
+  try {
+    const res = await sendMessageToTab<{ width: number; height: number; dpr: number }>(
+      activeTab.id,
+      { action: 'GET_VIEWPORT' },
+      1500
+    );
+    if (res && res.width > 0) {
+      return { width: res.width, height: res.height, devicePixelRatio: res.dpr || 1 };
+    }
+  } catch {
+    /* fall through to direct injection */
+  }
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: () => ({
+          width: window.innerWidth,
+          height: window.innerHeight,
+          dpr: window.devicePixelRatio || 1,
+        }),
+      });
+      const r = results?.[0]?.result;
+      if (r && r.width > 0) return r as unknown as TabViewport;
+    } catch {
+      /* unavailable */
+    }
+  }
+  return null;
 }
 
 export async function captureTabScreenshot(): Promise<string> {
