@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test:chunks": "esbuild scripts/test-media-chunking.mjs --bundle --platform=node --format=esm --outfile=.tmp-chunktest.mjs --log-level=error && node .tmp-chunktest.mjs",
     "test:inputs": "node scripts/test-file-input-selection.mjs",
+    "test:dist": "node scripts/test-dist-artifact.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
