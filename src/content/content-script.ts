@@ -1789,64 +1789,239 @@ function commitFileTransfer(
   refId?: string,
   selector?: string,
   dropEvents = true
-): { success: boolean; message: string; fileName?: string; attached?: boolean; bytes?: number } {
+): Promise<{ success: boolean; message: string; fileName?: string; attached?: boolean; bytes?: number }> {
   const store = getTransferStore();
   const tx = store.get(transferId);
   if (!tx) {
-    return { success: false, message: 'No active file transfer to commit.' };
+    return Promise.resolve({ success: false, message: 'No active file transfer to commit.' });
   }
 
   const missing = tx.chunks.findIndex((c) => c === undefined);
   if (missing >= 0) {
     store.delete(transferId);
-    return {
+    return Promise.resolve({
       success: false,
       message: `File transfer incomplete: chunk ${missing + 1} of ${tx.totalChunks} never arrived.`,
-    };
-  }
-
-  try {
-    const parts = tx.chunks.map((c) => base64ChunkToBytes(c as string));
-    const total = parts.reduce((sum, p) => sum + p.length, 0);
-    const merged = new Uint8Array(total);
-    let offset = 0;
-    for (const part of parts) {
-      merged.set(part, offset);
-      offset += part.length;
-    }
-    store.delete(transferId);
-
-    const file = new File([merged], tx.fileName, {
-      type: tx.mimeType || 'application/octet-stream',
     });
-
-    const result = attachFileToComposer(file, refId, selector, dropEvents);
-    return {
-      success: result.success,
-      message: result.message,
-      fileName: tx.fileName,
-      attached: result.attached,
-      bytes: total,
-    };
-  } catch (err: any) {
-    store.delete(transferId);
-    return { success: false, message: `Failed to build file from transfer: ${err?.message || err}` };
   }
+
+  return (async (): Promise<{
+    success: boolean;
+    message: string;
+    fileName?: string;
+    attached?: boolean;
+    bytes?: number;
+  }> => {
+    try {
+      const parts = tx.chunks.map((c) => base64ChunkToBytes(c as string));
+      const total = parts.reduce((sum, p) => sum + p.length, 0);
+      const merged = new Uint8Array(total);
+      let offset = 0;
+      for (const part of parts) {
+        merged.set(part, offset);
+        offset += part.length;
+      }
+      store.delete(transferId);
+
+      const file = new File([merged], tx.fileName, {
+        type: tx.mimeType || 'application/octet-stream',
+      });
+
+      const result = await attachFileToComposer(file, refId, selector, dropEvents);
+      return {
+        success: result.success,
+        message: result.message,
+        fileName: tx.fileName,
+        attached: result.attached,
+        bytes: total,
+      };
+    } catch (err: any) {
+      store.delete(transferId);
+      return { success: false, message: `Failed to build file from transfer: ${err?.message || err}` };
+    }
+  })();
+}
+
+// ---------------------------------------------------------------------------
+// Choosing the right file input
+//
+// Sites like WhatsApp Web keep several hidden <input type="file"> elements, one
+// per attachment-menu entry (Camera, Photos & Videos, Document). Taking the
+// first in DOM order almost always lands on the media input, whose `accept`
+// attribute excludes documents. The file is then set on the input, the app
+// renders a convincing preview, and only afterwards does the app reject it with
+// "file is not supported" - which looks exactly like a broken file.
+//
+// So pick the input whose `accept` attribute actually permits the file, and if
+// none does, open the attachment menu and select the right entry first.
+// ---------------------------------------------------------------------------
+
+/** True when an input's `accept` attribute permits this file. */
+function acceptAllowsFile(accept: string | null, file: File): boolean {
+  const raw = (accept || '').trim().toLowerCase();
+  // No accept attribute, "*" or "*/*" means unconstrained.
+  if (!raw || raw === '*' || raw.split(',').some((t) => t.trim() === '*/*')) return true;
+
+  const type = (file.type || '').toLowerCase();
+  const name = (file.name || '').toLowerCase();
+  const main = type.split('/')[0] || '';
+
+  return raw
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .some((token) => {
+      if (token === type && type) return true; // "application/pdf"
+      if (token === `${main}/*` && main) return true; // "video/*"
+      if (token.startsWith('.') && name.endsWith(token)) return true; // ".pdf"
+      return false;
+    });
+}
+
+/**
+ * Rank a candidate input. Returns -1 when `accept` explicitly excludes the
+ * file, so such inputs are only ever used as a last resort.
+ */
+function scoreFileInput(input: HTMLInputElement, file: File, inDialog: boolean): number {
+  const accept = input.getAttribute('accept');
+  const raw = (accept || '').trim().toLowerCase();
+  const tokens = raw.split(',').map((t) => t.trim()).filter(Boolean);
+
+  let score: number;
+  if (!raw) {
+    // Unconstrained: this is the generic document picker. Exactly right for
+    // documents, and harmless for media too.
+    score = 800;
+  } else if (tokens.some((t) => t === '*/*')) {
+    score = 600;
+  } else if (acceptAllowsFile(accept, file)) {
+    // Explicitly names this type, e.g. accept*="application/pdf".
+    score = 1000;
+  } else {
+    return -1;
+  }
+
+  if (inDialog) score += 50;
+  if (input.multiple) score += 25;
+  return score;
+}
+
+function isFileVisible(el: HTMLElement): boolean {
+  const rect = el.getBoundingClientRect();
+  if (rect.width > 1 && rect.height > 1) return true;
+  // File inputs are frequently visually hidden yet still the live control.
+  return el.offsetParent !== null;
+}
+
+/** Best-scoring file input on the page, or null when nothing accepts the file. */
+function bestFileInputFor(file: File): { input: HTMLInputElement | null; score: number } {
+  const candidates = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]'));
+  let best: HTMLInputElement | null = null;
+  let bestScore = -1;
+
+  for (const el of candidates) {
+    const dialog = el.closest('[role="dialog"], dialog, [aria-modal="true"]');
+    const inDialog = Boolean(dialog) && isFileVisible(dialog as HTMLElement);
+    const score = scoreFileInput(el, file, inDialog);
+    if (score > bestScore) {
+      best = el;
+      bestScore = score;
+    }
+  }
+  return { input: best, score: bestScore };
+}
+
+/** Click the first element matching a selector whose own text matches. */
+function clickByText(root: ParentNode, selector: string, keywords: string[]): boolean {
+  const nodes = Array.from(root.querySelectorAll<HTMLElement>(selector));
+  for (const node of nodes) {
+    const haystack = [
+      node.innerText,
+      node.textContent,
+      node.getAttribute('aria-label'),
+      node.getAttribute('title'),
+      node.getAttribute('data-testid'),
+      node.getAttribute('data-tooltip'),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    if (haystack && keywords.some((k) => haystack.includes(k))) {
+      try {
+        node.click();
+        return true;
+      } catch {
+        /* try the next candidate */
+      }
+    }
+  }
+  return false;
+}
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Open the attachment menu and choose the entry that matches this file's kind,
+ * mirroring what a human does before the picker appears.
+ */
+async function openAttachmentMenuForFile(file: File): Promise<boolean> {
+  const isMedia = file.type.startsWith('video/') || file.type.startsWith('image/');
+  const options = isMedia
+    ? ['photos & videos', 'photos and videos', 'photo & video', 'image & video', 'images & video', 'media', 'gallery']
+    : ['document', 'file'];
+
+  // Some apps render the menu entries inline; try the entry directly first.
+  if (clickByText(document, '[data-testid], [role="menuitem"], button, [role="button"], span, div[title]', options)) {
+    await wait(700);
+    return true;
+  }
+
+  // Otherwise open the menu, then pick the entry.
+  const triggers = [
+    '[title="Attach"]',
+    '[aria-label="Attach"]',
+    '[data-testid="attach"]',
+    '[data-icon="attach"]',
+    'button[aria-label*="Attach" i]',
+    '[role="button"][aria-label*="attach" i]',
+  ];
+  let opened = false;
+  for (const selector of triggers) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el) {
+      el.click();
+      opened = true;
+      break;
+    }
+  }
+  if (!opened) {
+    opened = clickByText(
+      document,
+      'button, [role="button"], [aria-label], [title]',
+      ['attach', 'attachment', 'add a file', 'paperclip']
+    );
+  }
+  if (!opened) return false;
+
+  await wait(500);
+  const picked = clickByText(document, '[data-testid], [role="menuitem"], button, [role="button"], span, div', options);
+  await wait(800);
+  return picked || opened;
 }
 
 /**
  * Attach a File to the right file input and fire the events that React/Vue/Svelte
- * composers listen for. Prefers the file input inside the visible modal, which
- * is the composer the user actually has open (X, LinkedIn and Reddit all render
- * one behind a home page that also has a hidden input).
+ * composers listen for. Prefers the file input inside the visible modal, then
+ * whichever input's `accept` attribute actually permits the file.
  */
-function attachFileToComposer(
+async function attachFileToComposer(
   file: File,
   refId?: string,
   selector?: string,
   dropEvents = true
-): { success: boolean; message: string; attached: boolean } {
+): Promise<{ success: boolean; message: string; attached: boolean }> {
   let input: HTMLInputElement | null = null;
+  let explicit = false;
 
   if (refId) {
     input =
@@ -1856,37 +2031,44 @@ function attachFileToComposer(
       const inner = input.querySelector<HTMLInputElement>('input[type="file"]');
       input = inner || input;
     }
+    explicit = Boolean(input);
   }
   if (!input && selector) {
     try {
       input = document.querySelector<HTMLInputElement>(selector);
+      explicit = Boolean(input);
     } catch {
       input = null;
     }
   }
 
-  const isVisible = (el: HTMLElement): boolean => {
-    const rect = el.getBoundingClientRect();
-    if (rect.width > 1 && rect.height > 1) return true;
-    // File inputs are frequently visually hidden yet still the live control.
-    return el.offsetParent !== null;
-  };
-
   if (!input) {
-    const candidates = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]'));
-    const inVisibleDialog = candidates.filter((el) => {
-      const dialog = el.closest('[role="dialog"], dialog, [aria-modal="true"]');
-      return Boolean(dialog) && isVisible(dialog as HTMLElement);
-    });
-    const visible = candidates.filter((el) => isVisible(el));
-    input = inVisibleDialog[0] || visible[0] || candidates[0] || null;
+    const best = bestFileInputFor(file);
+    input = best.input;
+  }
+
+  // Nothing on the page accepts this file yet: open the attachment menu so the
+  // right entry (Document vs Photos & Videos) reveals its own input.
+  let warnedAboutAccept = false;
+  if (!explicit && input && !acceptAllowsFile(input.getAttribute('accept'), file)) {
+    const best = bestFileInputFor(file);
+    if (best.score < 0 || !best.input) {
+      await openAttachmentMenuForFile(file);
+      const retry = bestFileInputFor(file);
+      if (retry.input) {
+        input = retry.input;
+      } else {
+        warnedAboutAccept = true;
+      }
+    } else {
+      input = best.input;
+    }
   }
 
   if (!input) {
-    // Last resort: platform media tabs (Reddit "Images & Video", etc.) that
-    // only reveal their input once the media tab is opened.
-    const isMedia = file.type.startsWith('video/') || file.type.startsWith('image/');
-    if (isMedia) {
+    // Last resort: platform media tabs (Reddit "Images & Video", etc.) that only
+    // reveal their input once the media tab is opened.
+    if (file.type.startsWith('video/') || file.type.startsWith('image/')) {
       const tabButton = Array.from(
         document.querySelectorAll<HTMLElement>('button[role="tab"], [role="tab"], button')
       ).find((b) => {
@@ -1901,17 +2083,24 @@ function attachFileToComposer(
       });
       if (tabButton && tabButton.getAttribute('aria-selected') !== 'true') {
         tabButton.click();
+        await wait(400);
       }
     }
-    input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    input = bestFileInputFor(file).input;
   }
 
   if (!input) {
     return {
       success: false,
       attached: false,
-      message: 'No file input found. Open the post composer (for example click "Post" on X, or "Start a post" on LinkedIn) and try again.',
+      message: `No usable file input found for "${file.name}" (${file.type || 'unknown type'}). Open the chat or composer, click the attach button and choose the right option, then try again.`,
     };
+  }
+
+  const acceptAttr = input.getAttribute('accept') || '';
+  const acceptsThisFile = acceptAllowsFile(acceptAttr, file);
+  if (!acceptsThisFile) {
+    warnedAboutAccept = true;
   }
 
   try {
@@ -1958,18 +2147,23 @@ function attachFileToComposer(
     }
 
     const attached = Boolean(input.files && input.files.length > 0);
-    const accepts = input.getAttribute('accept') || '';
-    const warning =
-      accepts && file.type && !accepts.includes(file.type.split('/')[1])
-        ? ` Note: this input declares accept="${accepts}" which may not include ${file.type}.`
-        : '';
+    const scope = acceptAttr ? `accept="${acceptAttr}"` : 'no accept attribute';
+
+    // This is the WhatsApp "file is not supported" trap: the file is on the
+    // input and a preview renders, but the app validates against accept and
+    // throws the file away. Say so plainly instead of reporting success.
+    const acceptWarning = warnedAboutAccept
+      ? ` WARNING: the file input (${scope}) does not accept ${file.type || file.name}. ` +
+        `This site keeps separate inputs per attachment option and will likely reject this file as "not supported" even though a preview rendered. ` +
+        `Open the attach menu, choose "${file.type.startsWith('video/') || file.type.startsWith('image/') ? 'Photos & Videos' : 'Document'}", and attach again.`
+      : '';
 
     return {
       success: true,
       attached,
       message: attached
-        ? `Attached "${file.name}" (${file.size} bytes, ${file.type}) to the composer file input.${warning}`
-        : `Set "${file.name}" on the file input but the page reported no file.`,
+        ? `Attached "${file.name}" (${file.size} bytes, ${file.type}) to the file input (${scope}).${acceptWarning}`
+        : `Set "${file.name}" on the file input but the page reported no file.${acceptWarning}`,
     };
   } catch (err: any) {
     return { success: false, attached: false, message: `Failed to attach file: ${err?.message || err}` };
@@ -2031,14 +2225,16 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
       }
 
       case 'COMMIT_FILE_UPLOAD': {
-        sendResponse(
-          commitFileTransfer(
-            request.transferId,
-            request.refId,
-            request.selector,
-            request.dropEvents !== false
-          )
-        );
+        commitFileTransfer(
+          request.transferId,
+          request.refId,
+          request.selector,
+          request.dropEvents !== false
+        )
+          .then(sendResponse)
+          .catch((err) => {
+            sendResponse({ success: false, message: err?.message || String(err) });
+          });
         break;
       }
 
