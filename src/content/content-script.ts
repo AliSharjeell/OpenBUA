@@ -1721,6 +1721,368 @@ async function uploadFileToElement(
 }
 
 // ---------------------------------------------------------------------------
+// Canvas-editor input: caret placement and real typing
+//
+// Google Docs, Sheets, Figma, Canva and Word Online do not render their document
+// as DOM text. Docs draws every glyph onto a <canvas>, so get_active_tab_form
+// reports only toolbar chrome and there is no element to target at "the end of
+// line 3". The only way in is:
+//
+//   1. place the caret by dispatching a real mouse sequence at viewport
+//      coordinates over the canvas, and
+//   2. type by driving the editor's hidden contenteditable so it receives a
+//      genuine `beforeinput` event, which is what the editor's model listens to.
+//
+// fill_form_fields cannot do either: it *sets* values, and Docs ignores that.
+// ---------------------------------------------------------------------------
+
+/** True when this page is a canvas-rendered editor rather than DOM text. */
+function detectCanvasEditor(): { isCanvas: boolean; name: string | null } {
+  const url = location.hostname || '';
+  if (/docs\.google\.com/.test(url)) {
+    if (document.querySelector('.kix-appview, .kix-canvas-tile-content, #docs-titlebar')) {
+      return { isCanvas: true, name: 'Google Docs' };
+    }
+  }
+  if (/sheets\.google\.com/.test(url)) return { isCanvas: true, name: 'Google Sheets' };
+  if (/slides\.google\.com/.test(url)) return { isCanvas: true, name: 'Google Slides' };
+  if (/figma\.com/.test(url)) return { isCanvas: true, name: 'Figma' };
+  if (/canva\.com/.test(url)) return { isCanvas: true, name: 'Canva' };
+  if (/(word|office)\.live\.com/.test(url)) return { isCanvas: true, name: 'Word Online' };
+  if (document.querySelector('.kix-appview, .kix-canvas-tile-content, .docs-texteventtarget-iframe')) {
+    return { isCanvas: true, name: 'Google Docs' };
+  }
+  return { isCanvas: false, name: null };
+}
+
+/**
+ * Resolve the element that actually receives keystrokes.
+ *
+ * Canvas editors route input through a same-origin hidden iframe
+ * (`.docs-texteventtarget-iframe`). Keyboard events dispatched at the top-level
+ * document.activeElement land on the <iframe> element itself and are never seen
+ * by the editor, so we descend into that frame when it exists.
+ */
+function resolveTypingTarget(): { target: HTMLElement; frame: HTMLIFrameElement | null } {
+  // 1. The hidden same-origin input frame that canvas editors use.
+  const frames = Array.from(document.querySelectorAll<HTMLIFrameElement>('iframe'));
+  for (const frame of frames) {
+    const marker = `${frame.className || ''} ${frame.id || ''} ${frame.src || ''}`;
+    if (!/texteventtarget|docs-texteventtarget/i.test(marker)) continue;
+    try {
+      const inner = frame.contentDocument;
+      if (!inner) continue;
+      const active = inner.activeElement as HTMLElement | null;
+      const candidate =
+        (active && active !== inner.body ? active : null) ||
+        inner.querySelector<HTMLElement>('[contenteditable="true"]') ||
+        inner.body;
+      if (candidate) return { target: candidate, frame };
+    } catch {
+      /* cross-origin frame; skip */
+    }
+  }
+
+  // 2. A visible contenteditable in the top document (Docs web app shell, Canva).
+  const editable = Array.from(
+    document.querySelectorAll<HTMLElement>('[contenteditable="true"]')
+  ).find((el) => el.offsetParent !== null || el === document.activeElement);
+  if (editable) return { target: editable, frame: null };
+
+  // 3. A focused text control.
+  const active = document.activeElement as HTMLElement | null;
+  if (active && /^(INPUT|TEXTAREA)$/.test(active.tagName)) return { target: active, frame: null };
+
+  // 4. Fall back to a JS-driven editor's hidden body, else the document body.
+  if (detectCanvasEditor().isCanvas) return { target: document.body, frame: null };
+  return { target: document.body, frame: null };
+}
+
+/** Correct keyCode/code pairs for the keys an agent actually presses. */
+const SPECIAL_KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
+  ENTER: { code: 'Enter', keyCode: 13, text: '\r' },
+  TAB: { code: 'Tab', keyCode: 9, text: '\t' },
+  ESCAPE: { code: 'Escape', keyCode: 27 },
+  ESC: { code: 'Escape', keyCode: 27 },
+  BACKSPACE: { code: 'Backspace', keyCode: 8 },
+  DELETE: { code: 'Delete', keyCode: 46 },
+  SPACE: { code: 'Space', keyCode: 32, text: ' ' },
+  ARROWUP: { code: 'ArrowUp', keyCode: 38 },
+  ARROWDOWN: { code: 'ArrowDown', keyCode: 40 },
+  ARROWLEFT: { code: 'ArrowLeft', keyCode: 37 },
+  ARROWRIGHT: { code: 'ArrowRight', keyCode: 39 },
+  HOME: { code: 'Home', keyCode: 36 },
+  END: { code: 'End', keyCode: 35 },
+  PAGEUP: { code: 'PageUp', keyCode: 33 },
+  PAGEDOWN: { code: 'PageDown', keyCode: 34 },
+};
+
+function resolveSpecialKey(key: string) {
+  return SPECIAL_KEYS[key.trim().toUpperCase()];
+}
+
+/** Dispatch a full key sequence for a special key on a specific target. */
+function dispatchSpecialKey(
+  target: HTMLElement,
+  key: string,
+  modifiers: { ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean; metaKey?: boolean } = {}
+): boolean {
+  const spec = resolveSpecialKey(key);
+  const isChar = !spec;
+  const keyCode = spec ? spec.keyCode : key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0;
+  const init: KeyboardEventInit = {
+    key: spec ? (spec.text ?? spec.code) : key,
+    code: spec ? spec.code : /^[a-zA-Z0-9]$/.test(key) ? `Key${key.toUpperCase()}` : key,
+    keyCode,
+    which: keyCode,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    ctrlKey: Boolean(modifiers.ctrlKey),
+    shiftKey: Boolean(modifiers.shiftKey),
+    altKey: Boolean(modifiers.altKey),
+    metaKey: Boolean(modifiers.metaKey),
+  };
+
+  const doc = target.ownerDocument || document;
+  // Build events with the target document's own view so dispatch into a hidden
+  // same-origin iframe stays same-realm.
+  const view = (doc.defaultView || window) as unknown as Window & typeof globalThis;
+  target.dispatchEvent(new view.KeyboardEvent('keydown', init));
+  if (isChar || spec?.text) target.dispatchEvent(new view.KeyboardEvent('keypress', init));
+  target.dispatchEvent(new view.KeyboardEvent('keyup', init));
+  return Boolean(spec);
+}
+
+/**
+ * Insert text at the current caret.
+ *
+ * Uses `execCommand('insertText')` because it produces a genuine, trusted
+ * `beforeinput` event carrying `data`, which is exactly what canvas editors
+ * consume. A synthetic InputEvent would be ignored.
+ */
+function insertTextAtCaret(target: HTMLElement, text: string): boolean {
+  const doc = target.ownerDocument || document;
+  // Plain <textarea>/<input> cannot use execCommand.
+  if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') {
+    const el = target as HTMLTextAreaElement;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    const next = el.value.slice(0, start) + text + el.value.slice(end);
+    el.value = next;
+    const caret = start + text.length;
+    try {
+      el.setSelectionRange(caret, caret);
+    } catch {
+      /* type=number and friends reject selection APIs */
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  }
+
+  let inserted = false;
+  try {
+    target.focus({ preventScroll: true });
+  } catch {
+    target.focus();
+  }
+  try {
+    inserted = doc.execCommand('insertText', false, text);
+  } catch {
+    inserted = false;
+  }
+
+  if (!inserted) {
+    // Last resort: mutate the DOM and announce it, for permissive editors.
+    const sel = doc.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      const node = doc.createTextNode(text);
+      range.insertNode(node);
+      range.setStartAfter(node);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } else {
+      target.textContent = (target.textContent || '') + text;
+    }
+    target.dispatchEvent(
+      new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: text })
+    );
+    inserted = true;
+  }
+  return inserted;
+}
+
+/** Type multi-line text, handling newlines the way the target editor expects. */
+function typeTextIntoPage(
+  rawText: string,
+  opts: { pressEnterForNewlines?: boolean; clearFirst?: boolean } = {}
+): { success: boolean; message: string; target: string; lines: number; chars: number } {
+  try {
+    const { target } = resolveTypingTarget();
+    const editor = detectCanvasEditor();
+    // JS-driven editors (Docs/Sheets/Figma) handle Enter in their own keydown
+    // handler, so a synthetic keydown is the correct signal there. A plain
+    // contenteditable ignores untrusted keydowns, so it needs execCommand.
+    const jsDriven = editor.isCanvas || target.closest('.kix-appview') !== null;
+
+    try {
+      target.focus({ preventScroll: true });
+    } catch {
+      /* focus is best-effort */
+    }
+
+    if (opts.clearFirst) {
+      const doc = target.ownerDocument || document;
+      if (target.isContentEditable) {
+        try {
+          doc.execCommand('selectAll', false);
+          doc.execCommand('delete', false);
+        } catch {
+          /* fall through */
+        }
+      } else if (/^(INPUT|TEXTAREA)$/.test(target.tagName)) {
+        (target as HTMLTextAreaElement).value = '';
+      }
+    }
+
+    const lines = rawText.split('\n');
+    let typed = 0;
+    let newlines = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.length > 0) {
+        insertTextAtCaret(target, line);
+        typed += line.length;
+      }
+      if (i < lines.length - 1) {
+        if (jsDriven) {
+          dispatchSpecialKey(target, 'Enter');
+        } else {
+          const doc = target.ownerDocument || document;
+          try {
+            doc.execCommand('insertParagraph', false);
+          } catch {
+            dispatchSpecialKey(target, 'Enter');
+          }
+        }
+        newlines += 1;
+      }
+    }
+
+    const where = editor.name ? `${editor.name} (canvas-rendered editor)` : target.tagName.toLowerCase();
+    return {
+      success: true,
+      message: `Typed ${typed} character(s) and ${newlines} line break(s) into ${where}.${
+        opts.pressEnterForNewlines === false && newlines > 0
+          ? ' Newlines were NOT sent as Enter, so they were typed literally.'
+          : ''
+      }`,
+      target: where,
+      lines: lines.length,
+      chars: typed,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Failed to type text: ${err?.message || err}`,
+      target: 'unknown',
+      lines: 0,
+      chars: 0,
+    };
+  }
+}
+
+/**
+ * Click at viewport coordinates, dispatching the full pointer/mouse sequence a
+ * real click produces. This is the only way to place a caret in a canvas editor.
+ */
+function clickAtPoint(
+  x: number,
+  y: number,
+  opts: { clickCount?: number; button?: number } = {}
+): { success: boolean; message: string; element: string; canvasEditor: string | null } {
+  try {
+    const clickCount = Math.max(1, opts.clickCount || 1);
+    const button = opts.button ?? 0;
+    const target = document.elementFromPoint(x, y) as HTMLElement | null;
+
+    if (!target) {
+      return {
+        success: false,
+        message: `Nothing at (${Math.round(x)}, ${Math.round(y)}). The point is outside the page content - check the coordinates against a screenshot.`,
+        element: 'none',
+        canvasEditor: null,
+      };
+    }
+
+    const common = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      clientX: x,
+      clientY: y,
+      screenX: window.screenX + x,
+      screenY: window.screenY + y,
+      button,
+      detail: clickCount,
+    };
+
+    try {
+      target.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          ...common,
+          pointerId: 1,
+          pointerType: 'mouse',
+          isPrimary: true,
+          buttons: button === 2 ? 2 : 1,
+        })
+      );
+    } catch {
+      /* PointerEvent unsupported */
+    }
+    target.dispatchEvent(
+      new MouseEvent('mousedown', { ...common, buttons: button === 2 ? 2 : 1 })
+    );
+    // A double-click needs two down/up pairs before the click event.
+    if (clickCount > 1) {
+      target.dispatchEvent(new MouseEvent('mouseup', common));
+      target.dispatchEvent(new MouseEvent('mousedown', { ...common, detail: 1, buttons: 1 }));
+    }
+    target.dispatchEvent(new MouseEvent('mouseup', common));
+    target.dispatchEvent(new MouseEvent('click', common));
+    if (clickCount > 1) {
+      target.dispatchEvent(new MouseEvent('dblclick', { ...common, detail: 2 }));
+    }
+
+    // Report what was actually under the cursor so the agent can correct course.
+    const tag = target.tagName.toLowerCase();
+    const editor = detectCanvasEditor();
+    const hint = editor.isCanvas
+      ? ` That is the ${editor.name} canvas, so the caret should now be placed there.`
+      : '';
+
+    return {
+      success: true,
+      message: `Clicked at (${Math.round(x)}, ${Math.round(y)}) on <${tag}>${clickCount > 1 ? ` (${clickCount} clicks)` : ''}.${hint} Now use type_text to write at the caret.`,
+      element: tag,
+      canvasEditor: editor.isCanvas ? editor.name : null,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Failed to click at (${Math.round(x)}, ${Math.round(y)}): ${err?.message || err}`,
+      element: 'error',
+      canvasEditor: null,
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Chunked file transfer
 //
 // Large media (videos) cannot be handed to a page in one message: Chrome
@@ -2207,6 +2569,46 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
           .catch((err) => {
             sendResponse({ success: false, message: err?.message || String(err) });
           });
+        break;
+      }
+
+      case 'TYPE_TEXT': {
+        sendResponse(
+          typeTextIntoPage(request.text, {
+            pressEnterForNewlines: request.pressEnterForNewlines !== false,
+            clearFirst: Boolean(request.clearFirst),
+          })
+        );
+        break;
+      }
+
+      case 'CLICK_AT_POSITION': {
+        sendResponse(
+          clickAtPoint(request.x, request.y, {
+            clickCount: request.clickCount,
+            button: request.button,
+          })
+        );
+        break;
+      }
+
+      case 'DETECT_CANVAS_EDITOR': {
+        const editor = detectCanvasEditor();
+        const { target } = resolveTypingTarget();
+        sendResponse({
+          success: true,
+          isCanvasEditor: editor.isCanvas,
+          editor: editor.name,
+          typingTarget: `${target.tagName.toLowerCase()}${
+            target.className && typeof target.className === 'string'
+              ? `.${target.className.split(/\s+/).filter(Boolean)[0]}`
+              : ''
+          }`,
+          focused: document.activeElement?.tagName?.toLowerCase() || 'none',
+          message: editor.isCanvas
+            ? `This is ${editor.name}, a canvas-rendered editor. The document is NOT in the DOM, so get_active_tab_form cannot show its text. Place the caret with click_at_position, then write with type_text.`
+            : `This is a standard DOM editor. type_text will work after focusing a field.`,
+        });
         break;
       }
 
