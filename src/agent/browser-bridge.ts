@@ -1678,6 +1678,313 @@ export async function clickActiveTabElement(options: {
   return { success: false, message: 'Could not click element on active tab' };
 }
 
+// ---------------------------------------------------------------------------
+// Canvas-editor input (Google Docs, Sheets, Figma, Canva, Word Online)
+//
+// These editors paint text onto a <canvas> and consume a trusted `beforeinput`
+// on a hidden same-origin iframe. The normal element tools cannot reach either,
+// so caret placement is done with a real mouse sequence at coordinates and
+// typing is done through execCommand('insertText').
+//
+// The inPage* fallbacks below are shipped via chrome.scripting.executeScript,
+// which serializes exactly one function: every helper they need is declared
+// inside their own body. Do not hoist anything out of them.
+// ---------------------------------------------------------------------------
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function inPageClickAtPoint(
+  x: number,
+  y: number,
+  clickCount: number,
+  button: number
+): { success: boolean; message: string; element: string } {
+  const count = Math.max(1, clickCount || 1);
+  const btn = button ?? 0;
+  const target = document.elementFromPoint(x, y) as HTMLElement | null;
+  if (!target) {
+    return {
+      success: false,
+      message: `Nothing at (${Math.round(x)}, ${Math.round(y)}). Check the coordinates against a screenshot of the page.`,
+      element: 'none',
+    };
+  }
+
+  const common = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    screenX: window.screenX + x,
+    screenY: window.screenY + y,
+    button: btn,
+    detail: count,
+  };
+
+  try {
+    target.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        ...common,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true,
+        buttons: btn === 2 ? 2 : 1,
+      })
+    );
+  } catch {
+    /* PointerEvent unsupported */
+  }
+  target.dispatchEvent(new MouseEvent('mousedown', { ...common, buttons: btn === 2 ? 2 : 1 }));
+  if (count > 1) {
+    target.dispatchEvent(new MouseEvent('mouseup', common));
+    target.dispatchEvent(new MouseEvent('mousedown', { ...common, detail: 1, buttons: 1 }));
+  }
+  target.dispatchEvent(new MouseEvent('mouseup', common));
+  target.dispatchEvent(new MouseEvent('click', common));
+  if (count > 1) target.dispatchEvent(new MouseEvent('dblclick', { ...common, detail: 2 }));
+
+  const tag = target.tagName.toLowerCase();
+  return {
+    success: true,
+    message: `Clicked at (${Math.round(x)}, ${Math.round(y)}) on <${tag}>${count > 1 ? ` (${count} clicks)` : ''}. Now use type_text to write at the caret.`,
+    element: tag,
+  };
+}
+
+function inPageTypeText(
+  text: string,
+  pressEnterForNewlines: boolean
+): { success: boolean; message: string; lines: number; chars: number } {
+  // Resolve the surface that actually receives keystrokes. Canvas editors route
+  // input through a hidden same-origin iframe, so events sent at the top-level
+  // activeElement land on the <iframe> and are never seen by the editor.
+  let target: HTMLElement = document.body;
+  let found = false;
+  const frames = Array.from(document.querySelectorAll('iframe')) as HTMLIFrameElement[];
+  for (const frame of frames) {
+    const marker = `${frame.className || ''} ${frame.id || ''} ${frame.src || ''}`;
+    if (!/texteventtarget|docs-texteventtarget/i.test(marker)) continue;
+    try {
+      const inner = frame.contentDocument;
+      if (!inner) continue;
+      const active = inner.activeElement as HTMLElement | null;
+      target = (active && active !== inner.body ? active : null) ||
+        inner.querySelector('[contenteditable="true"]') || inner.body;
+      found = true;
+      break;
+    } catch {
+      /* cross-origin */
+    }
+  }
+  if (!found) {
+    const editable = Array.from(
+      document.querySelectorAll<HTMLElement>('[contenteditable="true"]')
+    ).find((el) => el.offsetParent !== null || el === document.activeElement);
+    const active = document.activeElement as HTMLElement | null;
+    if (editable) target = editable;
+    else if (active && /^(INPUT|TEXTAREA)$/.test(active.tagName)) target = active;
+  }
+
+  const doc = target.ownerDocument || document;
+  try {
+    target.focus({ preventScroll: true });
+  } catch {
+    /* best effort */
+  }
+
+  const isCanvas = Boolean(
+    document.querySelector('.kix-appview, .kix-canvas-tile-content, .docs-texteventtarget-iframe')
+  );
+
+  // Correct keyCode for Enter; previously a generic charCode fallback sent 65.
+  const pressEnter = (): void => {
+    const init: KeyboardEventInit = {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    };
+    const view = (doc.defaultView || window) as unknown as Window & typeof globalThis;
+    target.dispatchEvent(new view.KeyboardEvent('keydown', init));
+    target.dispatchEvent(new view.KeyboardEvent('keypress', init));
+    target.dispatchEvent(new view.KeyboardEvent('keyup', init));
+  };
+
+  if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') {
+    const el = target as HTMLTextAreaElement;
+    el.value = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return {
+      success: true,
+      message: `Typed ${text.length} character(s) into <${target.tagName.toLowerCase()}>.`,
+      lines: text.split('\n').length,
+      chars: text.length,
+    };
+  }
+
+  const lines = text.split('\n');
+  let chars = 0;
+  let breaks = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.length) {
+      let ok = false;
+      try {
+        ok = doc.execCommand('insertText', false, line);
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        const sel = doc.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const node = doc.createTextNode(line);
+          range.insertNode(node);
+          range.setStartAfter(node);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } else {
+          target.textContent = (target.textContent || '') + line;
+        }
+        target.dispatchEvent(
+          new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: line })
+        );
+      }
+      chars += line.length;
+    }
+    if (i < lines.length - 1) {
+      if (isCanvas || !pressEnterForNewlines) pressEnter();
+      else {
+        try {
+          doc.execCommand('insertParagraph', false);
+        } catch {
+          pressEnter();
+        }
+      }
+      breaks += 1;
+    }
+  }
+
+  return {
+    success: true,
+    message: `Typed ${chars} character(s) and ${breaks} line break(s)${isCanvas ? ' into the canvas editor' : ''}.`,
+    lines: lines.length,
+    chars,
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+export interface CanvasEditorInfo {
+  isCanvasEditor: boolean;
+  editor: string | null;
+  typingTarget: string;
+  focused: string;
+  message: string;
+}
+
+/** Report whether the active tab is a canvas-rendered editor. */
+export async function detectActiveTabEditor(): Promise<CanvasEditorInfo | null> {
+  const activeTab = await getActiveTab();
+  if (!activeTab || !activeTab.id) return null;
+  try {
+    return await sendMessageToTab<CanvasEditorInfo>(activeTab.id, { action: 'DETECT_CANVAS_EDITOR' }, 2000);
+  } catch {
+    return null;
+  }
+}
+
+/** Place the caret (or click) at viewport coordinates on the active tab. */
+export async function clickAtPosition(
+  options: { x: number; y: number; clickCount?: number; button?: number; tabId?: number }
+): Promise<{ success: boolean; message: string; element?: string }> {
+  const activeTab = options.tabId ? { id: options.tabId } : await getActiveTab();
+  if (!activeTab || !activeTab.id) {
+    return { success: false, message: 'No active browser tab found to click.' };
+  }
+
+  try {
+    const response = await sendMessageToTab<{ success: boolean; message: string; element?: string }>(
+      activeTab.id,
+      {
+        action: 'CLICK_AT_POSITION',
+        x: options.x,
+        y: options.y,
+        clickCount: options.clickCount || 1,
+        button: options.button ?? 0,
+      },
+      2000
+    );
+    if (response && response.success !== undefined) return response;
+  } catch {
+    // Fall through to direct injection.
+  }
+
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: inPageClickAtPoint,
+        args: [options.x, options.y, options.clickCount || 1, options.button ?? 0],
+      });
+      if (results?.[0]?.result) return results[0].result;
+    } catch (err: any) {
+      return { success: false, message: `Coordinate click failed: ${err?.message || err}` };
+    }
+  }
+
+  return { success: false, message: 'Could not click at those coordinates.' };
+}
+
+/** Type text at the current caret on the active tab. */
+export async function typeActiveTabText(
+  options: { text: string; pressEnterForNewlines?: boolean; clearFirst?: boolean }
+): Promise<{ success: boolean; message: string; lines?: number; chars?: number }> {
+  const activeTab = await getActiveTab();
+  if (!activeTab || !activeTab.id) {
+    return { success: false, message: 'No active browser tab found to type into.' };
+  }
+  if (typeof options.text !== 'string' || options.text.length === 0) {
+    return { success: false, message: 'No text was provided to type.' };
+  }
+
+  try {
+    const response = await sendMessageToTab<{ success: boolean; message: string; lines?: number; chars?: number }>(
+      activeTab.id,
+      {
+        action: 'TYPE_TEXT',
+        text: options.text,
+        pressEnterForNewlines: options.pressEnterForNewlines !== false,
+        clearFirst: Boolean(options.clearFirst),
+      },
+      8000
+    );
+    if (response && response.success !== undefined) return response;
+  } catch {
+    // Fall through to direct injection.
+  }
+
+  if (typeof chrome !== 'undefined' && chrome.scripting) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: inPageTypeText,
+        args: [options.text, options.pressEnterForNewlines !== false],
+      });
+      if (results?.[0]?.result) return results[0].result as any;
+    } catch (err: any) {
+      return { success: false, message: `Typing failed: ${err?.message || err}` };
+    }
+  }
+
+  return { success: false, message: 'Could not type into the active tab.' };
+}
+
 // In-page fallback script for directly scrolling containers without relying on message ports
 function inPageScrollPage(
   direction: 'up' | 'down' | 'top' | 'bottom' | 'element',
@@ -2574,20 +2881,90 @@ function inPagePressKey(options: {
   metaKey?: boolean;
   selector?: string;
 }) {
-  const target = options.selector
-    ? document.querySelector<HTMLElement>(options.selector) || document.activeElement || document.body
-    : (document.activeElement as HTMLElement) || document.body;
+  // Canvas editors (Google Docs) receive keys through a hidden same-origin
+  // iframe. Dispatching at the top-level document.activeElement hits the <iframe>
+  // element and is never seen, so descend into that frame when present.
+  let target: HTMLElement;
+  const explicit = options.selector
+    ? document.querySelector<HTMLElement>(options.selector)
+    : null;
+  if (explicit) {
+    target = explicit;
+  } else {
+    target = document.body;
+    for (const frame of Array.from(document.querySelectorAll('iframe'))) {
+      const marker = `${frame.className || ''} ${frame.id || ''} ${frame.src || ''}`;
+      if (!/texteventtarget|docs-texteventtarget/i.test(marker)) continue;
+      try {
+        const inner = (frame as HTMLIFrameElement).contentDocument;
+        if (!inner) continue;
+        const active = inner.activeElement as HTMLElement | null;
+        target = (active && active !== inner.body ? active : null) ||
+          inner.querySelector<HTMLElement>('[contenteditable="true"]') ||
+          inner.body;
+        break;
+      } catch {
+        /* cross-origin */
+      }
+    }
+    if (target === document.body) {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== document.body) target = active;
+    }
+  }
 
-  const keyUpper = options.key.toUpperCase();
-  const keyCode =
-    keyUpper === 'ENTER' ? 13 :
-    keyUpper === 'ESCAPE' || keyUpper === 'ESC' ? 27 :
-    keyUpper === 'TAB' ? 9 :
-    options.key.charCodeAt(0) || 0;
+  // A real keyCode table. The previous fallback used key.charCodeAt(0), which
+  // turned "ArrowUp" into 65 ('A') and "Home" into 124 ('|') - so every
+  // navigation key an agent tried was silently ignored.
+  const keyCodeMap: Record<string, number> = {
+    ENTER: 13,
+    TAB: 9,
+    ESC: 27,
+    ESCAPE: 27,
+    BACKSPACE: 8,
+    DELETE: 46,
+    SPACE: 32,
+    ARROWUP: 38,
+    ARROWDOWN: 40,
+    ARROWLEFT: 37,
+    ARROWRIGHT: 39,
+    HOME: 36,
+    END: 35,
+    PAGEUP: 33,
+    PAGEDOWN: 34,
+    F1: 112,
+    F2: 113,
+    F3: 114,
+    F4: 115,
+    F5: 116,
+  };
+  const codeMap: Record<string, string> = {
+    ENTER: 'Enter',
+    TAB: 'Tab',
+    ESC: 'Escape',
+    ESCAPE: 'Escape',
+    BACKSPACE: 'Backspace',
+    DELETE: 'Delete',
+    SPACE: 'Space',
+    ARROWUP: 'ArrowUp',
+    ARROWDOWN: 'ArrowDown',
+    ARROWLEFT: 'ArrowLeft',
+    ARROWRIGHT: 'ArrowRight',
+    HOME: 'Home',
+    END: 'End',
+    PAGEUP: 'PageUp',
+    PAGEDOWN: 'PageDown',
+  };
+
+  const keyUpper = options.key.trim().toUpperCase();
+  const isSingleChar = options.key.length === 1;
+  const keyCode = keyCodeMap[keyUpper] ?? (isSingleChar ? options.key.toUpperCase().charCodeAt(0) : 0);
+  const code =
+    codeMap[keyUpper] ?? (isSingleChar ? `Key${options.key.toUpperCase()}` : options.key);
 
   const eventInit: KeyboardEventInit = {
     key: options.key,
-    code: options.key === 'Enter' ? 'Enter' : options.key === 'Escape' ? 'Escape' : options.key,
+    code,
     keyCode,
     which: keyCode,
     bubbles: true,
@@ -2599,13 +2976,16 @@ function inPagePressKey(options: {
     metaKey: Boolean(options.metaKey),
   };
 
-  target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
-  target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
-  target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+  const view = (target.ownerDocument?.defaultView || window) as unknown as Window & typeof globalThis;
+  target.dispatchEvent(new view.KeyboardEvent('keydown', eventInit));
+  if (isSingleChar || keyCodeMap[keyUpper]) {
+    target.dispatchEvent(new view.KeyboardEvent('keypress', eventInit));
+  }
+  target.dispatchEvent(new view.KeyboardEvent('keyup', eventInit));
 
   return {
     success: true,
-    message: `Dispatched ${options.ctrlKey ? 'Ctrl+' : ''}${options.key} to ${target.tagName.toLowerCase()}`,
+    message: `Dispatched ${options.ctrlKey ? 'Ctrl+' : ''}${options.key} to ${target.tagName.toLowerCase()} (keyCode ${keyCode})`,
   };
 }
 
