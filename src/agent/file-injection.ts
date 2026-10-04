@@ -123,10 +123,70 @@ function inPagePushChunk(transferId: string, index: number, data: string): { ok:
   return { ok: true, received };
 }
 
+/**
+ * Reassemble the transferred chunks and attach the resulting File.
+ *
+ * IMPORTANT: this function is shipped to the page by
+ * `chrome.scripting.executeScript({ func })`, which serializes ONLY this
+ * function's source. Anything it calls from module scope is undefined in the
+ * page, so every helper it needs is declared inside its own body. Do not
+ * extract these.
+ */
 function inPageCommitTransfer(transferId: string): { success: boolean; message: string; bytes: number } {
   const w = window as any;
   const tx = w.__OPENBUA_FILE_TRANSFERS__?.[transferId];
   if (!tx) return { success: false, message: 'No active file transfer on this page.', bytes: 0 };
+
+  // --- local helpers (must stay inside this function) ---
+  const acceptAllows = (accept: string | null, file: File): boolean => {
+    const raw = (accept || '').trim().toLowerCase();
+    if (!raw || raw === '*' || raw.split(',').some((t: string) => t.trim() === '*/*')) return true;
+    const type = (file.type || '').toLowerCase();
+    const name = (file.name || '').toLowerCase();
+    const main = type.split('/')[0] || '';
+    return raw.split(',').some((t: string) => {
+      const token = t.trim();
+      if (!token) return false;
+      if (token === type && type) return true;
+      if (token === main + '/*' && main) return true;
+      if (token.startsWith('.') && name.endsWith(token)) return true;
+      return false;
+    });
+  };
+
+  const isVisible = (el: HTMLElement): boolean => {
+    if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 || rect.height > 0 || el.offsetParent !== null;
+  };
+
+  // Rank inputs by whether `accept` actually permits the file. Sites such as
+  // WhatsApp keep one input per attachment-menu entry, and the first in DOM
+  // order is usually the media-only one, which renders a preview and then
+  // rejects the file as "not supported".
+  const bestInput = (file: File): HTMLInputElement | null => {
+    const inputs = Array.from(document.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
+    let best: HTMLInputElement | null = null;
+    let bestScore = -1;
+    for (const el of inputs) {
+      const dialog = el.closest('[role="dialog"], dialog, [aria-modal="true"]');
+      const inDialog = Boolean(dialog) && isVisible(dialog as HTMLElement);
+      const raw = (el.getAttribute('accept') || '').trim().toLowerCase();
+      let score: number;
+      if (!raw) score = 800;
+      else if (raw.split(',').some((t: string) => t.trim() === '*/*')) score = 600;
+      else if (acceptAllows(el.getAttribute('accept'), file)) score = 1000;
+      else continue; // this input explicitly excludes the file
+      if (inDialog) score += 50;
+      if (el.multiple) score += 25;
+      if (score > bestScore) {
+        best = el;
+        bestScore = score;
+      }
+    }
+    return best;
+  };
+
   try {
     const parts: Uint8Array[] = [];
     for (let i = 0; i < tx.chunks.length; i++) {
@@ -150,47 +210,11 @@ function inPageCommitTransfer(transferId: string): { success: boolean; message: 
     delete w.__OPENBUA_FILE_TRANSFERS__[transferId];
 
     const file = new File([merged], tx.meta.fileName, { type: tx.meta.mimeType || 'application/octet-stream' });
-    const attached = attachFileToPage(file);
-    return {
-      ...attached,
-      success: true,
-      message: attached.attached
-        ? `Attached "${tx.meta.fileName}" (${total} bytes) to the page.`
-        : `Set "${tx.meta.fileName}" on the file input but the page reported no file.`,
-      bytes: total,
-    };
-  } catch (err: any) {
-    return { success: false, message: `Failed to attach file: ${err?.message || err}`, bytes: 0 };
-  }
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
+    const input = bestInput(file);
+    if (!input) {
+      return { success: false, message: 'No file input found on the page.', bytes: total };
+    }
 
-/**
- * Locate a file input, preferring inputs inside the visible modal/dialog the
- * user is actually working in, then dispatch the events frameworks listen for.
- */
-function attachFileToPage(file: File): { attached: boolean; message: string } {
-  const doc = document;
-  const inputs = Array.from(doc.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
-  if (inputs.length === 0) {
-    return { attached: false, message: 'No file input found on the page.' };
-  }
-
-  const isVisible = (el: HTMLElement): boolean => {
-    if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 || rect.height > 0 || el.offsetParent !== null;
-  };
-
-  // Prefer inputs scoped to a visible dialog: that is the open composer.
-  const dialogScoped = inputs.filter((input) => {
-    const dialog = input.closest('[role="dialog"], dialog, [aria-modal="true"]');
-    return Boolean(dialog) && isVisible(dialog as HTMLElement);
-  });
-  const visible = inputs.filter((input) => isVisible(input) || input.offsetParent !== null);
-  const input = dialogScoped[0] || visible[0] || inputs[0];
-
-  try {
     const transfer = new DataTransfer();
     transfer.items.add(file);
     input.files = transfer.files;
@@ -214,17 +238,25 @@ function attachFileToPage(file: File): { attached: boolean; message: string } {
       }
     }
 
-    const attached = input.files && input.files.length > 0;
+    const attached = Boolean(input.files && input.files.length > 0);
+    const acceptAttr = input.getAttribute('accept') || '';
+    const warning = acceptAllows(acceptAttr, file)
+      ? ''
+      : ` WARNING: the chosen input (accept="${acceptAttr}") does not allow ${file.type}. This site may reject it as "not supported" despite a preview. Open the attach menu and choose the correct option.`;
+
     return {
-      attached: Boolean(attached),
+      success: true,
+      attached,
       message: attached
-        ? `Attached "${file.name}" to the file input.`
-        : 'Set the file on the input but the page reported no file.',
+        ? `Attached "${file.name}" (${total} bytes) to the file input.${warning}`
+        : `Set "${file.name}" on the file input but the page reported no file.${warning}`,
+      bytes: total,
     };
   } catch (err: any) {
-    return { attached: false, message: `Failed to attach file: ${err?.message || err}` };
+    return { success: false, message: `Failed to attach file: ${err?.message || err}`, bytes: 0 };
   }
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
  * Inject a file into a tab, chunk by chunk.
