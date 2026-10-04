@@ -22,6 +22,7 @@ import {
   clickAtPosition,
   typeActiveTabText,
   getActiveTabViewport,
+  clipboardAction,
 } from './browser-bridge';
 import {
   findPlatform,
@@ -1104,6 +1105,12 @@ const ClickAtPositionSchema = Type.Object({
   clickCount: Type.Optional(
     Type.Number({ description: 'Number of clicks. Use 2 to double-click (select a word). Default 1.' })
   ),
+  shiftKey: Type.Optional(
+    Type.Boolean({
+      description:
+        'Hold Shift to extend the selection from the existing caret to this point. This is the only way to select a range of text in a canvas editor such as Google Docs, where there is no element to target. Use it to select an existing block before copying it.',
+    })
+  ),
   button: Type.Optional(
     Type.Number({ description: '0 = left, 2 = right. Default 0. Right-click opens a context menu.' })
   ),
@@ -1127,6 +1134,7 @@ export const clickAtPositionTool: AgentTool<typeof ClickAtPositionSchema> = {
         x: params.x,
         y: params.y,
         clickCount: params.clickCount,
+        shiftKey: params.shiftKey,
         button: params.button,
       });
       return {
@@ -1186,6 +1194,46 @@ export const typeTextTool: AgentTool<typeof TypeTextSchema> = {
   },
 };
 
+// 23. Clipboard: copy/paste an existing block to reuse its exact formatting
+const ClipboardActionSchema = Type.Object({
+  action: Type.String({
+    description:
+      'copy, cut, paste, selectAll, or duplicate. These dispatch the real shortcut into the editor, so Google Docs runs its own native path and heading styles, bold runs and bullet lists are preserved exactly.',
+  }),
+});
+
+export const clipboardActionTool: AgentTool<typeof ClipboardActionSchema> = {
+  name: 'clipboard_action',
+  label: 'Clipboard (Copy / Paste)',
+  description:
+    'Copy, cut, paste, select all, or duplicate in the active tab, using the editor\'s own native clipboard so formatting is preserved exactly. USE THIS to match existing formatting: if the user says "keep the formatting like <existing block>", select that block with click_at_position plus shiftKey, copy it, click where the new content should go, paste it, then edit the text of the pasted clone. This is far faster and far more reliable than trying to work out which bold and list styles a renderer will inherit. Select a range by clicking at its start, then click at its end with shiftKey: true.',
+  parameters: ClipboardActionSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    const allowed = ['copy', 'cut', 'paste', 'selectAll', 'duplicate'];
+    const action = String(params.action || '').trim();
+    if (!allowed.includes(action)) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Unknown clipboard action "${action}". Use one of: ${allowed.join(', ')}.`,
+          },
+        ],
+        details: { success: false, allowed },
+      };
+    }
+    try {
+      const res = await clipboardAction(action as 'copy' | 'cut' | 'paste' | 'selectAll' | 'duplicate');
+      return { content: [{ type: 'text', text: res.message }], details: res };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Clipboard action failed: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string): AgentTool<any>[] {
   return [
@@ -1197,6 +1245,7 @@ export function createAgentTools(sessionId?: string): AgentTool<any>[] {
     scrollPageTool,
     clickAtPositionTool,
     typeTextTool,
+    clipboardActionTool,
     getUserDocumentsTool,
     captureTabScreenshotTool,
     listBrowserTabsTool,

@@ -2079,13 +2079,77 @@ function typeTextIntoPage(
 }
 
 /**
+ * Clipboard operations on the active editor.
+ *
+ * The reliable way to give text the same formatting as existing text is to copy
+ * that text and edit the copy, not to reason about how a renderer will inherit
+ * bold and list styles. These dispatch the real shortcut into the editor's input
+ * frame so Google Docs runs its own native copy/paste path, which preserves
+ * heading styles, bold runs and list formatting exactly.
+ */
+function clipboardActionInPage(
+  action: 'copy' | 'cut' | 'paste' | 'selectAll' | 'duplicate'
+): { success: boolean; message: string; action: string } {
+  const combos: Record<string, { key: string; ctrlKey: boolean; label: string }> = {
+    copy: { key: 'c', ctrlKey: true, label: 'Copy' },
+    cut: { key: 'x', ctrlKey: true, label: 'Cut' },
+    paste: { key: 'v', ctrlKey: true, label: 'Paste' },
+    selectAll: { key: 'a', ctrlKey: true, label: 'Select all' },
+    duplicate: { key: 'd', ctrlKey: true, label: 'Duplicate (Ctrl+D)' },
+  };
+  const combo = combos[action];
+  if (!combo) {
+    return { success: false, message: `Unknown clipboard action "${action}".`, action };
+  }
+
+  const { target } = resolveTypingTarget();
+  // Give the editor keyboard focus first, or the shortcut is discarded.
+  primeEditorFocus(target);
+
+  const doc = target.ownerDocument || document;
+  const view = (doc.defaultView || window) as unknown as Window & typeof globalThis;
+  const keyCode = combo.key.toUpperCase().charCodeAt(0);
+  const init: KeyboardEventInit = {
+    key: combo.key,
+    code: `Key${combo.key.toUpperCase()}`,
+    keyCode,
+    which: keyCode,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    ctrlKey: true,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+  };
+  target.dispatchEvent(new view.KeyboardEvent('keydown', init));
+  target.dispatchEvent(new view.KeyboardEvent('keyup', init));
+
+  const editor = detectCanvasEditor();
+  const where = editor.name ? editor.name : target.tagName.toLowerCase();
+  const followUps: Record<string, string> = {
+    copy:
+      'To duplicate this text: click where you want the copy, then use the paste action. Formatting is preserved exactly.',
+    paste: 'Pasted with the source formatting intact. Use a screenshot to confirm where it landed.',
+    selectAll: 'Everything is selected. Use clearFirst on type_text to replace it, or the paste action to overwrite.',
+    cut: 'Cut the selection. It is now on the clipboard and removed from the document.',
+    duplicate: 'Duplicated in place with formatting preserved.',
+  };
+  return {
+    success: true,
+    message: `${combo.label} performed in ${where}. ${followUps[action] || ''}`,
+    action,
+  };
+}
+
+/**
  * Click at viewport coordinates, dispatching the full pointer/mouse sequence a
  * real click produces. This is the only way to place a caret in a canvas editor.
  */
 function clickAtPoint(
   x: number,
   y: number,
-  opts: { clickCount?: number; button?: number } = {}
+  opts: { clickCount?: number; button?: number; shiftKey?: boolean } = {}
 ): {
   success: boolean;
   message: string;
@@ -2129,6 +2193,13 @@ function clickAtPoint(
       screenY: window.screenY + y,
       button,
       detail: clickCount,
+      // Shift-click extends the selection from the existing caret/anchor. This
+      // is the only way to select a range of text in a canvas editor, where
+      // there is no element to target.
+      shiftKey: Boolean(opts.shiftKey),
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
     };
 
     try {
@@ -2167,7 +2238,9 @@ function clickAtPoint(
 
     return {
       success: true,
-      message: `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>${clickCount > 1 ? ` (${clickCount} clicks)` : ''}.${hint} Now use type_text to write at the caret.`,
+      message:
+        `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>${clickCount > 1 ? ` (${clickCount} clicks)` : ''}` +
+        `${opts.shiftKey ? ' with Shift held, extending the selection' : ''}.${hint} Now use type_text to write at the caret.`,
       element: tag,
       canvasEditor: editor.isCanvas ? editor.name : null,
       viewport,
@@ -2681,6 +2754,11 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
         break;
       }
 
+      case 'CLIPBOARD_ACTION': {
+        sendResponse(clipboardActionInPage(request.clipboardAction));
+        break;
+      }
+
       case 'TYPE_TEXT': {
         sendResponse(
           typeTextIntoPage(request.text, {
@@ -2696,6 +2774,7 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
           clickAtPoint(request.x, request.y, {
             clickCount: request.clickCount,
             button: request.button,
+            shiftKey: request.shiftKey,
           })
         );
         break;

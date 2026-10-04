@@ -1696,7 +1696,8 @@ function inPageClickAtPoint(
   x: number,
   y: number,
   clickCount: number,
-  button: number
+  button: number,
+  shiftKey: boolean
 ): { success: boolean; message: string; element: string; viewport?: { width: number; height: number; devicePixelRatio: number } } {
   const count = Math.max(1, clickCount || 1);
   const btn = button ?? 0;
@@ -1731,6 +1732,12 @@ function inPageClickAtPoint(
     screenY: window.screenY + y,
     button: btn,
     detail: count,
+    // Shift-click extends the selection, the only way to select a range in a
+    // canvas editor where there is no element to target.
+    shiftKey: Boolean(shiftKey),
+    ctrlKey: false,
+    altKey: false,
+    metaKey: false,
   };
 
   try {
@@ -1758,7 +1765,9 @@ function inPageClickAtPoint(
   const tag = target.tagName.toLowerCase();
   return {
     success: true,
-    message: `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>. Now use type_text to write at the caret.`,
+    message:
+      `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>${count > 1 ? ` (${count} clicks)` : ''}` +
+      `${shiftKey ? ' with Shift held, extending the selection' : ''}. Now use type_text to write at the caret.`,
     element: tag,
     viewport,
   };
@@ -1959,7 +1968,7 @@ export async function detectActiveTabEditor(): Promise<CanvasEditorInfo | null> 
  * below the intended element, or off the page entirely.
  */
 export async function clickAtPosition(
-  options: { x: number; y: number; clickCount?: number; button?: number; tabId?: number; viewport?: TabViewport | null }
+  options: { x: number; y: number; clickCount?: number; button?: number; shiftKey?: boolean; tabId?: number; viewport?: TabViewport | null }
 ): Promise<{ success: boolean; message: string; element?: string; viewport?: TabViewport; cssX?: number; cssY?: number }> {
   const activeTab = options.tabId ? { id: options.tabId } : await getActiveTab();
   if (!activeTab || !activeTab.id) {
@@ -1993,6 +2002,7 @@ export async function clickAtPosition(
         y: cssY,
         clickCount: options.clickCount || 1,
         button: options.button ?? 0,
+        shiftKey: Boolean(options.shiftKey),
       },
       2000
     );
@@ -2014,7 +2024,7 @@ export async function clickAtPosition(
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPageClickAtPoint,
-        args: [cssX, cssY, options.clickCount || 1, options.button ?? 0],
+        args: [cssX, cssY, options.clickCount || 1, options.button ?? 0, Boolean(options.shiftKey)]
       });
       if (results?.[0]?.result) {
         return {
@@ -2041,7 +2051,41 @@ export async function clickAtPosition(
   };
 }
 
-/** Type text at the current caret on the active tab. */
+/**
+ * Clipboard action on the active tab.
+ *
+ * Copy/paste is the reliable way to reproduce existing formatting: the editor
+ * runs its own native path, so heading styles, bold runs and list formatting
+ * survive exactly. It also gives the agent a way to edit a clone of a block
+ * instead of guessing how formatting will be inherited.
+ */
+export async function clipboardAction(
+  action: 'copy' | 'cut' | 'paste' | 'selectAll' | 'duplicate'
+): Promise<{ success: boolean; message: string; action: string }> {
+  const activeTab = await getActiveTab();
+  if (!activeTab || !activeTab.id) {
+    return { success: false, message: 'No active browser tab found.', action };
+  }
+  try {
+    const res = await sendMessageToTab<{ success: boolean; message: string; action: string }>(
+      activeTab.id,
+      { action: 'CLIPBOARD_ACTION', clipboardAction: action },
+      4000
+    );
+    if (res && res.success !== undefined) return res;
+  } catch {
+    // Fall through.
+  }
+  return {
+    success: false,
+    message: `Clipboard "${action}" could not be performed on the active tab.`,
+    action,
+  };
+}
+
+/**
+ * Type text at the current caret on the active tab.
+ */
 export async function typeActiveTabText(
   options: { text: string; pressEnterForNewlines?: boolean; clearFirst?: boolean }
 ): Promise<{ success: boolean; message: string; lines?: number; chars?: number }> {

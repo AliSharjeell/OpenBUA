@@ -18,15 +18,28 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
-const compiled = await build({
-  entryPoints: [`${repoRoot}src/agent/browser-bridge.ts`],
-  bundle: false,
-  write: false,
-  format: 'esm',
-  target: 'es2020',
-  logLevel: 'silent',
-});
-const src = compiled.outputFiles[0].text;
+
+// The canvas input path is split across two modules: the content script owns the
+// primary implementation, the bridge owns the direct-injection fallback. Compile
+// both and search whichever holds a given function.
+const sources = {};
+const modulePaths = {
+  'browser-bridge.ts': 'src/agent/browser-bridge.ts',
+  'content-script.ts': 'src/content/content-script.ts',
+};
+for (const [name, rel] of Object.entries(modulePaths)) {
+  const compiled = await build({
+    entryPoints: [`${repoRoot}${rel}`],
+    bundle: false,
+    write: false,
+    format: 'esm',
+    target: 'es2020',
+    logLevel: 'silent',
+  });
+  sources[name] = compiled.outputFiles[0].text;
+}
+const src = sources['browser-bridge.ts'];
+const allSrc = Object.values(sources).join('\n');
 
 let failures = 0;
 function check(name, ok, detail = '') {
@@ -36,9 +49,15 @@ function check(name, ok, detail = '') {
 
 /** Slice one function out of compiled source, skipping params and return types. */
 function extractFunction(name) {
-  const start = src.indexOf(`function ${name}(`);
+  // Search the bridge first, then the content script, so a function that exists
+  // in both resolves to the one being asserted about.
+  let haystack = src;
+  if (!src.includes(`function ${name}(`)) {
+    if (allSrc.includes(`function ${name}(`)) haystack = allSrc;
+  }
+  const start = haystack.indexOf(`function ${name}(`);
   if (start < 0) throw new Error(`${name} not found in compiled output`);
-  let i = src.indexOf('(', start);
+  let i = haystack.indexOf('(', start);
   let depth = 0;
   for (; i < src.length; i++) {
     if (src[i] === '(') depth++;
@@ -47,16 +66,16 @@ function extractFunction(name) {
       if (depth === 0) break;
     }
   }
-  const bodyStart = src.indexOf('{', i);
+  const bodyStart = haystack.indexOf('{', i);
   depth = 0;
-  for (i = bodyStart; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}') {
+  for (i = bodyStart; i < haystack.length; i++) {
+    if (haystack[i] === '{') depth++;
+    else if (haystack[i] === '}') {
       depth--;
       if (depth === 0) break;
     }
   }
-  return src.slice(start, i + 1);
+  return haystack.slice(start, i + 1);
 }
 
 /** Rebuild a function the way Chrome does: source only, no closure. */
@@ -314,6 +333,38 @@ function makeDocsPage(opts = {}) {
   check('double click succeeds', dbl.success === true);
 }
 
+// --- 3b. shift+click must extend the selection, the only way to select a
+//         range in a canvas editor where there is no element to target.
+{
+  const { page, canvas } = makeDocsPage();
+  const { fn } = rebuild('inPageClickAtPoint', {
+    document: page,
+    window: { screenX: 0, screenY: 0, innerWidth: 1081, innerHeight: 1060, devicePixelRatio: 1.6 },
+    PointerEvent: makeMouseEvent,
+    MouseEvent: makeMouseEvent,
+  });
+
+  const shifted = fn(300, 500, 1, 0, true);
+  check('shift+click succeeds', shifted.success === true, JSON.stringify(shifted));
+  const shiftDown = canvas._events.filter((e) => e.type === 'mousedown');
+  check('shift+click dispatches mousedown with shiftKey true', shiftDown.some((e) => e.shiftKey === true), JSON.stringify(shiftDown.map((e) => e.shiftKey)));
+  check('shift+click also sets the other modifiers false, not undefined', shiftDown.every((e) => e.ctrlKey === false && e.altKey === false && e.metaKey === false), JSON.stringify(shiftDown));
+  check('reply confirms the selection was extended', /extending the selection/i.test(shifted.message), shifted.message);
+
+  // A normal click must NOT claim a selection extension.
+  const { page: page2, canvas: canvas2 } = makeDocsPage();
+  const plain = rebuild('inPageClickAtPoint', {
+    document: page2,
+    window: { screenX: 0, screenY: 0, innerWidth: 1081, innerHeight: 1060, devicePixelRatio: 1.6 },
+    PointerEvent: makeMouseEvent,
+    MouseEvent: makeMouseEvent,
+  }).fn;
+  const normal = plain(300, 500, 1, 0, false);
+  const normalDown = canvas2._events.find((e) => e.type === 'mousedown');
+  check('plain click has shiftKey false', normalDown.shiftKey === false, String(normalDown.shiftKey));
+  check('plain click does not claim to extend the selection', !/extending the selection/i.test(normal.message), normal.message);
+}
+
 // --- 4. miss reports honestly ----------------------------------------------
 {
   const { page } = makeDocsPage();
@@ -398,6 +449,70 @@ function makeDocsPage(opts = {}) {
   fn({ key: 'a', ctrlKey: true });
   const ctrlA = innerBody._events.find((e) => e.type === 'keydown');
   check('Ctrl+key keeps its modifier', ctrlA.ctrlKey === true && ctrlA.keyCode === 65, JSON.stringify({ c: ctrlA.ctrlKey, k: ctrlA.keyCode }));
+}
+
+// --- 6. clipboard must prime focus and send a real Ctrl shortcut ----------
+// The content script is injected as a file, not serialized by executeScript, so
+// clipboardActionInPage may call module-scope helpers. Rebuild those too so the
+// function runs in isolation here.
+function buildContentScriptHelpers(globals) {
+  const detect = rebuild('detectCanvasEditor', globals).fn;
+  const prime = rebuild('primeEditorFocus', globals).fn;
+  const resolve = rebuild('resolveTypingTarget', { ...globals, detectCanvasEditor: detect }).fn;
+  return { detect, prime, resolve };
+}
+{
+  const combos = {
+    copy: 'c',
+    cut: 'x',
+    paste: 'v',
+    selectAll: 'a',
+    duplicate: 'd',
+  };
+  for (const [action, letter] of Object.entries(combos)) {
+    const { page, innerBody } = makeDocsPage();
+    const base = { document: page, location: { hostname: 'docs.google.com' }, Event: makeEvent, InputEvent: makeInputEvent };
+    const h = buildContentScriptHelpers(base);
+    const { fn } = rebuild('clipboardActionInPage', {
+      ...base,
+      detectCanvasEditor: h.detect,
+      primeEditorFocus: h.prime,
+      resolveTypingTarget: h.resolve,
+    });
+    const res = fn(action);
+    const kd = innerBody._events.find((e) => e.type === 'keydown' && e.key === letter);
+    const ok = res.success === true && kd && kd.ctrlKey === true;
+    check(
+      `clipboard "${action}" dispatches Ctrl+${letter.toUpperCase()} to the editor frame`,
+      ok,
+      JSON.stringify({ success: res.success, key: kd && kd.key, ctrl: kd && kd.ctrlKey })
+    );
+    check(
+      `clipboard "${action}" also sends keyup`,
+      innerBody._events.some((e) => e.type === 'keyup' && e.key === letter)
+    );
+  }
+
+  // It must prime focus first, or the shortcut is discarded like the typing was.
+  const { page, innerBody } = makeDocsPage();
+  const base = { document: page, location: { hostname: 'docs.google.com' }, Event: makeEvent, InputEvent: makeInputEvent };
+  const h = buildContentScriptHelpers(base);
+  const { fn } = rebuild('clipboardActionInPage', {
+    ...base,
+    detectCanvasEditor: h.detect,
+    primeEditorFocus: h.prime,
+    resolveTypingTarget: h.resolve,
+  });
+  fn('copy');
+  const firstKeydown = innerBody._events.find((e) => e.type === 'keydown');
+  check(
+    'clipboard primes editor focus with Shift before sending the shortcut',
+    firstKeydown && firstKeydown.keyCode === 16,
+    JSON.stringify(firstKeydown)
+  );
+
+  const bad = fn('nonsense');
+  check('an unknown clipboard action fails instead of doing something random', bad.success === false, JSON.stringify(bad));
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
