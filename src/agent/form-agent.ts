@@ -276,6 +276,11 @@ export class FormAgentHarness {
   private activeToolCalls = new Map<string, ToolCallState>();
   private currentStreamingText = '';
   private currentThinkingText = '';
+  /** True only when the user pressed stop, so we never fight the user. */
+  private userAborted = false;
+  /** Guards against a pathological auto-resume loop. */
+  private autoResumeCount = 0;
+  private static readonly MAX_AUTO_RESUMES = 3;
   private sessionThinkingText = '';
   private chatHistory: ChatMessage[] = [];
   private sessionId: string = 'session_default';
@@ -1003,6 +1008,47 @@ ${this.settings.systemInstruction || ''}`.trim();
 
       case 'turn_end': {
         this.pruneAgentStateMessages();
+
+        // A turn that produced neither an answer nor a tool call is a stall, and
+        // one that was aborted by anything other than the user (rate limit,
+        // provider hiccup) is recoverable. Both used to dead-end and force the
+        // user to type "continue" by hand.
+        const stalledTurn =
+          this.currentStreamingText.trim().length === 0 &&
+          this.activeToolCalls.size === 0 &&
+          this.currentThinkingText.trim().length > 0;
+        const providerAborted =
+          Boolean(event.message?.errorMessage) && !this.userAborted;
+
+        if (!this.userAborted && (stalledTurn || providerAborted)) {
+          if (this.autoResumeCount < FormAgentHarness.MAX_AUTO_RESUMES) {
+            this.autoResumeCount += 1;
+            const why = stalledTurn
+              ? 'The previous turn stopped after planning without taking an action.'
+              : `The provider ended the turn early (${event.message?.errorMessage}).`;
+            console.warn(
+              `[FormAgentHarness] auto-resuming (${this.autoResumeCount}/${FormAgentHarness.MAX_AUTO_RESUMES}): ${why}`
+            );
+            this.listeners.onStatusChange?.(true);
+            const agentRef = this.agent;
+            if (agentRef) {
+              // Fire and forget: the resumed run emits its own turn_end/agent_end.
+              agentRef
+                .continue()
+                .catch((err) => {
+                  console.warn('[FormAgentHarness] auto-resume failed:', err);
+                  this.listeners.onStatusChange?.(false);
+                  this.listeners.onError?.(
+                    `Could not resume automatically: ${err?.message || err}. Please type continue.`
+                  );
+                });
+            } else {
+              this.listeners.onStatusChange?.(false);
+            }
+            break;
+          }
+        }
+
         if (event.message?.errorMessage) {
           this.listeners.onError?.(event.message.errorMessage);
         }
@@ -1036,6 +1082,11 @@ ${this.settings.systemInstruction || ''}`.trim();
       this.listeners.onStatusChange?.(false);
       throw new Error(err);
     }
+
+    // A fresh user message is a clean slate: clear the abort flag and the
+    // auto-resume budget so recovery is available again for this new task.
+    this.userAborted = false;
+    this.autoResumeCount = 0;
 
     // Proactively scan user input for personal details, student email, university, or interests
     await detectAndQueueMemorySuggestions(input, this.sessionId, this.documents);
@@ -1091,6 +1142,9 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public abort() {
+    // Mark before tearing down, so the turn_end handler can tell a deliberate
+    // stop apart from a provider-side abort and does not fight the user.
+    this.userAborted = true;
     if (this.agent) {
       this.agent.abort();
       this.listeners.onStatusChange?.(false);
@@ -1104,6 +1158,8 @@ ${this.settings.systemInstruction || ''}`.trim();
     this.currentStreamingText = '';
     this.currentThinkingText = '';
     this.sessionThinkingText = '';
+    this.userAborted = false;
+    this.autoResumeCount = 0;
     this.listeners.onStatusChange?.(false);
     this.setupAgent();
   }
