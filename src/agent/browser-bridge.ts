@@ -2468,7 +2468,8 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
       }
     }
 
-    // 3. Clean excerpt of page content (up to 10,000 characters)
+    // 3. Clean excerpt of page content
+    const PAGE_TEXT_LIMIT = 10000;
     let mainText = '';
     const mainEl = document.querySelector('#main, main, article, #content, [role="main"]') || document.body;
     if (mainEl) {
@@ -2476,7 +2477,20 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
     } else if (document.body) {
       mainText = document.body.innerText || '';
     }
-    mainText = mainText.replace(/\n\s*\n\s*\n/g, '\n\n').slice(0, 10000);
+    mainText = mainText.replace(/\n\s*\n\s*\n/g, '\n\n');
+
+    // Never truncate silently. An agent that cannot tell it was cut off will
+    // re-read the same URL repeatedly hoping for the rest, which never arrives.
+    let truncationNotice = '';
+    if (mainText.length > PAGE_TEXT_LIMIT) {
+      const total = mainText.length;
+      mainText = mainText.slice(0, PAGE_TEXT_LIMIT);
+      truncationNotice =
+        `\n\n[TRUNCATED: showing ${PAGE_TEXT_LIMIT.toLocaleString()} of ${total.toLocaleString()} characters. ` +
+        `Do NOT call get_page_content on this URL again expecting more - it will return this same prefix. ` +
+        `To see the rest, use capture_tab_screenshot, or get a specific section with ` +
+        `get_active_tab_form / click_element, or read the source file directly for raw pages like README.md.]`;
+    }
 
     let formatted = `Title: ${title}\nURL: ${url}\n\n`;
     if (chatExcerpt) {
@@ -2494,7 +2508,7 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
     if (buttons.length > 0) {
       formatted += `### Interactive Buttons:\n${buttons.join('\n')}\n\n`;
     }
-    formatted += `### Page Text Excerpt:\n${mainText}`;
+    formatted += `### Page Text Excerpt:\n${mainText}${truncationNotice}`;
 
     return { title, url, text: formatted };
   } catch (err: any) {

@@ -2910,7 +2910,8 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
           }
         }
 
-        // 3. Clean excerpt of page content (up to 10,000 characters for rich model context)
+        // 3. Clean excerpt of page content
+        const PAGE_TEXT_LIMIT = 10000;
         let mainText = '';
         const mainEl = document.querySelector('#main, main, article, #content, [role="main"]') || document.body;
         if (mainEl) {
@@ -2918,7 +2919,18 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
         } else if (document.body) {
           mainText = document.body.innerText || '';
         }
-        mainText = mainText.replace(/\n\s*\n\s*\n/g, '\n\n').slice(0, 10000);
+        mainText = mainText.replace(/\n\s*\n\s*\n/g, '\n\n');
+
+        // Never truncate silently, or the agent re-reads the same URL forever.
+        let truncationNotice = '';
+        if (mainText.length > PAGE_TEXT_LIMIT) {
+          const total = mainText.length;
+          mainText = mainText.slice(0, PAGE_TEXT_LIMIT);
+          truncationNotice =
+            `\n\n[TRUNCATED: showing ${PAGE_TEXT_LIMIT.toLocaleString()} of ${total.toLocaleString()} characters. ` +
+            `Do NOT call get_page_content on this URL again expecting more - it will return this same prefix. ` +
+            `Use capture_tab_screenshot, or read a specific section instead.]`;
+        }
 
         let formatted = `Title: ${document.title}\nURL: ${window.location.href}\n\n`;
         if (chatExcerpt) {
@@ -2936,7 +2948,7 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
         if (buttons.length > 0) {
           formatted += `### Interactive Buttons:\n${buttons.join('\n')}\n\n`;
         }
-        formatted += `### Page Text Excerpt:\n${mainText}`;
+        formatted += `### Page Text Excerpt:\n${mainText}${truncationNotice}`;
 
         sendResponse({ success: true, text: formatted, title: document.title, url: window.location.href });
         break;
