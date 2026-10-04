@@ -56,7 +56,14 @@ Because OpenBUA runs directly in your existing browser, it executes end-to-end a
   - Suggested Memories interface: Review suggested memories on a dedicated full-page screen, discard with a single tap, or approve into Tab Memory or Global Memory.
   - Global Memory: General user background (profile, resume, work history) shared across all chats and browser tabs.
   - Tab Memory: Project-specific notes and uploaded documents isolated to the active chat session.
-  - Document Uploads: Directly upload PDF, Markdown, Text, and JSON documents with client-side text parsing powered by `pdfjs-dist`.
+  - Document Uploads: Directly upload PDF, Markdown, Text, JSON, image, and video files with client-side text parsing powered by `pdfjs-dist`.
+  - Large Media Storage: Videos and files over 3 MB are kept as raw Blobs in IndexedDB instead of base64 strings in `chrome.storage.local`, so uploading a long video no longer freezes the panel. Inline `dataUrl` is kept only for small files that need OCR.
+
+- **Cross-Platform Social Media Posting**:
+  - One `post_to_social` call posts media + caption to X/Twitter, LinkedIn, Reddit, Facebook, Instagram, Threads, Bluesky, Mastodon, YouTube, Pinterest, Tumblr, or TikTok.
+  - Resolves the platform from your request or the current tab, opens its composer, attaches stored videos/images, types the caption, and reports composer state so nothing publishes without your say-so.
+  - Files of any size are streamed to the page in bounded chunks, so a 200 MB video attaches exactly like a small image.
+  - Correctly targets the file input inside the open composer dialog, which is what single-page social apps require.
 
 - **Autonomous Form Filling and Wizard Completion**:
   - Matches web forms, job application portals (Greenhouse, Lever, Workday), and customer onboarding wizards against your stored profile.
@@ -241,6 +248,7 @@ Autonomous AI browser agent, browser-use Chrome extension, in-browser AI automat
 
 - **Build**: `npm run build`
 - **Typecheck**: `npm run typecheck`
+- **Media transport tests**: `npm run test:chunks`
 - **Development Server**: `npm run dev`
 
 ---
