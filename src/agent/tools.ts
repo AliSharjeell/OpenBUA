@@ -18,7 +18,15 @@ import {
   checkUrlReachable,
   searchWeb,
   uploadFileToActiveTab,
+  getActiveTab,
 } from './browser-bridge';
+import {
+  findPlatform,
+  resolvePlatformForUrl,
+  openPlatformComposer,
+  describePlatforms,
+  SUPPORTED_PLATFORM_IDS,
+} from './social-platforms';
 import {
   loadDocuments,
   getScratchpad,
@@ -838,12 +846,12 @@ export const waitSecondsTool: AgentTool<typeof WaitSecondsSchema> = {
   },
 };
 
-// 19. Upload Raw Stored File (Resume, Image, PDF) to Active Form
+// 19. Upload Raw Stored File (Resume, Image, PDF, Video) to Active Form
 const UploadFileToFormSchema = Type.Object({
   fileName: Type.Optional(
     Type.String({
       description:
-        'The filename or keyword of the stored file to attach (e.g. "resume.pdf", "resume", "profile.png"). If omitted or "resume", OpenBUA automatically selects the user\'s stored resume or primary document from Memory.',
+        'The filename or keyword of the stored file to attach (e.g. "resume.pdf", "resume", "profile.png", "consistnet.mp4"). If omitted or "resume", OpenBUA automatically selects the user\'s stored resume or primary document from Memory. On a social platform, stored video media is preferred when nothing is named.',
     })
   ),
   refId: Type.Optional(
@@ -854,7 +862,7 @@ const UploadFileToFormSchema = Type.Object({
   selector: Type.Optional(
     Type.String({
       description:
-        'CSS selector of the file input or upload dropzone (e.g. "input[type=\'file\']" or ".upload-dropzone")',
+        'CSS selector of the file input or upload dropzone (e.g. "input[type=\'file\']" or ".upload-dropzone"). Usually omit this: OpenBUA finds the composer file input automatically, preferring the one inside the visible dialog.',
     })
   ),
 });
@@ -863,7 +871,7 @@ export const uploadFileToFormTool: AgentTool<typeof UploadFileToFormSchema> = {
   name: 'upload_file_to_form',
   label: 'Upload File / Video / Resume to Form',
   description:
-    'Programmatically attaches a stored raw file (such as a marketing video mp4/webm/mov, resume.pdf, PNG/JPG photo, or document) from the user\'s Memory to a file input (<input type="file">) or dropzone on the active tab using DataTransfer. Use this whenever an application or form asks for a file upload, or when posting marketing videos/images to platforms like Reddit, Twitter/X, or social media.',
+    'Programmatically attaches a stored raw file (marketing video mp4/webm/mov, resume.pdf, PNG/JPG photo, or document) from the user\'s Memory to a file input (<input type="file">), dropzone, or open social media composer. Works on any site: X/Twitter, LinkedIn, Reddit, Facebook, Instagram, Threads, Bluesky, Mastodon, and job boards. Files of any size are streamed in chunks, so large videos are supported. Use this whenever a form or composer asks for a file upload, or when posting media to a social platform. It does NOT submit the post - review the result, then click the Post/Share button.',
   parameters: UploadFileToFormSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
@@ -886,12 +894,196 @@ export const uploadFileToFormTool: AgentTool<typeof UploadFileToFormSchema> = {
   },
 };
 
+// 20. Post media + text to a social platform (platform-agnostic)
+
+/**
+ * Pick the composer text field out of an inspected form. Search boxes and
+ * sidebars are excluded so the caption never lands in the wrong input.
+ */
+function formFieldsForCaption(
+  fields: Array<{ refId: string; type: string; label?: string; visible: boolean }> | undefined
+): Array<{ refId: string }> {
+  if (!fields || fields.length === 0) return [];
+  const isTextual = (type: string) =>
+    type === 'contenteditable' || type === 'textarea' || type === 'text' || type === '';
+
+  return fields
+    .filter((f) => f.visible && isTextual(f.type))
+    .filter((f) => !/search|find|filter|recipient|subject/i.test(f.label || ''))
+    .sort((a, b) => {
+      // Prefer a field that is explicitly labelled as post text.
+      const score = (label?: string) => (/post|write|caption|share|thought/i.test(label || '') ? 0 : 1);
+      return score(a.label) - score(b.label);
+    })
+    .map((f) => ({ refId: f.refId }));
+}
+
+const PostToSocialSchema = Type.Object({
+  platform: Type.Optional(
+    Type.String({
+      description:
+        'Platform to post to: x, linkedin, reddit, facebook, instagram, threads, bluesky, mastodon, youtube, pinterest, tumblr, or tiktok. Omit to use the platform of the current tab.',
+    })
+  ),
+  text: Type.Optional(
+    Type.String({
+      description: 'The post caption/body to type into the composer. Omit to attach media only.',
+    })
+  ),
+  media: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        'Names or keywords of stored Memory files to attach (e.g. ["consistnet.mp4"], ["demo"]). Omit for a text-only post.',
+    })
+  ),
+  openComposer: Type.Optional(
+    Type.Boolean({
+      description:
+        'Navigate the current tab to the platform composer first. Default true. Set false if the user already has the composer open.',
+    })
+  ),
+});
+
+export const postToSocialTool: AgentTool<typeof PostToSocialSchema> = {
+  name: 'post_to_social',
+  label: 'Post Media + Text to Any Social Platform',
+  description:
+    'Posts to ANY social platform in one step: resolves the platform (X/Twitter, LinkedIn, Reddit, Facebook, Instagram, Threads, Bluesky, Mastodon, YouTube, Pinterest, Tumblr, TikTok), opens its composer, attaches one or more stored videos/images from Memory by streaming them in chunks, and types the caption. Returns the composer state so you can verify the media preview rendered, then click the Post/Share/Submit button. Does NOT publish automatically unless you click submit afterwards.',
+  parameters: PostToSocialSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    const steps: string[] = [];
+    const details: Record<string, any> = {};
+
+    try {
+      const activeTab = await getActiveTab();
+      const currentUrl = activeTab?.url || '';
+
+      // 1. Resolve the platform from the explicit name or the current tab.
+      const recipe = params.platform
+        ? findPlatform(params.platform)
+        : resolvePlatformForUrl(currentUrl);
+
+      if (!recipe) {
+        const known = SUPPORTED_PLATFORM_IDS.join(', ');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: params.platform
+                ? `Unknown platform "${params.platform}". Supported platforms: ${known}.`
+                : `Could not tell which platform this is (current tab: ${currentUrl || 'unknown'}). Pass platform explicitly. Supported: ${known}.`,
+            },
+          ],
+          details: { success: false, supported: SUPPORTED_PLATFORM_IDS },
+        };
+      }
+      details.platform = recipe.id;
+      details.platformLabel = recipe.label;
+
+      // 2. Open the composer.
+      if (params.openComposer !== false && activeTab?.id) {
+        const opened = await openPlatformComposer(recipe, { tabId: activeTab.id });
+        steps.push(opened.message);
+        details.composerOpened = opened.success;
+        details.composerUrl = opened.url;
+        if (!opened.success) {
+          details.fallbackSteps = opened.fallbackSteps;
+        }
+        // Let the composer render before we inspect it.
+        await new Promise((r) => setTimeout(r, 1200));
+      } else {
+        steps.push(`Using the already-open composer on ${currentUrl || 'the current tab'}.`);
+      }
+
+      // 3. Attach media, one file at a time so a single failure is isolated.
+      const mediaResults: Array<{ name: string; success: boolean; message: string }> = [];
+      for (const mediaName of params.media || []) {
+        const upload = await uploadFileToActiveTab({ fileName: mediaName });
+        mediaResults.push({ name: mediaName, success: upload.success, message: upload.message });
+        // Platforms queue uploads asynchronously; give each one room to start.
+        if (upload.success) await new Promise((r) => setTimeout(r, 1500));
+      }
+      details.media = mediaResults;
+
+      // 4. Inspect the composer so the agent can verify before submitting.
+      let formSummary: string | undefined;
+      try {
+        const form = await inspectActiveTabForm();
+        formSummary = `Composer fields: ${form.fields.length}, buttons: ${form.buttons.length}.`;
+        details.formFields = form.fields.map((f) => ({
+          refId: f.refId,
+          type: f.type,
+          label: f.label || f.ariaLabel,
+          visible: f.isVisible,
+        }));
+        details.formButtons = form.buttons.map((b) => ({ refId: b.refId, text: b.text, isSubmit: b.isSubmit }));
+      } catch {
+        steps.push('Could not read the composer form; verify visually before submitting.');
+      }
+
+      // 5. Type the caption into whichever composer text field is on screen.
+      let textFilled = false;
+      if (params.text) {
+        try {
+          let target:
+            | { refId?: string; selector?: string; value: string; pressEnter?: boolean }
+            | undefined;
+          if (formFieldsForCaption(details.formFields).length > 0) {
+            const best = formFieldsForCaption(details.formFields)[0];
+            target = { refId: best.refId, value: params.text };
+          } else {
+            // Fall back to the platform's usual composer selector.
+            target = {
+              selector: 'div[contenteditable="true"][role="textbox"], textarea, [data-lexical-editor="true"]',
+              value: params.text,
+            };
+          }
+          const fill = await fillActiveTabFields([target], false);
+          textFilled = fill.successCount > 0;
+          details.textFill = fill;
+        } catch (err: any) {
+          steps.push(`Could not type the caption automatically: ${err?.message || err}`);
+        }
+      }
+      details.textFilled = textFilled;
+
+      const failedMedia = mediaResults.filter((m) => !m.success);
+      const summaryLines = [
+        `Platform: ${recipe.label} (${recipe.id})`,
+        `Composer: ${details.composerUrl || currentUrl}`,
+        ...steps,
+        ...mediaResults.map((m) => `- media "${m.name}": ${m.success ? 'attached' : 'FAILED - ' + m.message}`),
+        `Caption: ${params.text ? (textFilled ? 'typed into the composer' : 'NOT typed - type it manually') : 'none'}`,
+        formSummary || '',
+        '',
+        failedMedia.length
+          ? `WARNING: ${failedMedia.length} media file(s) failed to attach. Do not submit until this is resolved.`
+          : 'All requested media attached.',
+        `Platform notes: ${recipe.notes}`,
+        '',
+        'NEXT: verify the media preview rendered, then click the Post/Share/Submit button with click_element. Do not submit if any media failed.',
+      ].filter(Boolean);
+
+      return {
+        content: [{ type: 'text', text: summaryLines.join('\n') }],
+        details: { ...details, success: failedMedia.length === 0 },
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Failed to prepare social post: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string): AgentTool<any>[] {
   return [
     getActiveTabFormTool,
     fillFormFieldsTool,
     uploadFileToFormTool,
+    postToSocialTool,
     clickElementTool,
     scrollPageTool,
     getUserDocumentsTool,
