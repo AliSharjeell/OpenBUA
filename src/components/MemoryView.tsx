@@ -17,6 +17,7 @@ import {
   detectDocumentCategory,
   splitExtractedTextIntoSections,
 } from '../services/pdf-parser';
+import { getMediaBlob } from '../services/blob-store';
 import { Button } from './ui/button';
 import { Input, Textarea } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -60,6 +61,7 @@ export function MemoryView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadingName, setUploadingName] = useState('');
+  const [uploadStage, setUploadStage] = useState('');
   const [ocrLoadingId, setOcrLoadingId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -81,10 +83,23 @@ export function MemoryView({
   const handleProcessFile = async (file: File) => {
     setIsUploading(true);
     setUploadingName(file.name);
+    setUploadStage(`Reading ${formatFileSize(file.size)}`);
     try {
-      const parsed = await processUploadedFile(file, { runOcr: false });
+      // Generate the id up front so the blob key is stable and the memory entry
+      // and its bytes stay linked. Video bytes go straight to the blob store,
+      // so this returns as soon as the write finishes - no giant base64 string
+      // is ever built, which is what used to freeze the panel.
+      const docId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+      if (file.type.startsWith('video/')) {
+        setUploadStage('Reading video frame for preview…');
+      }
+
+      const parsed = await processUploadedFile(file, { runOcr: false, docId });
+
+      setUploadStage('Saving to memory…');
       const newDoc: UserDocument = {
-        id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: docId,
         title: parsed.title,
         type: parsed.type,
         content: parsed.content,
@@ -98,6 +113,7 @@ export function MemoryView({
         fileName: parsed.fileName,
         mimeType: parsed.mimeType,
         dataUrl: parsed.dataUrl,
+        blobKey: parsed.blobKey,
         ocrStatus: parsed.ocrStatus,
         fileCategory: parsed.fileCategory,
         thumbnailUrl: parsed.thumbnailUrl,
@@ -118,6 +134,7 @@ export function MemoryView({
     } finally {
       setIsUploading(false);
       setUploadingName('');
+      setUploadStage('');
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -146,8 +163,26 @@ export function MemoryView({
     }
   };
 
-  const handleDownloadFile = (doc: UserDocument, e?: React.MouseEvent) => {
+  const handleDownloadFile = async (doc: UserDocument, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    // Videos and other large media live in the blob store, not as a data URL.
+    if (doc.blobKey) {
+      const blob = await getMediaBlob(doc.blobKey);
+      if (!blob) {
+        alert('The stored file could not be read. Please re-upload it in the Memory tab.');
+        return;
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = doc.fileName || `${doc.title}.${doc.type === 'video' ? 'mp4' : 'bin'}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      // Revoke on the next tick so the download has picked up the blob first.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      return;
+    }
     if (!doc.dataUrl) return;
     const link = document.createElement('a');
     link.href = doc.dataUrl;
@@ -159,7 +194,7 @@ export function MemoryView({
 
   const handleExtractInfo = async (doc: UserDocument, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (!doc.dataUrl) return;
+    if (!doc.dataUrl && !doc.blobKey) return;
     setOcrLoadingId(doc.id);
     try {
       const extracted = await extractTextForDocument(doc);
@@ -464,7 +499,9 @@ export function MemoryView({
           <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium truncate">Uploading {uploadingName}...</p>
-            <p className="text-[10px] text-blue-300/80">Saving raw document into memory</p>
+            <p className="text-[10px] text-blue-300/80 truncate">
+              {uploadStage || 'Saving raw document into memory'}
+            </p>
           </div>
         </div>
       )}
@@ -497,7 +534,7 @@ export function MemoryView({
           </CardHeader>
           <CardContent className="p-3 space-y-2.5">
             {/* Raw file details if present */}
-            {selectedDoc?.dataUrl && (
+            {(selectedDoc?.dataUrl || selectedDoc?.blobKey) && (
               <div className="p-2.5 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   {selectedDoc.thumbnailUrl ? (
@@ -591,7 +628,7 @@ export function MemoryView({
                 <label className="text-[10px] font-medium text-zinc-400 block">
                   Extracted Content / Marketing Copy & Context
                 </label>
-                {selectedDoc?.dataUrl && (
+                {(selectedDoc?.dataUrl || selectedDoc?.blobKey) && (
                   <span className="text-[10px] text-zinc-500">
                     Used by AI agent to fill forms or post copy
                   </span>
@@ -654,7 +691,7 @@ export function MemoryView({
         ) : (
           activeMemories.map((doc) => {
             const isOcrLoading = ocrLoadingId === doc.id;
-            const hasRawFile = Boolean(doc.dataUrl);
+            const hasRawFile = Boolean(doc.dataUrl || doc.blobKey);
             const isResume = doc.fileCategory === 'resume' || doc.tags?.includes('resume');
             const isVideo = doc.type === 'video' || doc.fileCategory === 'video' || doc.tags?.includes('video');
 
@@ -697,13 +734,6 @@ export function MemoryView({
                         <span className="font-semibold text-zinc-100 text-xs truncate">
                           {doc.title}
                         </span>
-
-                        {/* Video Category Badge */}
-                        {isVideo && (
-                          <span className="text-[9px] font-medium bg-purple-500/10 text-purple-400 px-1.5 py-0.2 rounded-full border border-purple-500/20">
-                            Video
-                          </span>
-                        )}
 
                         {/* Resume Category Badge */}
                         {isResume && (
