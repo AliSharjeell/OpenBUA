@@ -739,6 +739,41 @@ ${(this.settings.autoConfirmSubmit ?? true)
     * After sending, verify the message actually appears in the conversation with the
       attachment; a clicked button is not confirmation of delivery.
 
+23. CANVAS EDITORS (GOOGLE DOCS, SHEETS, SLIDES, FIGMA, CANVA, WORD ONLINE) - READ THIS FIRST:
+    - THESE EDITORS HAVE NO DOM TEXT. They paint every character onto a <canvas>. This changes
+      everything you know about how to edit a page:
+      * 'get_active_tab_form' will show only toolbar chrome (Rename, Zoom, Menus). An empty or
+        useless form summary in Google Docs does NOT mean the page failed to load.
+      * 'get_page_content' will return ruler numbers and stray digits, not the document.
+      * 'click_element', 'fill_form_fields' and innerHTML manipulation DO NOT WORK. Setting a
+        contenteditable's value does not change the document. Do not attempt either.
+      * NEVER search for a text node, a paragraph div, or a caret element. They do not exist.
+        Do not describe a plan for how you might click. Just use the two tools below.
+    - THE WORKING SEQUENCE, always in this order:
+      * STEP 1 — 'capture_tab_screenshot()'. A screenshot is your only view of the content.
+        Read the layout, the existing text, and the pixel position of where the text must go.
+        Never guess coordinates.
+      * STEP 2 — PLACE THE CARET with 'click_at_position({ x: <px>, y: <px> })'. Coordinates are
+        viewport pixels from the top-left of the browser window, exactly as the screenshot shows.
+        To reach the very start of the document, use 'press_key_combination({ key: "Ctrl+a" })'
+        followed by 'press_key_combination({ key: "Home" })', or simply click the first line.
+      * STEP 3 — WRITE with 'type_text({ text: "...\\n...\\n..." })'. Each \n becomes a real
+        Enter, so multi-line documents work in one call. Add 'clearFirst: true' to replace the
+        whole document instead of appending.
+      * STEP 4 — VERIFY with 'capture_tab_screenshot()'. The tool reports characters typed, but
+        that is not proof the editor accepted them. Look at the document. If nothing appeared,
+        the caret was not in the document: re-take a screenshot, re-click, and retry once.
+    - FORMATTING: select text first (drag is not available, so use 'click_at_position' with
+      'clickCount: 2' to select a word, or 'Ctrl+a' to select everything), then use
+      'press_key_combination' for formatting shortcuts: Ctrl+B bold, Ctrl+I italic, Ctrl+U
+      underline, Ctrl+A select all. Apply formatting BEFORE typing bulk text where possible.
+    - BEFORE YOU ACT: if the page is Google Docs or another editor on this list, do not spend a
+      turn describing your reasoning to the user. Take the screenshot, click, type, verify. Only
+      report back once you have either written the text or have a concrete error to report.
+    - DOCUMENT TITENING: the title lives in a normal input at the top, so 'fill_form_fields'
+      with a selector like 'input.docs-title-input' or the Rename button DOES work there. Only
+      the document body needs the canvas sequence.
+
 ${docsSummary}
 
 ${this.settings.systemInstruction || ''}`.trim();
