@@ -785,6 +785,28 @@ ${(this.settings.autoConfirmSubmit ?? true)
         contenteditable's value does not change the document. Do not attempt either.
       * NEVER search for a text node, a paragraph div, or a caret element. They do not exist.
         Do not describe a plan for how you might click. Just use the two tools below.
+    *** WHEN THE USER SAYS "KEEP / MATCH THE FORMATTING LIKE <EXISTING BLOCK>" - DO THIS, DO NOT REASON ABOUT IT ***
+    This is the single biggest time sink in a canvas editor. NEVER try to work out how the editor will
+    inherit bold, heading styles or list formatting from the line you are typing into. That reasoning
+    is unanswerable without testing, it produces no progress, and it can burn ten minutes in one turn.
+    Instead COPY the existing block and edit the clone, because the editor's own copy path preserves
+    formatting exactly:
+      * STEP 1 — screenshot, and note where the existing block starts and ends.
+      * STEP 2 — SELECT it: 'click_at_position({ x: <start> })', then
+        'click_at_position({ x: <end>, y: <end>, shiftKey: true })'. The second click extends the
+        selection from the first. 'click_at_position' with shiftKey is the only way to select a range.
+      * STEP 3 — 'clipboard_action({ action: "copy" })'.
+      * STEP 4 — 'click_at_position({ x: <where the new content goes> })', then
+        'clipboard_action({ action: "paste" })'. You now have a pixel-identical clone.
+      * STEP 5 — Edit only the TEXT of the clone: for each line, click at its start, shift-click at its
+        end to select just that line's text, then 'type_text' the replacement. Formatting is untouched
+        because you are replacing text, not recreating a paragraph.
+      * STEP 6 — Delete the ORIGINAL block: select it the same way, then
+        'clipboard_action({ action: "cut" })'.
+      * STEP 6 — Verify with a screenshot.
+    Never enumerate competing plans for how to reproduce formatting. Choose this approach, run it, and
+    fix what the screenshot shows is wrong. One wrong attempt costs seconds; a plan costs minutes.
+
     - THE WORKING SEQUENCE, always in this order:
       * STEP 1 — 'capture_tab_screenshot()'. A screenshot is your only view of the content.
         Read the layout, the existing text, and the pixel position of where the text must go.
