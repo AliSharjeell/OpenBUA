@@ -1,6 +1,7 @@
 node_modules
 dist
 .vite
+.tmp-chunktest.mjs
 .env
 .env.local
 *.log
