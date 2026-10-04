@@ -1,7 +1,15 @@
-// Client-side PDF, image, and text document parser for extracting resume/profile text and raw file data
+// Client-side PDF, image, video, and text document parser for extracting resume/profile text and raw file data
 import * as pdfjsLib from 'pdfjs-dist';
 import { DocumentFileType, UserDocument } from '../types';
+import { getMediaBlob, mediaBlobKeyFor, putMediaBlob } from './blob-store';
 import { loadSettings } from './storage';
+
+/**
+ * Files at or below this size keep an inline base64 dataUrl, which keeps the
+ * existing OCR/extract and simple-upload flows working unchanged. Anything
+ * larger (and every video, regardless of size) is stored as a raw Blob instead.
+ */
+export const INLINE_DATA_URL_MAX_BYTES = 3 * 1024 * 1024; // 3 MB
 
 // Configure pdfjs worker to use CDN or inline fallback
 try {
@@ -385,7 +393,10 @@ export interface ParsedFileResult {
   type: DocumentFileType;
   mimeType: string;
   content: string;
-  dataUrl: string;
+  /** Present only for small files kept inline. */
+  dataUrl?: string;
+  /** Present when raw bytes live in the IndexedDB blob store. */
+  blobKey?: string;
   sizeBytes: number;
   ocrStatus: 'pending' | 'processing' | 'done' | 'failed';
   fileCategory: 'resume' | 'id_card' | 'photo' | 'video' | 'document' | 'other';
@@ -397,14 +408,35 @@ export interface ParsedFileResult {
 
 /**
  * Extract a video frame thumbnail and duration using offscreen HTMLVideoElement
+ *
+ * Reads the video through a blob/object URL so the file is never base64-encoded
+ * into memory. Resolves with empty values on any failure, and always settles:
+ * a stalled decode or metadata load can never hang the caller.
  */
 export function generateVideoThumbnail(
   source: File | Blob | string
 ): Promise<{ thumbnailUrl: string; duration: number }> {
   return new Promise((resolve) => {
+    let objectUrl = '';
+    let video: HTMLVideoElement | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+
+    const finish = (thumbnailUrl: string, duration: number) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      try {
+        video?.remove();
+      } catch {
+        /* noop */
+      }
+      resolve({ thumbnailUrl, duration });
+    };
+
     try {
-      const video = document.createElement('video');
-      let objectUrl = '';
+      video = document.createElement('video');
       if (typeof source === 'string') {
         video.src = source;
       } else {
@@ -413,60 +445,81 @@ export function generateVideoThumbnail(
       }
       video.muted = true;
       video.playsInline = true;
-      video.crossOrigin = 'anonymous';
+      video.preload = 'auto';
+      // Never set crossOrigin on a blob: URL - it makes the fetch fail and the
+      // thumbnail decode to nothing.
 
-      const cleanup = () => {
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
-        video.remove();
+      const drawFrame = () => {
+        try {
+          const width = video!.videoWidth || 0;
+          const height = video!.videoHeight || 0;
+          if (!width || !height) {
+            finish('', video!.duration || 0);
+            return;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.min(width, 640);
+          canvas.height = Math.round((height / width) * canvas.width);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            finish('', video!.duration || 0);
+            return;
+          }
+          ctx.drawImage(video!, 0, 0, canvas.width, canvas.height);
+          finish(canvas.toDataURL('image/jpeg', 0.8), video!.duration || 0);
+        } catch (e) {
+          console.warn('[AutoForm AI] Failed to draw video thumbnail:', e);
+          finish('', video!.duration || 0);
+        }
       };
 
-      video.onloadedmetadata = () => {
-        const duration = video.duration || 0;
-        video.currentTime = Math.min(1.0, duration > 1 ? 0.5 : 0.1);
+      video.onerror = () => finish('', 0);
+
+      video.onloadeddata = () => {
+        // Frames are available. Seeking can stall on some codecs, so if the
+        // seeked event does not arrive we still capture the current frame.
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(drawFrame, 1500);
       };
 
       video.onseeked = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = Math.min(video.videoWidth || 320, 640);
-          canvas.height = Math.min(video.videoHeight || 180, 360);
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.8);
-            cleanup();
-            resolve({ thumbnailUrl, duration: video.duration || 0 });
-            return;
-          }
-        } catch (e) {
-          console.warn('[AutoForm AI] Failed to draw video thumbnail:', e);
-        }
-        cleanup();
-        resolve({ thumbnailUrl: '', duration: video.duration || 0 });
+        if (timer) clearTimeout(timer);
+        drawFrame();
       };
 
-      video.onerror = () => {
-        cleanup();
-        resolve({ thumbnailUrl: '', duration: 0 });
+      video.onloadedmetadata = () => {
+        const duration = isFinite(video!.duration) ? video!.duration : 0;
+        // Seeking to 0 never fires `seeked`; start slightly into the clip so we
+        // get a representative frame instead of a black first frame.
+        video!.currentTime = duration > 0.5 ? Math.min(1, duration / 4) : 0.1;
       };
 
-      // 4-second safety timeout in case seek stalls
-      setTimeout(() => {
-        cleanup();
-        resolve({ thumbnailUrl: '', duration: 0 });
-      }, 4000);
+      video.load();
+
+      // Hard safety net: never let a stalled decode block the upload flow.
+      timer = setTimeout(() => finish('', isFinite(video?.duration || 0) ? video!.duration : 0), 6000);
     } catch {
-      resolve({ thumbnailUrl: '', duration: 0 });
+      finish('', 0);
     }
   });
 }
 
 /**
- * Attempt to load file data from a local disk path or media URL
+ * Attempt to load file data from a local disk path or media URL.
+ *
+ * Returns the raw Blob plus an inline dataUrl ONLY when the file is small
+ * enough to keep in memory. Large media is returned as `blob` alone so callers
+ * can persist it in the blob store instead of freezing on a huge base64 string.
  */
 export async function tryLoadFileFromLocalPath(
   pathOrUrl: string
-): Promise<{ dataUrl: string; mimeType: string; sizeBytes: number; fileName: string } | null> {
+): Promise<{
+  blob: Blob;
+  dataUrl?: string;
+  mimeType: string;
+  sizeBytes: number;
+  fileName: string;
+} | null> {
   const trimmed = pathOrUrl.trim();
   if (!trimmed) return null;
 
@@ -480,14 +533,11 @@ export async function tryLoadFileFromLocalPath(
     const res = await fetch(fetchUrl);
     if (!res.ok) return null;
     const blob = await res.blob();
-    const dataUrl = await fileToDataUrl(blob);
     const fileName = trimmed.split(/[/\\]/).pop() || 'media_file';
-    return {
-      dataUrl,
-      mimeType: blob.type || 'application/octet-stream',
-      sizeBytes: blob.size,
-      fileName,
-    };
+    const mimeType = blob.type || 'application/octet-stream';
+    const dataUrl =
+      blob.size <= INLINE_DATA_URL_MAX_BYTES ? await fileToDataUrl(blob) : undefined;
+    return { blob, dataUrl, mimeType, sizeBytes: blob.size, fileName };
   } catch (e) {
     console.debug('[AutoForm AI] Could not fetch local file path:', e);
     return null;
@@ -496,17 +546,50 @@ export async function tryLoadFileFromLocalPath(
 
 /**
  * Process any uploaded file (PDF, image, video, markdown, json, text, or binary).
- * Generates raw base64 dataUrl, extracts content (via pdfjs or VLM OCR for images),
- * and detects category (resume, video, id_card, photo, document).
+ *
+ * PERFORMANCE: raw bytes for large media (always video, anything over
+ * INLINE_DATA_URL_MAX_BYTES) are written to the IndexedDB blob store and only
+ * referenced by `blobKey`. We never build a base64 copy of a large video, which
+ * is what previously froze the Memory tab on upload.
+ *
+ * Small files keep an inline `dataUrl` so existing OCR/extract flows and simple
+ * form uploads are unaffected.
  */
 export async function processUploadedFile(
   file: File,
-  options?: { runOcr?: boolean; filePath?: string }
+  options?: { runOcr?: boolean; filePath?: string; docId?: string }
 ): Promise<ParsedFileResult> {
-  const dataUrl = await fileToDataUrl(file);
   const type = detectFileType(file.name, file.type);
   const mimeType = file.type || (type === 'pdf' ? 'application/pdf' : type === 'video' ? 'video/mp4' : 'application/octet-stream');
   const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
+
+  // Decide the storage strategy BEFORE reading any bytes, so the cheap path
+  // never touches the file contents.
+  const storeAsBlob = type === 'video' || file.size > INLINE_DATA_URL_MAX_BYTES;
+  const needsInlineDataUrl =
+    !storeAsBlob || (type === 'image' && options?.runOcr === true) || (type === 'pdf' && options?.runOcr === true);
+
+  let blobKey: string | undefined;
+  let dataUrl: string | undefined;
+
+  if (storeAsBlob) {
+    const key = mediaBlobKeyFor(options?.docId || `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    if (await putMediaBlob(key, file)) {
+      blobKey = key;
+    } else {
+      // IndexedDB unavailable: fall back to inline base64 so the file is still usable.
+      dataUrl = await fileToDataUrl(file);
+    }
+  } else {
+    dataUrl = await fileToDataUrl(file);
+  }
+
+  if (needsInlineDataUrl && !dataUrl && blobKey) {
+    // OCR was requested on a file we stored as a blob; pull the bytes back just
+    // for the extraction step rather than for permanent storage.
+    const blob = await getMediaBlob(blobKey);
+    if (blob) dataUrl = await fileToDataUrl(blob);
+  }
 
   let content = '';
   let ocrStatus: 'pending' | 'processing' | 'done' | 'failed' = 'done';
@@ -516,12 +599,12 @@ export async function processUploadedFile(
   if (type === 'video') {
     try {
       const vidInfo = await generateVideoThumbnail(file);
-      thumbnailUrl = vidInfo.thumbnailUrl;
+      thumbnailUrl = vidInfo.thumbnailUrl || undefined;
       videoDuration = Math.round(vidInfo.duration);
-      content = `[Video Media: ${file.name}] Duration: ${videoDuration}s. Ready for Reddit, YouTube, and social media marketing upload.`;
+      content = `[Video Media: ${file.name}] Duration: ${videoDuration}s. Ready for X/Twitter, LinkedIn, Reddit, YouTube, and other social media upload.`;
       ocrStatus = 'done';
     } catch {
-      content = `[Video Media: ${file.name}] Stored video media. Ready for Reddit, YouTube, and marketing form upload.`;
+      content = `[Video Media: ${file.name}] Stored video media. Ready for X/Twitter, LinkedIn, Reddit, YouTube, and other social media upload.`;
       ocrStatus = 'done';
     }
   } else if (type === 'pdf') {
@@ -539,7 +622,7 @@ export async function processUploadedFile(
       ocrStatus = 'pending';
     }
   } else if (type === 'image') {
-    if (options?.runOcr === true) {
+    if (options?.runOcr === true && dataUrl) {
       try {
         content = await extractTextWithVlm(dataUrl, mimeType);
         ocrStatus = 'done';
@@ -578,6 +661,7 @@ export async function processUploadedFile(
     mimeType,
     content,
     dataUrl,
+    blobKey,
     sizeBytes: file.size,
     ocrStatus,
     fileCategory,
@@ -588,25 +672,40 @@ export async function processUploadedFile(
 }
 
 /**
- * Re-runs or triggers OCR / text extraction for an existing stored UserDocument
+ * Re-runs or triggers OCR / text extraction for an existing stored UserDocument.
+ * Reads raw bytes from the blob store when the file is not kept inline.
  */
 export async function extractTextForDocument(doc: UserDocument): Promise<string> {
-  if (!doc.dataUrl) {
-    throw new Error('Document does not have stored raw file data (dataUrl).');
-  }
-
   const mimeType = doc.mimeType || (doc.type === 'pdf' ? 'application/pdf' : 'image/png');
 
+  const isExtractable =
+    doc.type === 'image' ||
+    doc.type === 'pdf' ||
+    mimeType.startsWith('image/') ||
+    mimeType === 'application/pdf';
+
+  if (!isExtractable) {
+    throw new Error(`Text extraction not supported for file type: ${doc.type}`);
+  }
+
+  let dataUrl = doc.dataUrl;
+  if (!dataUrl && doc.blobKey) {
+    const blob = await getMediaBlob(doc.blobKey);
+    if (blob) dataUrl = await fileToDataUrl(blob);
+  }
+
+  if (!dataUrl) {
+    throw new Error(
+      'Document does not have stored raw file data. Please re-upload the file in the Memory tab.'
+    );
+  }
+
   if (doc.type === 'image' || mimeType.startsWith('image/')) {
-    return await extractTextWithVlm(doc.dataUrl, mimeType);
+    return await extractTextWithVlm(dataUrl, mimeType);
   }
 
-  if (doc.type === 'pdf' || mimeType === 'application/pdf') {
-    const file = dataUrlToFile(doc.dataUrl, doc.fileName || `${doc.title}.pdf`, 'application/pdf');
-    return await extractTextFromPdf(file);
-  }
-
-  throw new Error(`Text extraction not supported for file type: ${doc.type}`);
+  const file = dataUrlToFile(dataUrl, doc.fileName || `${doc.title}.pdf`, 'application/pdf');
+  return await extractTextFromPdf(file);
 }
 
 export interface ExtractedMemorySection {
