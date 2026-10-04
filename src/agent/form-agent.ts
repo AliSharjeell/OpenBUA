@@ -788,17 +788,23 @@ ${(this.settings.autoConfirmSubmit ?? true)
     - THE WORKING SEQUENCE, always in this order:
       * STEP 1 — 'capture_tab_screenshot()'. A screenshot is your only view of the content.
         Read the layout, the existing text, and the pixel position of where the text must go.
-        Never guess coordinates.
-      * STEP 2 — PLACE THE CARET with 'click_at_position({ x: <px>, y: <px> })'. Coordinates are
-        viewport pixels from the top-left of the browser window, exactly as the screenshot shows.
-        To reach the very start of the document, use 'press_key_combination({ key: "Ctrl+a" })'
-        followed by 'press_key_combination({ key: "Home" })', or simply click the first line.
+        The tool also reports the CSS viewport and device pixel ratio, and 'click_at_position'
+        accepts the SAME screenshot pixel coordinates and converts them for you. So just read a
+        position off the image and pass it through unchanged. NEVER scale coordinates by hand or
+        try to work out a ratio: that wastes many calls and lands clicks in the wrong place.
+      * STEP 2 — PLACE THE CARET. Click the position where the text must go:
+        'click_at_position({ x: <px from screenshot>, y: <px from screenshot> })'.
+        Then, because a click alone does not give the editor keyboard focus, IMMEDIATELY press a
+        navigation key to wake it: 'press_key_combination({ key: "Home" })' (or "End"). Skipping
+        this is the most common cause of type_text silently doing nothing.
+        To replace the whole document, use Ctrl+A then type_text with clearFirst: true.
       * STEP 3 — WRITE with 'type_text({ text: "...\\n...\\n..." })'. Each \n becomes a real
-        Enter, so multi-line documents work in one call. Add 'clearFirst: true' to replace the
-        whole document instead of appending.
-      * STEP 4 — VERIFY with 'capture_tab_screenshot()'. The tool reports characters typed, but
-        that is not proof the editor accepted them. Look at the document. If nothing appeared,
-        the caret was not in the document: re-take a screenshot, re-click, and retry once.
+        Enter, so multi-line documents work in one call.
+      * STEP 4 — VERIFY with 'capture_tab_screenshot()'. This step is mandatory. The tool now
+        reports failure honestly when the editor did not accept the text, but a successful return
+        only means the input was dispatched. If nothing appears, the caret was not in the document:
+        re-screenshot, click again, press Home, and retry ONCE. If it still fails, report the
+        blocker instead of retrying the same call.
     - FORMATTING: select text first (drag is not available, so use 'click_at_position' with
       'clickCount: 2' to select a word, or 'Ctrl+a' to select everything), then use
       'press_key_combination' for formatting shortcuts: Ctrl+B bold, Ctrl+I italic, Ctrl+U
