@@ -1915,11 +1915,53 @@ function insertTextAtCaret(target: HTMLElement, text: string): boolean {
   return inserted;
 }
 
+/**
+ * Give a canvas editor real keyboard focus before inserting text.
+ *
+ * A coordinate click sets the editor's internal caret but leaves DOM focus on
+ * the outer canvas element, so a later execCommand('insertText') against the
+ * hidden input frame does nothing. The editor only accepts text once a key
+ * event has reached that frame, which is why typing worked after pressing Home
+ * but not after a bare click. A harmless modifier press primes that path
+ * without altering the document.
+ */
+function primeEditorFocus(target: HTMLElement): void {
+  try {
+    target.focus({ preventScroll: true });
+  } catch {
+    try {
+      target.focus();
+    } catch {
+      /* best effort */
+    }
+  }
+  const doc = target.ownerDocument || document;
+  const view = (doc.defaultView || window) as unknown as Window & typeof globalThis;
+  const init: KeyboardEventInit = {
+    key: 'Shift',
+    code: 'ShiftLeft',
+    keyCode: 16,
+    which: 16,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  };
+  target.dispatchEvent(new view.KeyboardEvent('keydown', init));
+  target.dispatchEvent(new view.KeyboardEvent('keyup', init));
+}
+
 /** Type multi-line text, handling newlines the way the target editor expects. */
 function typeTextIntoPage(
   rawText: string,
   opts: { pressEnterForNewlines?: boolean; clearFirst?: boolean } = {}
-): { success: boolean; message: string; target: string; lines: number; chars: number } {
+): {
+  success: boolean;
+  message: string;
+  target: string;
+  lines: number;
+  chars: number;
+  verified: boolean;
+} {
   try {
     const { target } = resolveTypingTarget();
     const editor = detectCanvasEditor();
@@ -1928,11 +1970,21 @@ function typeTextIntoPage(
     // contenteditable ignores untrusted keydowns, so it needs execCommand.
     const jsDriven = editor.isCanvas || target.closest('.kix-appview') !== null;
 
-    try {
-      target.focus({ preventScroll: true });
-    } catch {
-      /* focus is best-effort */
+    // A coordinate click does not give the editor keyboard focus. Prime it, or
+    // the insert below is silently discarded.
+    if (jsDriven) {
+      primeEditorFocus(target);
+    } else {
+      try {
+        target.focus({ preventScroll: true });
+      } catch {
+        /* focus is best-effort */
+      }
     }
+
+    // Snapshot what we can observe so we never report success we cannot back up.
+    const docRef = target.ownerDocument || document;
+    const beforeLength = (target.textContent || '').length;
 
     if (opts.clearFirst) {
       const doc = target.ownerDocument || document;
@@ -1974,13 +2026,42 @@ function typeTextIntoPage(
     }
 
     const where = editor.name ? `${editor.name} (canvas-rendered editor)` : target.tagName.toLowerCase();
+    const afterLength = (target.textContent || '').length;
+    const grew = afterLength > beforeLength;
+    const isPlainTextField = /^(INPUT|TEXTAREA)$/.test(target.tagName);
+
+    // execCommand reports whether it dispatched an edit, not whether the editor
+    // accepted it. Claiming "typed N characters" when nothing changed is what
+    // makes an agent retry the same call forever, so only say that when the
+    // target's own content actually grew.
+    const confirmed = grew || isPlainTextField;
+    const newlineNote =
+      opts.pressEnterForNewlines === false && newlines > 0
+        ? ' Newlines were NOT sent as Enter, so they were typed literally.'
+        : '';
+
+    if (!confirmed) {
+      return {
+        success: false,
+        verified: false,
+        message:
+          `Dispatched ${typed} character(s) to ${where}, but the target's content did not change, so the editor ` +
+          `did not accept the text. A coordinate click sets the caret without giving the editor keyboard focus, and ` +
+          `Google Docs discards input until a key event reaches its hidden input frame. ` +
+          `To fix: click the target again, then immediately press any navigation key such as Home or End to give the ` +
+          `editor focus, and call type_text again. Verify with capture_tab_screenshot before assuming it worked.`,
+        target: where,
+        lines: lines.length,
+        chars: typed,
+      };
+    }
+
     return {
       success: true,
-      message: `Typed ${typed} character(s) and ${newlines} line break(s) into ${where}.${
-        opts.pressEnterForNewlines === false && newlines > 0
-          ? ' Newlines were NOT sent as Enter, so they were typed literally.'
-          : ''
-      }`,
+      verified: true,
+      message:
+        `Typed ${typed} character(s) and ${newlines} line break(s) into ${where}.${newlineNote}` +
+        (isPlainTextField ? '' : ' Confirm with capture_tab_screenshot that the document shows the text.'),
       target: where,
       lines: lines.length,
       chars: typed,
@@ -1988,6 +2069,7 @@ function typeTextIntoPage(
   } catch (err: any) {
     return {
       success: false,
+      verified: false,
       message: `Failed to type text: ${err?.message || err}`,
       target: 'unknown',
       lines: 0,

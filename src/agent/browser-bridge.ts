@@ -1809,6 +1809,28 @@ function inPageTypeText(
     document.querySelector('.kix-appview, .kix-canvas-tile-content, .docs-texteventtarget-iframe')
   );
 
+  // A coordinate click does not give the editor keyboard focus. Prime it, or the
+  // insert below is silently discarded by Google Docs.
+  if (isCanvas) {
+    try {
+      target.focus({ preventScroll: true });
+    } catch {
+      /* best effort */
+    }
+    const focusInit: KeyboardEventInit = {
+      key: 'Shift',
+      code: 'ShiftLeft',
+      keyCode: 16,
+      which: 16,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    };
+    const focusView = (doc.defaultView || window) as unknown as Window & typeof globalThis;
+    target.dispatchEvent(new focusView.KeyboardEvent('keydown', focusInit));
+    target.dispatchEvent(new focusView.KeyboardEvent('keyup', focusInit));
+  }
+
   // Correct keyCode for Enter; previously a generic charCode fallback sent 65.
   const pressEnter = (): void => {
     const init: KeyboardEventInit = {
@@ -1839,6 +1861,7 @@ function inPageTypeText(
   }
 
   const lines = text.split('\n');
+  const beforeLength = (target.textContent || '').length;
   let chars = 0;
   let breaks = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -1883,14 +1906,28 @@ function inPageTypeText(
     }
   }
 
+  // execCommand reports dispatch, not acceptance. Only claim the text landed
+  // when the target's own content actually grew.
+  const afterLength = (target.textContent || '').length;
+  if (afterLength <= beforeLength) {
+    return {
+      success: false,
+      message:
+        `Dispatched ${chars} character(s) to the canvas editor, but its content did not change, so the editor did ` +
+        `not accept the text. A coordinate click sets the caret without giving the editor keyboard focus. ` +
+        `Click the target again, press a navigation key such as Home, then call type_text again.`,
+      lines: lines.length,
+      chars,
+    };
+  }
+
   return {
     success: true,
     message: `Typed ${chars} character(s) and ${breaks} line break(s)${isCanvas ? ' into the canvas editor' : ''}.`,
     lines: lines.length,
     chars,
   };
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
+}/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export interface CanvasEditorInfo {
   isCanvasEditor: boolean;

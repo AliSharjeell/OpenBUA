@@ -100,7 +100,11 @@ function makeCanvasEl() {
 }
 
 /** A minimal Google Docs-like page: a canvas plus the hidden input iframe. */
-function makeDocsPage() {
+function makeDocsPage(opts = {}) {
+  // By default the editor ACCEPTS input and its content grows, which is what a
+  // working Docs looks like. Pass { rejectInput: true } to model an editor that
+  // silently discards the insert - the failure that made the agent loop.
+  const rejectInput = Boolean(opts.rejectInput);
   const canvas = makeCanvasEl();
 
   const innerBody = {
@@ -118,8 +122,12 @@ function makeDocsPage() {
   const innerDoc = {
     body: innerBody,
     activeElement: innerBody,
-    execCommand: (cmd) => {
+    execCommand: (cmd, _ui, value) => {
       page.execCalls.push(cmd);
+      if (rejectInput) return true; // dispatch succeeds, nothing lands
+      if (cmd === 'insertText' && typeof value === 'string') {
+        innerBody.textContent += value;
+      }
       return true;
     },
     getSelection: () => null,
@@ -190,6 +198,11 @@ function makeDocsPage() {
 
   const res = fn('First line\nSecond line\nThird line', true);
   check('multi-line typing succeeds', res.success === true, JSON.stringify(res));
+  check(
+    'a Shift key is dispatched to prime the editor focus before typing',
+    innerBody._events.some((e) => e.type === 'keydown' && e.keyCode === 16),
+    'the missing focus step that made typing silently no-op'
+  );
   check('reports 3 lines', res.lines === 3, String(res.lines));
   check(
     'one insertText per non-empty line',
@@ -212,6 +225,30 @@ function makeDocsPage() {
     page.body._events.length === 0,
     `top body got ${page.body._events.length} events`
   );
+}
+
+// --- 1b. an editor that silently discards input must NOT report success ----
+{
+  const { page, innerBody } = makeDocsPage({ rejectInput: true });
+  const { fn } = rebuild('inPageTypeText', { document: page, Event: makeEvent, InputEvent: makeInputEvent });
+
+  const res = fn('Z', true);
+  check(
+    'silently-rejecting editor reports failure, not "Typed 1 character"',
+    res.success === false,
+    JSON.stringify(res)
+  );
+  check(
+    'the failure explains a coordinate click alone does not give the editor focus',
+    /keyboard focus/i.test(res.message),
+    res.message
+  );
+  check(
+    'the failure tells the agent what to do next (click, press a key, retry)',
+    /Home|End|navigation key/i.test(res.message) && /again/i.test(res.message),
+    res.message
+  );
+  check('the target content really did not change', innerBody.textContent === '', JSON.stringify(innerBody.textContent));
 }
 
 // --- 2. plain textarea path -------------------------------------------------
@@ -247,7 +284,7 @@ function makeDocsPage() {
   const { page, canvas } = makeDocsPage();
   const { fn } = rebuild('inPageClickAtPoint', {
     document: page,
-    window: { screenX: 0, screenY: 0 },
+    window: { screenX: 0, screenY: 0, innerWidth: 1079, innerHeight: 1067, devicePixelRatio: 1.6 },
     PointerEvent: makeMouseEvent,
     MouseEvent: makeMouseEvent,
   });
@@ -283,13 +320,29 @@ function makeDocsPage() {
   page.elementFromPoint = () => null;
   const { fn } = rebuild('inPageClickAtPoint', {
     document: page,
-    window: { screenX: 0, screenY: 0 },
+    window: { screenX: 0, screenY: 0, innerWidth: 1079, innerHeight: 1067, devicePixelRatio: 1.6 },
     PointerEvent: makeMouseEvent,
     MouseEvent: makeMouseEvent,
   });
   const res = fn(9999, 9999, 1, 0);
   check('out-of-bounds click fails honestly instead of pretending', res.success === false, JSON.stringify(res));
   check('and explains to check the screenshot', /screenshot/i.test(res.message), res.message);
+  // The reported viewport must be real numbers, not "undefinedxundefined".
+  check(
+    'the failure reports the actual CSS viewport and device pixel ratio',
+    res.viewport?.width === 1079 && res.viewport?.height === 1067 && res.viewport?.devicePixelRatio === 1.6,
+    JSON.stringify(res.viewport)
+  );
+  check(
+    'the failure names the device pixel ratio so the agent stops guessing the scale',
+    /1\.6/.test(res.message),
+    res.message
+  );
+  check(
+    'the failure says screenshots are larger than the CSS viewport',
+    /screenshot/i.test(res.message) && /larger/i.test(res.message),
+    res.message
+  );
 }
 
 // --- 5. keyCode regression: the bug that blocked Google Docs ----------------
