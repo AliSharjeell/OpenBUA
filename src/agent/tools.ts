@@ -19,6 +19,8 @@ import {
   searchWeb,
   uploadFileToActiveTab,
   getActiveTab,
+  clickAtPosition,
+  typeActiveTabText,
 } from './browser-bridge';
 import {
   findPlatform,
@@ -1077,6 +1079,85 @@ export const postToSocialTool: AgentTool<typeof PostToSocialSchema> = {
   },
 };
 
+// 21. Click at viewport coordinates (the only way to place a caret in a
+//     canvas-rendered editor such as Google Docs, Sheets, Figma or Canva)
+const ClickAtPositionSchema = Type.Object({
+  x: Type.Number({ description: 'Horizontal position in viewport pixels (0 = left edge of the window)' }),
+  y: Type.Number({ description: 'Vertical position in viewport pixels (0 = top edge of the window)' }),
+  clickCount: Type.Optional(
+    Type.Number({ description: 'Number of clicks. Use 2 to double-click (select a word). Default 1.' })
+  ),
+  button: Type.Optional(
+    Type.Number({ description: '0 = left, 2 = right. Default 0. Right-click opens a context menu.' })
+  ),
+});
+
+export const clickAtPositionTool: AgentTool<typeof ClickAtPositionSchema> = {
+  name: 'click_at_position',
+  label: 'Click at Coordinates',
+  description:
+    'Clicks at an exact viewport (x, y) coordinate instead of the centre of a matched element. This is the ONLY way to place a text caret inside a canvas-rendered editor: Google Docs, Sheets, Slides, Figma, Canva and Word Online paint their content onto a <canvas>, so there is no element to target and click_element cannot reach them. Take a screenshot first, read the target position off it, then click. The reply tells you which element was under the cursor and whether this is a canvas editor.',
+  parameters: ClickAtPositionSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      if (typeof params.x !== 'number' || typeof params.y !== 'number') {
+        return {
+          content: [{ type: 'text', text: 'Both x and y are required and must be numbers.' }],
+          details: { success: false },
+        };
+      }
+      const res = await clickAtPosition({
+        x: params.x,
+        y: params.y,
+        clickCount: params.clickCount,
+        button: params.button,
+      });
+      return { content: [{ type: 'text', text: res.message }], details: res };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Failed to click at position: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
+// 22. Type text at the current caret
+const TypeTextSchema = Type.Object({
+  text: Type.String({
+    description:
+      'The text to type. Use \\n between lines; each newline is sent as a real Enter (or paragraph break) so multi-line documents work.',
+  }),
+  clearFirst: Type.Optional(
+    Type.Boolean({
+      description:
+        'Select-all and delete before typing. Use this to replace an existing document rather than append to it. Default false.',
+    })
+  ),
+});
+
+export const typeTextTool: AgentTool<typeof TypeTextSchema> = {
+  name: 'type_text',
+  label: 'Type Text at Caret',
+  description:
+    'Types text at the current cursor position, one line at a time, using a real trusted beforeinput event. Required for Google Docs, Sheets, Slides, Figma, Canva and Word Online, which render on a canvas and ignore anything fill_form_fields does. Always place the caret first with click_at_position (or Ctrl+Home) and then call this. Line breaks in the text are typed as Enter.',
+  parameters: TypeTextSchema,
+  execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    try {
+      const res = await typeActiveTabText({
+        text: params.text,
+        clearFirst: params.clearFirst,
+      });
+      return { content: [{ type: 'text', text: res.message }], details: res };
+    } catch (err: any) {
+      return {
+        content: [{ type: 'text', text: `Failed to type text: ${err?.message || err}` }],
+        details: { error: String(err) },
+      };
+    }
+  },
+};
+
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string): AgentTool<any>[] {
   return [
@@ -1086,6 +1167,8 @@ export function createAgentTools(sessionId?: string): AgentTool<any>[] {
     postToSocialTool,
     clickElementTool,
     scrollPageTool,
+    clickAtPositionTool,
+    typeTextTool,
     getUserDocumentsTool,
     captureTabScreenshotTool,
     listBrowserTabsTool,
