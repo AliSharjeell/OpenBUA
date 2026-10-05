@@ -27,8 +27,8 @@ export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolic
       if (tool.name === 'confirm_docs_clone') {
         if (!state.pendingPaste || !state.observed) return blocked('No clone confirmation recorded. Inspect a fresh screenshot of a dispatched paste first.');
         state.cloned = params.outcome === 'duplicated';
-        state.pendingPaste = false;
-        state.pasteFailed = !state.cloned;
+        state.pendingPaste = params.outcome === 'merged';
+        state.pasteFailed = params.outcome === 'no_change' || params.outcome === 'wrong_location';
       }
       if (policy?.cloneRequired && tool.name === 'docs_clipboard' && params.action === 'paste' && state.pasteAttempted) {
         return blocked('No second paste dispatched. Inspect and report the previous paste with confirm_docs_clone. If no duplicate appeared, stop and report the clipboard failure instead of pasting repeatedly or editing the original.');
@@ -84,6 +84,7 @@ export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolic
       if (policy?.cloneRequired && state.observed) {
         let nextAction: string;
         if (state.pasteFailed) nextAction = 'No complete duplicate was confirmed. Keep the original unchanged and report the clipboard failure. Do not repeat paste or edit the original as if it were a clone.';
+        else if (state.pendingPaste && tool.name === 'confirm_docs_clone' && params.outcome === 'merged') nextAction = 'The pasted copy exists but its boundary is joined. Place and inspect the caret exactly between the pasted final paragraph and the original heading, press Enter once, inspect again, then confirm_docs_clone. Do not add Enter when no new copy is visible.';
         else if (state.pendingPaste) nextAction = 'Next: inspect this screenshot and call confirm_docs_clone. Report duplicated only if a second complete block and the preserved original are visible; otherwise report no_change, merged or wrong_location. Do not edit the source or retry paste.';
         else if (state.cloned) nextAction = 'Next: select_docs_text for one text run in the pasted clone, inspect its highlight, then type_text its replacement without paragraph breaks.';
         else if (tool.name === 'docs_clipboard' && params.action === 'copy' && state.copied) nextAction = 'Next: click_at_position at the start of the source heading to insert above it, then inspect the destination caret before docs_clipboard paste.';
