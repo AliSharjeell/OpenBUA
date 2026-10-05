@@ -1117,8 +1117,9 @@ ${this.settings.systemInstruction || ''}`.trim();
   private static readonly ACT_NOW_DIRECTIVE =
     'SYSTEM: your previous turn was cut off because you spent it reasoning instead of acting. ' +
     'Do not deliberate further and do not restate a plan. Your next output MUST be a tool call. ' +
-    'If you were weighing how an editor will format something, stop guessing: use the tool that changes it ' +
-    'and check the result. One wrong attempt is cheaper than any amount of reasoning.';
+    'If you were weighing how an editor will format something, stop guessing: inspect its current state ' +
+    'with find_docs_text, inspect_docs_editor or a screenshot, then follow the verified clone workflow. ' +
+    'Do not write or undo at an uncertain location merely to act quickly.';
 
   /** Instruction injected when a turn ended before the task was finished. */
   private static readonly RESUME_DIRECTIVE =
