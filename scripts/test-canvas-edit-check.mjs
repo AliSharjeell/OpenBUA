@@ -40,3 +40,23 @@ assert.equal(check('Title', 'Termote').allowed, true, 'missing mirror does not f
 isDocs = false;
 assert.equal(check('Text\nText').allowed, true, 'ordinary editors are unaffected');
 console.log('PASS serialized canvas formatting and caret-context guard');
+
+// Exercise the exported wrapper too: Chrome rejects undefined injection args.
+const wrapper = source.slice(source.indexOf('async function checkCanvasTextInsertion('), source.indexOf('\nexport {'));
+let injected;
+const checkWrapper = runInNewContext(`(${wrapper.trim()})`, {
+  getActiveTab: async () => ({ id: 7, url: 'https://docs.google.com/document/d/test/edit' }),
+  inspectCanvasInsertion: check,
+  chrome: { scripting: { executeScript: async (request) => {
+    injected = request;
+    assert.ok(request.args.every(arg => arg !== undefined), 'injection arguments must be serializable');
+    return [{ result: { allowed: true } }];
+  } } },
+});
+await checkWrapper('abc');
+assert.equal(injected.args[1], '');
+assert.equal(injected.args[2], false);
+await checkWrapper('abc', 'Termote', true);
+assert.equal(injected.args[1], 'Termote');
+assert.equal(injected.args[2], true);
+console.log('PASS omitted and explicit Docs injection arguments');
