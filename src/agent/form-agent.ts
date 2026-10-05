@@ -856,14 +856,25 @@ ${(this.settings.autoConfirmSubmit ?? true)
         try to work out a ratio: that wastes many calls and lands clicks in the wrong place.
       * STEP 2 — PLACE THE CARET. Click the position where the text must go:
         'click_at_position({ x: <px from screenshot>, y: <px from screenshot> })'.
+        A successful click only means mouse events were dispatched; it does NOT prove
+        the caret is at the heading you intended. Read any reported caret-line text.
+        If it names a different section or bullet, do not type: locate the target again.
+        Before the first edit or paste, capture a screenshot AFTER the click and check
+        the visible caret/selection against the requested heading in the document body.
+        Outline/sidebar text is not the document body. Never invent a target position
+        or claim you can see a caret that is absent. If placement stays unclear after
+        one corrected click, report the blocker without writing into another section.
+        After scroll, zoom, navigation or an edit changes the layout, capture a new
+        screenshot before using coordinates again. The retained image may be stale.
         type_text primes editor focus itself. Do NOT try to "wake" the editor by pressing
         keys that move the caret: they reach the document, and pressing them blindly has
         corrupted documents before. If typing misses, click again at a more precise spot -
         never mash keys.
         To replace the whole document, use Ctrl+A then type_text with clearFirst: true.
       * STEP 3 — WRITE with 'type_text({ text: "...\\n...\\n..." })'. Each \n becomes a real
-        Enter, so multi-line documents work in one call. type_text verifies against the
-        document text and reports failure when the editor did not accept it.
+        Enter, so multi-line documents work in one call. Text verification confirms
+        content only, never the section or formatting. An unverified insert may have
+        landed: screenshot before any retry to avoid inserting duplicate text.
       * STEP 4 — VERIFY with 'capture_tab_screenshot()'. This step is mandatory. If nothing
         appears, the caret was not in the document: re-screenshot, click again at the exact
         line, and retry ONCE. If it still fails, report the blocker instead of retrying the
