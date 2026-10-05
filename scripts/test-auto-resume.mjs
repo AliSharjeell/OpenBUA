@@ -84,6 +84,9 @@ function scriptedStreamFn(counter) {
       stream.push({ type: 'start', partial });
 
       if (call >= 2) {
+        // Keep the retry open long enough to observe the previous request's
+        // finally block and agent_end without allowing either to hide Stop.
+        await sleep(40);
         // The resumed turn: act immediately, like the directive demands.
         const text = 'Adding the project entry now.';
         partial.content = [{ type: 'text', text }];
@@ -164,7 +167,7 @@ function makeLiveHarness() {
 
 {
   // 1. The cut-off turn must resume by itself, against the real run lifecycle.
-  const { agent, counter, errors, agentEnds } = makeLiveHarness();
+  const { agent, counter, errors, status, agentEnds } = makeLiveHarness();
   await agent.prompt('write another project on top of termote');
 
   // The first run is done; the resume is in flight. It must start a second run.
@@ -172,6 +175,9 @@ function makeLiveHarness() {
   check('a watchdog cut resumes with a new run', resumed, `streamFn calls=${counter.calls}`);
   const finished = await until(() => agentEnds() >= 2);
   check('and the resumed run finishes', finished, `agent_end count=${agentEnds()}`);
+  await until(() => status.at(-1) === false);
+  check('activity remains visible throughout automatic retry', status.slice(0, -1).every(Boolean), JSON.stringify(status));
+  check('activity clears after the final run completes', status.at(-1) === false);
 
   check(
     'no "already processing" error ever surfaces',
@@ -204,6 +210,43 @@ function makeLiveHarness() {
     /MUST be a tool call/.test(resumedContext),
     resumedContext.slice(0, 200)
   );
+}
+
+{
+  // Exercise the public request's finally block, not just Agent.prompt().
+  const { h, counter, status, agentEnds } = makeLiveHarness();
+  h.getActiveConfig = () => ({ apiKey: 'test-key', provider: 'openai' });
+  const request = h.prompt('write a project');
+  check('activity is visible immediately before async preparation', status.at(-1) === true);
+  await request;
+  await until(() => counter.calls >= 2);
+  check('original request completion keeps the retry indicator active', status.at(-1) === true, JSON.stringify(status));
+  await until(() => agentEnds() >= 2 && status.at(-1) === false);
+  check('public request and retry never flicker idle', status.slice(0, -1).every(Boolean), JSON.stringify(status));
+  check('public request becomes idle after all runs finish', status.at(-1) === false);
+}
+
+{
+  // Stop while storage preparation is pending must prevent a later run start.
+  const { h, counter, status } = makeLiveHarness();
+  h.getActiveConfig = () => ({ apiKey: 'test-key', provider: 'openai' });
+  let release;
+  globalThis.chrome = { runtime: {}, storage: { local: {
+    get(_keys, callback) { release = () => callback({}); },
+    set(_values, callback) { callback(); },
+  } } };
+  try {
+    const request = h.prompt('write a project');
+    check('preparation shows activity while storage is pending', status.at(-1) === true);
+    h.abort();
+    check('Stop hides activity immediately', status.at(-1) === false);
+    release();
+    await request;
+    check('stopped preparation never starts a model run', counter.calls === 0);
+    check('late preparation completion cannot restore activity', status.at(-1) === false);
+  } finally {
+    delete globalThis.chrome;
+  }
 }
 
 rmSync(outPath, { force: true });
