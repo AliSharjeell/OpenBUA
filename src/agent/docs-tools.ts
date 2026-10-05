@@ -10,7 +10,7 @@ async function observedResult(details: unknown): Promise<AgentToolResult> {
     const match = screenshot.match(/^data:([^;]+);base64,(.+)$/);
     if (match) content.push({ type: 'image', mimeType: match[1], data: match[2] });
   } catch { content.push({ type: 'text', text: 'Screenshot unavailable. Capture one before further editing.' }); }
-  return { content, details };
+  return { content, details: JSON.parse(JSON.stringify(details)) };
 }
 
 const InspectSchema = Type.Object({});
