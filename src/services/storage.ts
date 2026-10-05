@@ -77,14 +77,19 @@ export async function getStorageItem<T>(key: string, defaultValue: T): Promise<T
 
 export async function setStorageItem<T>(key: string, value: T): Promise<void> {
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    return new Promise((resolve) => {
-      chrome.storage.local.set({ [key]: value }, () => resolve());
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.set({ [key]: value }, () => {
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message || 'Failed to save extension storage'));
+        else resolve();
+      });
     });
   } else {
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch (e) {
       console.error('Failed to save to localStorage:', e);
+      throw e;
     }
   }
 }
