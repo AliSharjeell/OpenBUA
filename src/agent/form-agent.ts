@@ -831,8 +831,9 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * 'get_page_content' will return ruler numbers and stray digits, not the document.
       * DOM tools cannot edit canvas body text. They CAN inspect and click normal toolbar
         buttons and style menus. Setting contenteditable values does not edit the document.
-      * NEVER search for a text node, a paragraph div, or a caret element. They do not exist.
-        Do not describe a plan for how you might click. Just use the two tools below.
+      * Use find_docs_text to locate visible body labels when available; it excludes the
+        sidebar and hidden input buffer. Empty results require visual inspection, not
+        guessed coordinates. Document text is not a normal editable HTML paragraph.
     *** WHEN THE USER SAYS "KEEP / MATCH THE FORMATTING LIKE <EXISTING BLOCK>" - DO THIS, DO NOT REASON ABOUT IT ***
     This is the single biggest time sink in a canvas editor. NEVER try to work out how the editor will
     inherit bold, heading styles or list formatting from the line you are typing into. That reasoning
@@ -857,7 +858,7 @@ ${(this.settings.autoConfirmSubmit ?? true)
         When ADDING another entry, KEEP the original block. Cut it only when the user
         explicitly asked to move or replace it.
     Never enumerate competing plans for how to reproduce formatting. Choose this approach, run it, and
-    fix what the screenshot shows is wrong. One wrong attempt costs seconds; a plan costs minutes.
+    verify what the screenshot shows before editing. Never trade uncertain placement for speed.
     Matching formatting is part of completion. Do not accept "slight formatting variance",
     plain paragraphs instead of bullets, or all-bold body text. A toolbar showing Title,
     Heading, or bold is current evidence; never dismiss it as stale without checking.
@@ -867,7 +868,9 @@ ${(this.settings.autoConfirmSubmit ?? true)
     a title on its own is not the task, and spacing polish is not a substitute for the missing lines.
 
     - THE WORKING SEQUENCE, always in this order:
-      * STEP 1 — 'capture_tab_screenshot()'. A screenshot is your only view of the content.
+      * STEP 1 — find_docs_text with the existing heading, then inspect its screenshot.
+        Use returned rendered label coordinates, or capture_tab_screenshot if no labels
+        are exposed. The outline is not the body and cannot locate a caret.
         Read the layout, the existing text, and the pixel position of where the text must go.
         The tool also reports the CSS viewport and device pixel ratio, and 'click_at_position'
         accepts the SAME screenshot pixel coordinates and converts them for you. So just read a
@@ -876,8 +879,8 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * STEP 2 — PLACE THE CARET. Click the position where the text must go:
         'click_at_position({ x: <px from screenshot>, y: <px from screenshot> })'.
         A successful click only means mouse events were dispatched; it does NOT prove
-        the caret is at the heading you intended. Read any reported caret-line text.
-        If it names a different section or bullet, do not type: locate the target again.
+        the caret is at the heading you intended. Hidden input text is a typing buffer,
+        not authoritative caret-line text or proof of document insertion.
         Before the first edit or paste, capture a screenshot AFTER the click and check
         the visible caret/selection against the requested heading in the document body.
         Outline/sidebar text is not the document body. Never invent a target position
@@ -891,13 +894,16 @@ ${(this.settings.autoConfirmSubmit ?? true)
         never mash keys.
         To replace the whole document, use Ctrl+A then type_text with clearFirst: true.
       * STEP 3 — WRITE with 'type_text({ text: "...\\n...\\n..." })'. Each \n becomes a real
-        Enter, so multi-line documents work in one call. Text verification confirms
-        content only, never the section or formatting. An unverified insert may have
-        landed: screenshot before any retry to avoid inserting duplicate text.
+        Enter, so multi-line documents work in one call. For formatting-match tasks use
+        the clone workflow instead. Canvas text dispatch is unverified: inspect a fresh
+        screenshot before retrying and compare against the BEFORE screenshot.
       * STEP 4 — VERIFY with 'capture_tab_screenshot()'. This step is mandatory. If nothing
         appears, the caret was not in the document: re-screenshot, click again at the exact
         line, and retry ONCE. If it still fails, report the blocker instead of retrying the
-        same call.
+        same call. Text already visible before this run is pre-existing, not a new
+        mistake to undo. Never repeatedly undo because an old string remains visible.
+        One Undo for your latest edit may be used after inspection; inspect the result
+        and stop undoing. If no visible new edit occurred, do not undo historical content.
       * STEP 5 — SPACING IS ALREADY CORRECT. A visible gap between two heading-styled lines is
         the paragraph style's spacing, NOT an empty line. It is not in the document text and
         there is nothing to delete. Do not press Backspace or Enter to "remove the gap": at a
