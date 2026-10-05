@@ -12,6 +12,8 @@ import {
   loadSettings,
   loadGlobalMemories,
   loadTabMemories,
+  migrateGlobalMemoryMedia,
+  migrateTabMemoryMedia,
   saveTabMemory,
   saveGlobalMemory,
   loadChatHistoryForTab,
@@ -171,6 +173,8 @@ export function App() {
 
   // Initial load of settings, sessions, memories, and harness
   useEffect(() => {
+    let cancelled = false;
+    let migrationTimer: ReturnType<typeof setTimeout> | undefined;
     async function init() {
       const [loadedSettings, loadedGlobal, loadedSessions, lastActive] = await Promise.all([
         loadSettings(),
@@ -192,6 +196,7 @@ export function App() {
         getScratchpad(targetSessionId),
         loadSuggestedMemories(targetSessionId),
       ]);
+      if (cancelled) return;
 
       // Only the open chat is needed on launch. Other histories are read when
       // their session is selected, where handleMessagesChange can name it.
@@ -469,6 +474,22 @@ export function App() {
       harnessRef.current = harness;
       setInitialized(true);
 
+      // Let the panel paint and become usable before maintaining legacy media.
+      // Decode batches yield to input; migrations never hold initialization open.
+      migrationTimer = setTimeout(() => {
+        void (async () => {
+          try {
+            const global = await migrateGlobalMemoryMedia(loadedGlobal);
+            if (cancelled) return;
+            setGlobalMemories(global);
+            const scoped = await migrateTabMemoryMedia(targetSessionId, loadedTabMems);
+            if (!cancelled && currentTabKeyRef.current === targetSessionId) setTabMemories(scoped);
+          } catch (error) {
+            console.warn('[OpenBUA] Background media migration deferred:', error);
+          }
+        })();
+      }, 1000);
+
       // Non-blocking socket pre-warm on launch to eliminate cold-start TLS/DNS handshake delay & Failed to fetch
       try {
         const activeCfg =
@@ -487,6 +508,10 @@ export function App() {
     }
 
     init();
+    return () => {
+      cancelled = true;
+      if (migrationTimer !== undefined) clearTimeout(migrationTimer);
+    };
   }, []);
 
   const handleSelectNavTab = (tab: 'chat' | 'memory' | 'settings' | 'preview' | 'suggestions') => {
