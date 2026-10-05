@@ -1964,11 +1964,10 @@ function typeCharactersAsKeys(target: HTMLElement, text: string): void {
  * Give a canvas editor real keyboard focus before inserting text.
  *
  * A coordinate click sets the editor's internal caret but leaves DOM focus on
- * the outer canvas element, so a later execCommand('insertText') against the
- * hidden input frame does nothing. The editor only accepts text once a key
- * event has reached that frame, which is why typing worked after pressing Home
- * but not after a bare click. A harmless modifier press primes that path
- * without altering the document.
+ * the outer canvas element, so input aimed at the hidden input frame before a
+ * key event reaches it is silently discarded. A harmless modifier press primes
+ * that path without moving the caret or altering the document - a navigation
+ * key would move the caret, and used to type characters into the document.
  */
 function primeEditorFocus(target: HTMLElement): void {
   try {

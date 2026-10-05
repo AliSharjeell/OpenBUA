@@ -348,6 +348,31 @@ function think(h, chars, chunk = 400) {
   check('the give-up turn still finalizes for the UI', turns.length === 1, String(turns.length));
 }
 
+{
+  // 19. The canvas-editing prompt must never tell the model to wake the editor
+  // with a caret-moving key. That advice sent Home/End into a Google Doc, and
+  // the keypresses on those keys typed "$" and "#" into the document.
+  const { h } = makeHarness();
+  const prompt = h.buildSystemPrompt();
+  check('the system prompt builds', typeof prompt === 'string' && prompt.length > 0);
+  check(
+    'it never points the agent at Home/End to focus an editor',
+    !/press(ing)?\s+["']?(Home|End)\b/i.test(prompt) &&
+      !/key:\s*["'](Home|End)["']/i.test(prompt) &&
+      !/navigation key/i.test(prompt),
+    (prompt.match(/.{0,40}(press(ing)?\s+["']?(Home|End)|key:\s*["'](Home|End)|navigation key).{0,40}/i) || [])[0] ||
+      'clean'
+  );
+  check(
+    'it tells the agent that type_text primes focus itself',
+    /primes editor focus itself/i.test(prompt)
+  );
+  check(
+    'and to click precisely instead of mashing keys',
+    /never mash keys/i.test(prompt) && /click again/i.test(prompt)
+  );
+}
+
 rmSync(outPath, { force: true });
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
