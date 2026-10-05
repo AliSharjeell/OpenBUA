@@ -12,11 +12,12 @@ const { protectDocsEdits } = await import(`data:text/javascript;base64,${Buffer.
 globalThis.__docsSafetyTab = { id: 1, url: 'https://docs.google.com/document/d/test/edit' };
 const calls = [];
 const policy = { cloneRequired: false, taskEpoch: 0 };
-const names = ['type_text', 'press_key_combination', 'click_at_position', 'capture_tab_screenshot', 'docs_clipboard', 'select_docs_text', 'clipboard_action'];
+const names = ['type_text', 'press_key_combination', 'click_at_position', 'capture_tab_screenshot', 'docs_clipboard', 'select_docs_text', 'clipboard_action', 'confirm_docs_clone'];
 const tools = protectDocsEdits(names.map(name => ({ name, execute: async (_id, params) => {
   calls.push({ name, params });
   if (name === 'capture_tab_screenshot' || name === 'select_docs_text') return { content: [{ type: 'image', mimeType: 'image/png', data: 'test' }], details: {} };
-  if (name === 'docs_clipboard') return { content: [{ type: 'image', mimeType: 'image/png', data: 'test' }], details: { action: { commandAccepted: true } } };
+  if (name === 'docs_clipboard') return { content: [{ type: 'image', mimeType: 'image/png', data: 'test' }], details: { action: params.action === 'copy' ? { commandAccepted: true, clipboardVerified: true } : { dispatched: true } } };
+  if (name === 'confirm_docs_clone') return { content: [{ type: 'text', text: params.evidence }], details: params };
   return { content: [{ type: 'text', text: 'Verified against the document text' }], details: { success: true, verified: true } };
 } })), policy);
 const run = (name, params = {}) => tools.find(tool => tool.name === name).execute('test', params);
@@ -53,11 +54,22 @@ assert.equal((await run('docs_clipboard', { action: 'paste' })).details.blocked,
 const destinationImage = await run('capture_tab_screenshot');
 assert.ok(destinationImage.details.nextAction.includes('docs_clipboard paste'), 'destination observation leads to paste');
 const pasted = await run('docs_clipboard', { action: 'paste' });
-assert.ok(pasted.details.nextAction.includes('one text run'), 'clone observation leads to text replacement');
+assert.ok(pasted.details.nextAction.includes('confirm_docs_clone'), 'paste dispatch requires explicit visual confirmation');
+assert.equal((await run('type_text', { text: 'new title' })).details.blocked, true, 'an accepted paste alone must not unlock editing the original');
+await run('confirm_docs_clone', { outcome: 'duplicated', evidence: 'Two complete project blocks are visible, original below the clone.' });
 assert.equal((await run('type_text', { text: 'new title' })).details.dispatched, true, 'clone text can be edited after observing paste');
 policy.taskEpoch++;
 await run('capture_tab_screenshot');
 assert.equal((await run('type_text', { text: 'new title' })).details.blocked, true, 'new task does not inherit clone approval');
+await run('select_docs_text');
+await run('docs_clipboard', { action: 'copy' });
+await run('click_at_position');
+await run('capture_tab_screenshot');
+await run('docs_clipboard', { action: 'paste' });
+await run('confirm_docs_clone', { outcome: 'no_change', evidence: 'Only the original project is visible; no new block.' });
+assert.equal((await run('type_text', { text: 'overwrite source' })).details.blocked, true, 'unchanged paste cannot lead to editing the source');
+await run('capture_tab_screenshot');
+assert.equal((await run('docs_clipboard', { action: 'paste' })).details.blocked, true, 'failed paste cannot loop');
 globalThis.__docsSafetyTab = { id: 2, url: 'https://example.com' };
 assert.equal((await run('type_text', { text: 'ordinary input' })).details.verified, true, 'ordinary inputs are unchanged');
 delete globalThis.__docsSafetyTab;
