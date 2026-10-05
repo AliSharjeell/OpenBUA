@@ -449,6 +449,57 @@ function makeDocsPage(opts = {}) {
   fn({ key: 'a', ctrlKey: true });
   const ctrlA = innerBody._events.find((e) => e.type === 'keydown');
   check('Ctrl+key keeps its modifier', ctrlA.ctrlKey === true && ctrlA.keyCode === 65, JSON.stringify({ c: ctrlA.ctrlKey, k: ctrlA.keyCode }));
+
+  // Regression: keypress means "insert this character", and editors turn its
+  // legacy char code into String.fromCharCode(which). A keypress on a
+  // navigation key therefore types '$' (Home=36) or '#' (End=35) into the
+  // document - a real session littered a Google Doc with exactly those
+  // characters after pressing Home/End ten times "to give the editor focus".
+  const navKeys = [
+    'Home', 'End', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+    'PageUp', 'PageDown', 'Escape', 'Tab', 'Backspace', 'Delete', 'F1',
+  ];
+  const leaked = [];
+  for (const key of navKeys) {
+    innerBody._events.length = 0;
+    fn({ key });
+    const presses = innerBody._events.filter((e) => e.type === 'keypress');
+    if (presses.length > 0) leaked.push(`${key}->${presses.map((p) => p.which).join(',')}`);
+  }
+  check(
+    'navigation/editing keys never dispatch keypress (that is what typed $ and #)',
+    leaked.length === 0,
+    leaked.join(' ') || `leaked ${leaked.length}`
+  );
+
+  // Character keys must still keypress - that is how text is inserted - and the
+  // keypress must carry the character's own code (String.fromCharCode(97) ===
+  // 'a'), not the physical key code (65 would uppercase).
+  innerBody._events.length = 0;
+  fn({ key: 'a' });
+  const aPress = innerBody._events.find((e) => e.type === 'keypress');
+  const aDown = innerBody._events.find((e) => e.type === 'keydown');
+  check('a character key still dispatches keypress', Boolean(aPress));
+  check(
+    'its keypress carries the character code 97, not the letter code 65',
+    aPress && aPress.which === 97 && aPress.keyCode === 97,
+    JSON.stringify(aPress)
+  );
+  check('while keydown keeps the physical code 65', aDown && aDown.keyCode === 65, JSON.stringify(aDown));
+
+  innerBody._events.length = 0;
+  fn({ key: 'Space' });
+  const spacePress = innerBody._events.find((e) => e.type === 'keypress');
+  check(
+    'Space keypresses a real space (char 32)',
+    spacePress && spacePress.which === 32 && spacePress.key === ' ',
+    JSON.stringify(spacePress)
+  );
+
+  innerBody._events.length = 0;
+  fn({ key: 'Enter' });
+  const enterPress = innerBody._events.find((e) => e.type === 'keypress');
+  check('Enter still keypresses (char 13)', enterPress && enterPress.which === 13, JSON.stringify(enterPress));
 }
 
 // --- 6. clipboard must prime focus and send a real Ctrl shortcut ----------

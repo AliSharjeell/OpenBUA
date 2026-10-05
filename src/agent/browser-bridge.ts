@@ -3168,8 +3168,23 @@ function inPagePressKey(options: {
   const code =
     codeMap[keyUpper] ?? (isSingleChar ? `Key${options.key.toUpperCase()}` : options.key);
 
+  // keydown/keyup carry the physical key code (a real 'a' reports 65), while
+  // keypress means "insert this character" and its legacy char code becomes
+  // String.fromCharCode(which). Firing keypress for Home/End therefore types
+  // '$' (36) and '#' (35) into the document - that is exactly how a session
+  // littered a Google Doc with those characters. Only keys that produce a
+  // character may carry a keypress, and it must carry the character's own code.
+  const producesCharacter = isSingleChar || keyUpper === 'SPACE' || keyUpper === 'ENTER';
+  const charCode = isSingleChar
+    ? options.key.charCodeAt(0)
+    : keyUpper === 'SPACE'
+      ? 32
+      : keyUpper === 'ENTER'
+        ? 13
+        : 0;
+
   const eventInit: KeyboardEventInit = {
-    key: options.key,
+    key: keyUpper === 'SPACE' ? ' ' : options.key,
     code,
     keyCode,
     which: keyCode,
@@ -3181,11 +3196,16 @@ function inPagePressKey(options: {
     altKey: Boolean(options.altKey),
     metaKey: Boolean(options.metaKey),
   };
+  const pressInit: KeyboardEventInit = {
+    ...eventInit,
+    keyCode: producesCharacter ? charCode : keyCode,
+    which: producesCharacter ? charCode : keyCode,
+  };
 
   const view = (target.ownerDocument?.defaultView || window) as unknown as Window & typeof globalThis;
   target.dispatchEvent(new view.KeyboardEvent('keydown', eventInit));
-  if (isSingleChar || keyCodeMap[keyUpper]) {
-    target.dispatchEvent(new view.KeyboardEvent('keypress', eventInit));
+  if (producesCharacter) {
+    target.dispatchEvent(new view.KeyboardEvent('keypress', pressInit));
   }
   target.dispatchEvent(new view.KeyboardEvent('keyup', eventInit));
 
