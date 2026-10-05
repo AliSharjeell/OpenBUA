@@ -41,6 +41,13 @@ try {
     assert.equal(provider === 'openai' ? ordinary[0].tool_choice : ordinary[0].tool_choice?.type, provider === 'openai' ? 'auto' : undefined);
     const recovery = await request([directive]);
     assert.equal(provider === 'openai' ? recovery[0].tool_choice : recovery[0].tool_choice.type, provider === 'openai' ? 'required' : 'any');
+    const vision = await request([
+      { role: 'user', content: 'Match the existing project formatting' },
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'docs-image', name: 'find_docs_text', arguments: { text: 'Termote' } }] },
+      { role: 'toolResult', toolCallId: 'docs-image', toolName: 'find_docs_text', content: [{ type: 'text', text: '{"matches":[]}' }, { type: 'image', mimeType: 'image/jpeg', data: 'visible-docs-image' }] },
+      directive,
+    ]);
+    assert.ok(JSON.stringify(vision[0].messages).includes('visible-docs-image'), 'empty Docs label lookup still delivers its image to the provider during recovery');
     const fallback = await request([directive], true);
     assert.equal(fallback.length, 2, 'unsupported forced mode retries once');
     assert.equal(provider === 'openai' ? fallback[1].tool_choice : fallback[1].tool_choice.type, 'auto');
