@@ -1281,12 +1281,25 @@ ${this.settings.systemInstruction || ''}`.trim();
     try {
       this.listeners.onStatusChange?.(true);
 
+      // A previous run may still be unwinding (right after a watchdog cut, for
+      // example). prompt()/continue() are refused while it is, so wait it out
+      // rather than surfacing "Agent is already processing a prompt" to the user.
+      try {
+        await this.settleAgent(this.agent);
+      } catch {
+        throw new Error(
+          'The previous request is still running. Press Stop to cancel it, then send your message again.'
+        );
+      }
+
       const currentMsgs = this.agent.state.messages;
-      const lastMsg = currentMsgs[currentMsgs.length - 1];
+      const lastMsg = currentMsgs[currentMsgs.length - 1] as any;
       const lastContent =
         typeof lastMsg?.content === 'string'
           ? lastMsg.content.trim()
-          : Array.isArray(lastMsg?.content) && (lastMsg.content[0] as any)?.text?.trim();
+          : Array.isArray(lastMsg?.content)
+            ? (lastMsg.content[0] as any)?.text?.trim()
+            : undefined;
 
       const isAlreadyLastUserMsg =
         lastMsg &&
