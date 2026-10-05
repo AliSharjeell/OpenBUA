@@ -14,6 +14,7 @@
     "test:canvas": "node scripts/test-canvas-input.mjs",
     "test:vision": "node scripts/test-visual-context.mjs",
     "test:startup": "node scripts/test-memory-startup.mjs",
+    "test:canvas-check": "node scripts/test-canvas-edit-check.mjs",
     "test:budget": "node scripts/test-thinking-budget.mjs",
     "test:resume": "node scripts/test-auto-resume.mjs",
     "typecheck": "tsc --noEmit"
