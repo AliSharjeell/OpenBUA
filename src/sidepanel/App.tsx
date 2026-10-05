@@ -172,10 +172,12 @@ export function App() {
   // Initial load of settings, sessions, memories, and harness
   useEffect(() => {
     async function init() {
-      const loadedSettings = await loadSettings();
-      const loadedGlobal = await loadGlobalMemories();
-      const loadedSessions = await loadChatSessions();
-      const lastActive = await loadLastActiveState();
+      const [loadedSettings, loadedGlobal, loadedSessions, lastActive] = await Promise.all([
+        loadSettings(),
+        loadGlobalMemories(),
+        loadChatSessions(),
+        loadLastActiveState(),
+      ]);
       
       const targetSessionId = (lastActive.sessionId && loadedSessions.some((s) => s.id === lastActive.sessionId))
         ? lastActive.sessionId
