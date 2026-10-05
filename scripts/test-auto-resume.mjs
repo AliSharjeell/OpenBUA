@@ -214,13 +214,16 @@ function makeLiveHarness() {
 
 {
   // Exercise the public request's finally block, not just Agent.prompt().
-  const { h, counter, status, agentEnds } = makeLiveHarness();
+  const { h, agent, counter, status, agentEnds } = makeLiveHarness();
   h.getActiveConfig = () => ({ apiKey: 'test-key', provider: 'openai' });
   const request = h.prompt('write a project');
   check('activity is visible immediately before async preparation', status.at(-1) === true);
   await request;
   await until(() => counter.calls >= 2);
   check('original request completion keeps the retry indicator active', status.at(-1) === true, JSON.stringify(status));
+  h.updateConfig(h.settings, [{ id: 'video', title: 'Clip', content: 'Saved video', type: 'video', blobKey: 'media:video', isActiveForContext: true }]);
+  check('background memory updates preserve the running agent', h.agent === agent);
+  check('configuration refresh is deferred until the next request', h.configRefreshPending === true);
   await until(() => agentEnds() >= 2 && status.at(-1) === false);
   check('public request and retry never flicker idle', status.slice(0, -1).every(Boolean), JSON.stringify(status));
   check('public request becomes idle after all runs finish', status.at(-1) === false);
