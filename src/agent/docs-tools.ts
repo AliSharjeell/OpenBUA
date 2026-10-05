@@ -1,12 +1,14 @@
 import { Type } from '@sinclair/typebox';
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { runDocsInspection, runDocsToggle, runDocsClipboard, runDocsTextLookup } from './docs-editor';
-import { captureTabScreenshot, clickAtPosition } from './browser-bridge';
+import { captureTabScreenshot, clickAtPosition, getActiveTabViewport } from './browser-bridge';
 
 async function observedResult(details: unknown): Promise<AgentToolResult> {
   const content: AgentToolResult['content'] = [{ type: 'text', text: JSON.stringify(details) }];
   try {
     const screenshot = await captureTabScreenshot();
+    const viewport = await getActiveTabViewport().catch(() => null);
+    if (viewport) content.push({ type: 'text', text: JSON.stringify({ viewport, screenshotPixels: { width: Math.round(viewport.width * viewport.devicePixelRatio), height: Math.round(viewport.height * viewport.devicePixelRatio) }, coordinates: 'Use pixels from the attached image directly. Do not scale by device pixel ratio.' }) });
     const match = screenshot.match(/^data:([^;]+);base64,(.+)$/);
     if (match) content.push({ type: 'image', mimeType: match[1], data: match[2] });
   } catch { content.push({ type: 'text', text: 'Screenshot unavailable. Capture one before further editing.' }); }
