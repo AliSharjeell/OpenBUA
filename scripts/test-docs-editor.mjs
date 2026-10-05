@@ -49,4 +49,22 @@ assert.equal(clipboard('paste').success, false);
 focused = false;
 assert.equal(clipboard('copy').success, false, 'toolbar focus must not copy unrelated text');
 assert.equal(clipboard('duplicate').success, false);
+// Only rendered body labels count; sidebar and input buffers are excluded.
+let nodes = [
+  { getAttribute: () => 'Termote — Rust-Based Agentic Development Environment', getBoundingClientRect: () => ({ left: 100, right: 500, top: 200, bottom: 220, x: 100, y: 200, width: 400, height: 20 }) },
+  { getAttribute: () => 'Termote hidden page', getBoundingClientRect: () => ({ left: 100, right: 500, top: 1200, bottom: 1220, x: 100, y: 1200, width: 400, height: 20 }) },
+];
+const lookup = runInNewContext(`(${extract('findDocsRenderedText', 'async function runDocsTextLookup')})`, {
+  document: { querySelectorAll: selector => {
+    assert.equal(selector, '.kix-page svg [aria-label], .kix-canvas-tile-content [aria-label]');
+    return nodes;
+  } }, devicePixelRatio: 2, innerWidth: 1000, innerHeight: 800,
+});
+result = lookup('Termote');
+assert.equal(result.matches.length, 1, 'offscreen labels are excluded');
+assert.equal(result.matches[0].start.x, 202, 'body label coordinates use screenshot pixels');
+assert.equal(result.matches[0].exactLine, false, 'substring lookup does not imply an exact text range');
+assert.equal(lookup('Experience').matches.length, 0, 'missing text produces no fabricated coordinates');
+nodes = [];
+assert.equal(lookup('Termote').matches.length, 0, 'canvas-only Docs remains explicitly unsupported by label lookup');
 console.log('PASS serialized Docs DOM inspection, idempotent formatting, clipboard rejection and focus guards');
