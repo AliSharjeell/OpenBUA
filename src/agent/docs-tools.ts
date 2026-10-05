@@ -55,7 +55,7 @@ const Point = Type.Object({ x: Type.Number({ minimum: 0 }), y: Type.Number({ min
 const SelectSchema = Type.Object({ start: Point, end: Point });
 export const selectDocsTextTool: AgentTool<typeof SelectSchema> = {
   name: 'select_docs_text', label: 'Select Docs Text Block',
-  description: 'Select a visible Google Docs text chunk by clicking its start and Shift-clicking its end. Coordinates are pixels from the latest full screenshot, not CSS pixels. Returns selection DOM, formatting states and a screenshot: verify the highlighted range covers exactly the source heading, technologies and final bullet before clipboard_action copy. Both endpoints must be visible. For longer blocks, click the start, scroll, then click_at_position with shiftKey true at the end. Never copy/paste or replace until the highlighted range is visually verified.',
+  description: 'Select a visible Google Docs text chunk by clicking its start and Shift-clicking its end. Coordinates are pixels from the latest full screenshot, not CSS pixels. Returns selection DOM, formatting states and a screenshot: verify the highlighted range covers exactly the source heading, technologies and final bullet before docs_clipboard copy. Both endpoints must be visible. For longer blocks, click the start, scroll, then click_at_position with shiftKey true at the end. Never copy/paste or replace until the highlighted range is visually verified.',
   parameters: SelectSchema,
   execute: async (_id, params) => {
     try {

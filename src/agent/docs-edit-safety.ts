@@ -63,6 +63,15 @@ export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolic
       if (tool.name === 'docs_clipboard' && params.action !== 'copy' && details?.action?.commandAccepted) state.undoAvailable = true;
       if (tool.name === 'docs_clipboard' && params.action === 'copy') state.copied = Boolean(details?.action?.commandAccepted);
       if (tool.name === 'docs_clipboard' && params.action === 'paste' && details?.action?.commandAccepted && state.copied) state.cloned = true;
+      if (policy?.cloneRequired && state.observed) {
+        let nextAction: string;
+        if (state.cloned) nextAction = 'Next: select_docs_text for one text run in the pasted clone, inspect its highlight, then type_text its replacement without paragraph breaks.';
+        else if (tool.name === 'docs_clipboard' && params.action === 'copy' && state.copied) nextAction = 'Next: click_at_position at the start of the source heading to insert above it, then inspect the destination caret before docs_clipboard paste.';
+        else if (state.copied) nextAction = 'Next: if the destination caret is correct in this image, call docs_clipboard paste. Otherwise correct its location and inspect again.';
+        else if (tool.name === 'select_docs_text' && details?.dispatched) nextAction = 'Next: if the highlight covers the complete source project, call docs_clipboard copy. Otherwise correct the selection.';
+        else nextAction = 'Next: read the screenshot attached to this result. If the complete source project is visible, call select_docs_text now using its start/end image pixels. If not, scroll_page to reveal it. Empty DOM labels do not require another find_docs_text query. Do not reason about Enter or formatting inheritance.';
+        return { content: [...result.content, { type: 'text', text: nextAction }], details: { ...details, nextAction } };
+      }
       return result;
     },
   });
