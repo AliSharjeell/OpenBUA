@@ -2,6 +2,7 @@
 import { Agent, AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
 import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS, createAgentTools } from './tools';
+import { DocsEditPolicy } from './docs-edit-safety';
 import { createCustomModel, createStreamFn } from './stream-adapter';
 import { getActiveTab, isExtensionPage } from './browser-bridge';
 import { describePlatforms } from './social-platforms';
@@ -269,6 +270,7 @@ export async function detectAndQueueMemorySuggestions(
 }
 
 export class FormAgentHarness {
+  private docsEditPolicy: DocsEditPolicy = { cloneRequired: false, taskEpoch: 0 };
   private agent: Agent | null = null;
   private settings: AppSettings;
   private documents: UserDocument[];
@@ -983,7 +985,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       initialState: {
         model,
         systemPrompt,
-        tools: createAgentTools(this.sessionId),
+        tools: createAgentTools(this.sessionId, this.docsEditPolicy),
         messages: agentMessages.length > 0 ? agentMessages : undefined,
       },
       streamFn: (m, ctx, opts) => createStreamFn(config, m, ctx, opts?.signal),
@@ -1496,6 +1498,8 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public async prompt(input: string): Promise<void> {
+    this.docsEditPolicy.taskEpoch += 1;
+    this.docsEditPolicy.cloneRequired = /format/i.test(input) && /like|same|match/i.test(input);
     const config = this.getActiveConfig();
     if (!config.apiKey || !config.apiKey.trim()) {
       const modeLabel =

@@ -5,9 +5,12 @@ const blocked = (message: string): AgentToolResult => ({
   content: [{ type: 'text', text: message }], details: { success: false, dispatched: false, blocked: true },
 });
 
+export interface DocsEditPolicy { cloneRequired: boolean; taskEpoch: number }
+
 // Per tool-set/session and per document: observations never replenish undo credit.
-export function protectDocsEdits(tools: AgentTool<any>[]): AgentTool<any>[] {
-  const documents = new Map<string, { observed: boolean; undoAvailable: boolean }>();
+export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolicy): AgentTool<any>[] {
+  let epoch = policy?.taskEpoch;
+  const documents = new Map<string, { observed: boolean; undoAvailable: boolean; copied: boolean; cloned: boolean }>();
   const relevant = new Set(['type_text', 'press_key_combination', 'click_at_position', 'click_element',
     'scroll_page', 'capture_tab_screenshot', 'inspect_docs_editor', 'find_docs_text', 'select_docs_text',
     'set_docs_formatting', 'docs_clipboard', 'clipboard_action']);
@@ -16,10 +19,17 @@ export function protectDocsEdits(tools: AgentTool<any>[]): AgentTool<any>[] {
     execute: async (...args: Parameters<typeof tool.execute>) => {
       const tab = await getActiveTab();
       if (!tab?.id || !/^https:\/\/docs\.google\.com\/document\//.test(tab.url || '')) return tool.execute(...args);
+      if (epoch !== policy?.taskEpoch) { documents.clear(); epoch = policy?.taskEpoch; }
       const key = `${tab.id}:${(tab.url || '').split('#')[0]}`;
       let state = documents.get(key);
-      if (!state) { state = { observed: false, undoAvailable: false }; documents.set(key, state); }
+      if (!state) { state = { observed: false, undoAvailable: false, copied: false, cloned: false }; documents.set(key, state); }
       const params = args[1] as Record<string, any>;
+      if (policy?.cloneRequired && !state.cloned && tool.name === 'type_text') {
+        return blocked('No text inserted. This task asks to match existing formatting. Locate the source with find_docs_text, select its complete project block with select_docs_text, verify the highlight, docs_clipboard copy, place and inspect the destination caret, then docs_clipboard paste. Verify the clone before replacing individual text runs. Do not build a mixed-format project by typing into its title paragraph.');
+      }
+      if (policy?.cloneRequired && tool.name === 'docs_clipboard' && params.action === 'paste' && !state.copied) {
+        return blocked('No paste dispatched. Copy the verified source project block using docs_clipboard first, rather than pasting unknown clipboard contents.');
+      }
       const undo = tool.name === 'press_key_combination' && params.ctrlKey && String(params.key).toLowerCase() === 'z' && !params.shiftKey;
       if (undo) {
         if (!state.observed) return blocked('No Undo dispatched. Inspect the current document screenshot first.');
@@ -46,6 +56,8 @@ export function protectDocsEdits(tools: AgentTool<any>[]): AgentTool<any>[] {
         };
       }
       if (tool.name === 'docs_clipboard' && params.action !== 'copy' && details?.action?.commandAccepted) state.undoAvailable = true;
+      if (tool.name === 'docs_clipboard' && params.action === 'copy') state.copied = Boolean(details?.action?.commandAccepted);
+      if (tool.name === 'docs_clipboard' && params.action === 'paste' && details?.action?.commandAccepted && state.copied) state.cloned = true;
       return result;
     },
   });
