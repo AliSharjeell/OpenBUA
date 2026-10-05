@@ -1101,8 +1101,8 @@ export const postToSocialTool: AgentTool<typeof PostToSocialSchema> = {
 // 21. Click at viewport coordinates (the only way to place a caret in a
 //     canvas-rendered editor such as Google Docs, Sheets, Figma or Canva)
 const ClickAtPositionSchema = Type.Object({
-  x: Type.Number({ description: 'Horizontal position in viewport pixels (0 = left edge of the window)' }),
-  y: Type.Number({ description: 'Vertical position in viewport pixels (0 = top edge of the window)' }),
+  x: Type.Number({ description: 'Horizontal position in pixels of the actual capture_tab_screenshot image. Pass the image coordinate unchanged; the tool converts to CSS pixels.' }),
+  y: Type.Number({ description: 'Vertical position in pixels of the actual capture_tab_screenshot image. Pass the image coordinate unchanged; do not estimate from a resized preview or divide by devicePixelRatio.' }),
   clickCount: Type.Optional(
     Type.Number({ description: 'Number of clicks. Use 2 to double-click (select a word). Default 1.' })
   ),
