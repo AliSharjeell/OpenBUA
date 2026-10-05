@@ -13,6 +13,7 @@
     "test:dist": "node scripts/test-dist-artifact.mjs",
     "test:canvas": "node scripts/test-canvas-input.mjs",
     "test:budget": "node scripts/test-thinking-budget.mjs",
+    "test:resume": "node scripts/test-auto-resume.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
