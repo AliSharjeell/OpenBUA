@@ -73,10 +73,21 @@ export const selectDocsTextTool: AgentTool<typeof SelectSchema> = {
 const ClipboardSchema = Type.Object({ action: Type.Union([Type.Literal('copy'), Type.Literal('paste'), Type.Literal('cut')]) });
 export const docsClipboardTool: AgentTool<typeof ClipboardSchema> = {
   name: 'docs_clipboard', label: 'Copy or Paste Formatted Docs Selection',
-  description: 'Run the browser copy/paste/cut command in the focused Google Docs input, allowing Docs rich-text clipboard handlers to preserve source formatting. First select_docs_text and visually verify the complete source block; copy, place the caret at the insertion point, verify, then paste. Inspect the returned screenshot before further edits or retries. Cut only if moving/removing was requested. This uses the system clipboard and overwrites it on copy/cut. Command acceptance does not verify content or formatting.',
+  description: 'Copy a Google Docs selection and verify its actual system clipboard text and rich HTML. Paste that verified HTML through the Docs paste handler at a collapsed destination caret. First select and inspect the source; copy; click before the source heading with Shift off; inspect the caret; paste; confirm_docs_clone from the returned screenshot. Never paste over the original selected block or assume dispatch created a clone. Cut only if moving/removing was requested. Copy/cut overwrite the system clipboard.',
   parameters: ClipboardSchema,
   execute: async (_id, params) => {
     try { return await observedResult({ action: await runDocsClipboard(params.action), editor: await runDocsInspection() }); }
     catch (error) { return { content: [{ type: 'text', text: String(error) }], details: { success: false } }; }
   },
+};
+
+const ConfirmCloneSchema = Type.Object({
+  outcome: Type.Union([Type.Literal('duplicated'), Type.Literal('no_change'), Type.Literal('merged'), Type.Literal('wrong_location')]),
+  evidence: Type.String({ minLength: 1, description: 'What the latest screenshot shows: positions of the new block and preserved original, or why no correct duplicate is visible.' }),
+});
+export const confirmDocsCloneTool: AgentTool<typeof ConfirmCloneSchema> = {
+  name: 'confirm_docs_clone', label: 'Report Visible Docs Paste Result',
+  description: 'Report the visual result of the latest Docs paste after inspecting its screenshot. Use duplicated ONLY when a second complete source block is visible at the destination and the original is preserved. Command acceptance, clipboard contents or a single unchanged block are insufficient. Report no_change if only the original remains, merged if the boundary joined text, or wrong_location if pasted elsewhere. This controls whether clone text editing is allowed; it does not independently verify the document.',
+  parameters: ConfirmCloneSchema,
+  execute: async (_id, params) => ({ content: [{ type: 'text', text: `Visual paste report: ${params.outcome}. ${params.evidence}` }], details: { outcome: params.outcome, evidence: params.evidence } }),
 };

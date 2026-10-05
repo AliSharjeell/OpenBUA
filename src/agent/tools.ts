@@ -3,7 +3,7 @@ import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { checkCanvasTextInsertion } from './canvas-edit-check';
 import { protectDocsEdits, DocsEditPolicy } from './docs-edit-safety';
-import { inspectDocsEditorTool, selectDocsTextTool, setDocsFormattingTool, docsClipboardTool, findDocsTextTool } from './docs-tools';
+import { inspectDocsEditorTool, selectDocsTextTool, setDocsFormattingTool, docsClipboardTool, findDocsTextTool, confirmDocsCloneTool } from './docs-tools';
 import {
   inspectActiveTabForm,
   fillActiveTabFields,
@@ -1256,6 +1256,7 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     selectDocsTextTool,
     setDocsFormattingTool,
     docsClipboardTool,
+    confirmDocsCloneTool,
     fillFormFieldsTool,
     uploadFileToFormTool,
     postToSocialTool,

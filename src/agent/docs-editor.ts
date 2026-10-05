@@ -1,4 +1,7 @@
 import { getActiveTab } from './browser-bridge';
+import { readDocsClipboard, dispatchDocsRichPaste } from './docs-rich-clipboard';
+
+const verifiedCopies = new Map<string, { text: string; html: string }>();
 
 // Serialized by Chrome: all DOM helpers must remain inside this function.
 export function inspectDocsEditor() {
@@ -83,8 +86,24 @@ export function commandDocsClipboard(action: string) {
 export async function runDocsClipboard(action: string) {
   const tab = await getActiveTab();
   if (!tab?.id || !/^https:\/\/docs\.google\.com\/document\//.test(tab.url || '')) throw new Error('Activate a Google Docs document first.');
+  const key = `${tab.id}:${(tab.url || '').split('#')[0]}`;
+  if (action === 'paste') {
+    const copy = verifiedCopies.get(key);
+    if (!copy) return { success: false, dispatched: false, message: 'No verified rich copy exists for this document. Copy the selected source first.' };
+    const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: dispatchDocsRichPaste, args: [copy.text, copy.html] });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    return results[0]?.result || { success: false, dispatched: false, message: 'Rich paste returned no result.' };
+  }
+  verifiedCopies.delete(key);
   const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: commandDocsClipboard, args: [action] });
-  return results[0]?.result || { success: false, message: 'Clipboard command returned no result.' };
+  const command = results[0]?.result;
+  if (!command?.commandAccepted) return command || { success: false, message: 'Clipboard command returned no result.' };
+  const editor = await runDocsInspection();
+  const reads = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readDocsClipboard, args: [editor.selectionText || ''] });
+  const copy = reads[0]?.result;
+  if (!copy?.success) return { ...command, success: false, clipboardVerified: false, message: copy?.message || 'Could not verify copied content.' };
+  verifiedCopies.set(key, { text: copy.text, html: copy.html });
+  return { ...command, success: true, clipboardVerified: true, textCharacters: copy.text.length, hasRichHtml: true, message: copy.message };
 }
 
 // Read only rendered page labels, never sidebar outlines or the typing buffer.
