@@ -481,9 +481,9 @@ export function App() {
           try {
             const global = await migrateGlobalMemoryMedia(loadedGlobal);
             if (cancelled) return;
-            setGlobalMemories(global);
+            if (global !== loadedGlobal) setGlobalMemories(global);
             const scoped = await migrateTabMemoryMedia(targetSessionId, loadedTabMems);
-            if (!cancelled && currentTabKeyRef.current === targetSessionId) setTabMemories(scoped);
+            if (!cancelled && currentTabKeyRef.current === targetSessionId && scoped !== loadedTabMems) setTabMemories(scoped);
           } catch (error) {
             console.warn('[OpenBUA] Background media migration deferred:', error);
           }
