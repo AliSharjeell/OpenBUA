@@ -704,10 +704,11 @@ export function App() {
   };
 
   const handleChatDocumentUpload = async (file: File): Promise<UserDocument> => {
-    const parsed = await processUploadedFile(file);
+    const docId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const parsed = await processUploadedFile(file, { docId });
     const tabKey = currentTabKeyRef.current;
     const newDoc: UserDocument = {
-      id: `mem-${Date.now()}`,
+      id: docId,
       title: parsed.title,
       type: parsed.type,
       content: parsed.content,
@@ -721,6 +722,9 @@ export function App() {
       fileName: parsed.fileName,
       mimeType: parsed.mimeType,
       dataUrl: parsed.dataUrl,
+      blobKey: parsed.blobKey,
+      thumbnailUrl: parsed.thumbnailUrl,
+      videoDuration: parsed.videoDuration,
       ocrStatus: parsed.ocrStatus,
       fileCategory: parsed.fileCategory,
     };
