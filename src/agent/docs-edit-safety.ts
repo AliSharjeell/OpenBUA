@@ -2,7 +2,7 @@ import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { getActiveTab } from './browser-bridge';
 
 const blocked = (message: string): AgentToolResult => ({
-  content: [{ type: 'text', text: message }], details: { success: false, dispatched: false, blocked: true },
+  content: [{ type: 'text', text: message }], details: { success: false, dispatched: false, blocked: true, message },
 });
 
 export interface DocsEditPolicy { cloneRequired: boolean; taskEpoch: number }
