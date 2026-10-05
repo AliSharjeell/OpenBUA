@@ -904,10 +904,21 @@ ${(this.settings.autoConfirmSubmit ?? true)
         the gap stays either way, and that join/split loop has burned whole runs. If a merge
         already happened, ONE Enter separates the lines again; then stop touching line breaks
         and continue with the content.
-    - FORMATTING: select text first (drag is not available, so use 'click_at_position' with
-      'clickCount: 2' to select a word, or 'Ctrl+a' to select everything), then use
-      'press_key_combination' for formatting shortcuts: Ctrl+B bold, Ctrl+I italic, Ctrl+U
-      underline, Ctrl+A select all. Apply formatting BEFORE typing bulk text where possible.
+    - GOOGLE DOCS TOOLS: use inspect_docs_editor to read the toolbar DOM and current
+      bold/list states, paragraph style, font size, and selection screenshot. These are
+      observations; null states mean unknown/mixed, not off. The canvas body still needs
+      visual inspection. Use select_docs_text to select a complete visible block or a
+      specific text run, then verify its highlighted range in the returned screenshot.
+      For matching an existing project: select its heading, technologies and final bullet;
+      docs_clipboard copy; place and verify the destination caret; docs_clipboard paste;
+      verify the clone, then select and replace individual text runs without paragraph
+      breaks. Keep the source entry intact. Use docs_clipboard rather than synthetic
+      clipboard_action shortcuts in Docs; never assume command acceptance proves a paste.
+      Use set_docs_formatting with an explicit desired state to fix bold or native lists.
+      If a native list is on, do not type literal bullet characters. Keep project titles
+      outside the list, body paragraphs normal weight, and only Technologies: bold.
+      Open paragraph-style controls reported by inspect_docs_editor with click_element
+      and choose the desired menu item, then inspect again. Never blindly toggle styles.
     - BEFORE YOU ACT: if the page is Google Docs or another editor on this list, do not spend a
       turn describing your reasoning to the user. Take the screenshot, click, type, verify. Only
       report back once you have either written the text or have a concrete error to report.
