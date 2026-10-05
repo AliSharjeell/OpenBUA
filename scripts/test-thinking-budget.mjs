@@ -373,16 +373,15 @@ function think(h, chars, chunk = 400) {
   );
   check(
     'it warns that a gap between headings is paragraph spacing, not a blank line',
-    /paragraph style's spacing, NOT an empty line/i.test(prompt)
+    /Paragraph spacing is not a blank line/i.test(prompt)
   );
   check(
     'and forbids Backspace/Enter as a way to "remove the gap"',
-    /Do not press Backspace or Enter/i.test(prompt) &&
-      /Backspace joins the two lines/i.test(prompt)
+    /Do not join\/split lines to fix it/i.test(prompt)
   );
   check(
-    'it demands the whole entry in one pass, not a title then spacing polish',
-    /Write the WHOLE entry/i.test(prompt) && /spacing polish is not a substitute/i.test(prompt)
+    'it demands a complete formatted clone and verifies all new text',
+    /heading through final bullet/i.test(prompt) && /Verify all new text, formatting, placement/i.test(prompt)
   );
 }
 
