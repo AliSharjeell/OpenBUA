@@ -141,7 +141,13 @@ function loadMemoryList(key: string, defaults: UserDocument[] = []): Promise<Use
     for (const doc of docs) compacted.push(await compactMemoryMedia(doc));
     if (compacted.some((doc, index) => doc !== docs[index])) {
       // A failed metadata write leaves the old inline bytes intact in storage.
-      await setStorageItem(key, compacted);
+      try {
+        await setStorageItem(key, compacted);
+      } catch (error) {
+        // The blob was committed, so this launch can use the compact metadata
+        // even if persistence needs retrying next time. Never block panel init.
+        console.warn('[OpenBUA] Could not persist media migration:', error);
+      }
     }
     return compacted;
   })();
