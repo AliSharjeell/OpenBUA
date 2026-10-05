@@ -182,6 +182,7 @@ export function App() {
         loadChatSessions(),
         loadLastActiveState(),
       ]);
+      if (cancelled) return;
       
       const targetSessionId = (lastActive.sessionId && loadedSessions.some((s) => s.id === lastActive.sessionId))
         ? lastActive.sessionId
