@@ -10,7 +10,9 @@
     "storage",
     "unlimitedStorage",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "clipboardRead",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "<all_urls>"
