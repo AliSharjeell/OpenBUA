@@ -964,8 +964,9 @@ ${this.settings.systemInstruction || ''}`.trim();
     });
 
     // Subscribe to pi-agent-core lifecycle events
-    this.agent.subscribe((event: AgentEvent) => {
-      this.handleAgentEvent(event);
+    const subscribedAgent = this.agent;
+    subscribedAgent.subscribe((event: AgentEvent) => {
+      if (this.agent === subscribedAgent) this.handleAgentEvent(event);
     });
   }
 
