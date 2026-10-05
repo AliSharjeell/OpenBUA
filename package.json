@@ -12,6 +12,7 @@
     "test:inputs": "node scripts/test-file-input-selection.mjs",
     "test:dist": "node scripts/test-dist-artifact.mjs",
     "test:canvas": "node scripts/test-canvas-input.mjs",
+    "test:vision": "node scripts/test-visual-context.mjs",
     "test:budget": "node scripts/test-thinking-budget.mjs",
     "test:resume": "node scripts/test-auto-resume.mjs",
     "typecheck": "tsc --noEmit"
