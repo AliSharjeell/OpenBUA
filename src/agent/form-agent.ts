@@ -1185,6 +1185,10 @@ ${this.settings.systemInstruction || ''}`.trim();
       }
 
       case 'tool_execution_end': {
+        // Acting earns the retry budget back. The cap exists to stop a loop of
+        // cut -> resume -> cut with nothing to show for it, not to punish a
+        // long task: one tool call is proof the run is alive.
+        this.autoResumeCount = 0;
         const anyEvt = event as any;
         const toolCallId = anyEvt.toolCallId || anyEvt.toolCall?.id;
         const existing = toolCallId ? this.activeToolCalls.get(toolCallId) : null;
