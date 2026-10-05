@@ -12,6 +12,7 @@ import {
   TranscriptContext,
 } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS } from './tools';
+import { recoveryRequiresTool, toolChoiceRejected } from './recovery-tool-choice';
 import { ProviderConfig } from '../types';
 import { incrementGeminiDailyUsage } from '../services/storage';
 
@@ -378,7 +379,7 @@ async function streamOpenAI(
 
   if (tools.length > 0) {
     payload.tools = tools;
-    payload.tool_choice = 'auto';
+    payload.tool_choice = recoveryRequiresTool(context.messages || []) ? 'required' : 'auto';
   }
 
   // Request thoughts / reasoning traces for Gemini models via Google OpenAI-compatible endpoint
@@ -456,6 +457,12 @@ async function streamOpenAI(
     }
 
     const errorBody = await response.text();
+
+    if (payload.tool_choice === 'required' && toolChoiceRejected(response.status, errorBody) && attempt < maxRetries) {
+      console.warn('[streamOpenAI] Provider rejected required tool choice; retrying recovery with auto tool choice.');
+      payload.tool_choice = 'auto';
+      continue;
+    }
 
     // If Gemini model rejected thinking_config with 400 Bad Request on attempt 0, try reasoning_effort fallback
     if (response && response.status === 400 && payload.google && attempt === 0) {
@@ -1171,6 +1178,7 @@ async function streamAnthropic(
   }
   if (tools.length > 0) {
     payload.tools = tools;
+    if (recoveryRequiresTool(context.messages || [])) payload.tool_choice = { type: 'any' };
   }
 
   let response: Response | null = null;
