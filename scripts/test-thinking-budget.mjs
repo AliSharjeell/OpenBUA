@@ -386,6 +386,138 @@ function think(h, chars, chunk = 400) {
   );
 }
 
+/** Fire one finished tool call, the shape the harness sees from a real run. */
+function finishTool(h, id, toolName, args) {
+  h.handleAgentEvent({ type: 'tool_execution_start', toolCallId: id, toolName, args });
+  h.handleAgentEvent({ type: 'tool_execution_end', toolCallId: id, toolName, args });
+}
+
+{
+  // 20. A Backspace/Enter oscillation must be cut. A real run joined two
+  // heading-styled lines and re-split them for ~13 minutes: the gap between
+  // them was paragraph spacing, not a blank line. Every keypress is a tool
+  // call, so tool_execution_end refills the shared retry budget and nothing
+  // else could stop the loop - the user had to.
+  const { h, aborts, prompts, errors, settle } = makeHarness();
+  const key = (k, extra = {}, id = `k${Math.random()}`) =>
+    finishTool(h, id, 'press_key_combination', { key: k, ...extra });
+
+  // Ordinary editing must not trip it: deleting a word, adding blank lines.
+  h.handleAgentEvent({ type: 'turn_start' });
+  for (let i = 0; i < 5; i++) key('Backspace');
+  for (let i = 0; i < 5; i++) key('Enter');
+  check('runs of one edit key are ordinary editing', h.editLoopTripped === false);
+  check('and never abort a healthy edit', aborts() === 0, String(aborts()));
+
+  // Modifier combos are commands (Ctrl+Z, Ctrl+B), not line-break thrash.
+  key('z', { ctrlKey: true });
+  key('b', { ctrlKey: true });
+  check('modifier combos are not counted as the loop', h.editLoopTripped === false);
+
+  // Screenshot/click between the keys is exactly the real loop's shape. A
+  // content edit first, so this phase counts its own pairs.
+  finishTool(h, 'type0', 'type_text', { text: 'Novum — Suite' });
+  h.handleAgentEvent({ type: 'turn_start' });
+  key('Backspace');
+  finishTool(h, 'shot1', 'capture_tab_screenshot', {});
+  key('Enter');
+  check('one join/split pair is a mistake, not a loop', h.editLoopTripped === false);
+  finishTool(h, 'click1', 'click_at_position', { x: 1, y: 1 });
+  key('Backspace');
+  key('Enter');
+  check('two join/split pairs are still tolerated', h.editLoopTripped === false);
+  key('Backspace');
+  key('Enter');
+  check('the third join/split pair trips the guard', h.editLoopTripped === true);
+  check('and aborts the stream exactly once', aborts() === 1, String(aborts()));
+
+  h.handleAgentEvent({ type: 'turn_end' });
+  await settle();
+  check('the steer names the mistake, not a bare continue', prompts.length === 1);
+  check('with the edit-loop directive', prompts[0] === FormAgentHarness.EDIT_LOOP_DIRECTIVE);
+  check('and the directive explains the gap is spacing', /paragraph spacing, not an empty line/i.test(prompts[0]));
+  check('and forbids the key pair', /Do not press Backspace or Enter/i.test(prompts[0]));
+  check('a steered turn reports no error to the user', errors.length === 0, errors.join(' | '));
+}
+
+{
+  // 21. Typing between the key pairs is real progress and clears the pattern.
+  const { h, aborts } = makeHarness();
+  const key = (k, id = `k${Math.random()}`) =>
+    finishTool(h, id, 'press_key_combination', { key: k });
+
+  h.handleAgentEvent({ type: 'turn_start' });
+  key('Backspace');
+  key('Enter');
+  key('Backspace');
+  key('Enter');
+  finishTool(h, 'type1', 'type_text', { text: 'Technologies: Rust, Tauri.' });
+  key('Backspace');
+  key('Enter');
+  key('Backspace');
+  key('Enter');
+  check('content edits reset the oscillation window', h.editLoopTripped === false);
+  check('so a productive run is never cut', aborts() === 0, String(aborts()));
+}
+
+{
+  // 22. When the steers run out the run must stop honestly, same contract as
+  // the rambling give-up: never "Agent interrupted", never blame the user.
+  const { h, prompts, errors, turns, settle } = makeHarness();
+  const giveUp = FormAgentHarness.EDIT_LOOP_GIVE_UP_MESSAGE;
+  check('an edit-loop give-up message exists', typeof giveUp === 'string' && giveUp.length > 0);
+  check('and it never claims the user interrupted', !/interrupt/i.test(giveUp), giveUp);
+
+  const key = (k, id = `k${Math.random()}`) =>
+    finishTool(h, id, 'press_key_combination', { key: k });
+  for (let round = 0; round < 3; round++) {
+    h.handleAgentEvent({ type: 'turn_start' });
+    for (let i = 0; i < 3; i++) {
+      key('Backspace');
+      key('Enter');
+    }
+    // The exact shape a real cut produces: the stream adapter's abort message.
+    h.handleAgentEvent({
+      type: 'turn_end',
+      message: { errorMessage: 'Agent interrupted. Type continue to resume.' },
+    });
+    await settle();
+  }
+  check('the loop gets exactly its own steer budget', prompts.length === 2, String(prompts.length));
+  check('and then stops instead of looping forever', prompts.length === 2);
+  check(
+    'the stop is reported with the honest message',
+    errors.some((e) => e === giveUp),
+    errors.join(' | ')
+  );
+  check('and the misleading interrupt text is never shown', !errors.some((e) => /interrupt/i.test(e)), errors.join(' | '));
+  check('the give-up turn still finalizes for the UI', turns.length === 1, String(turns.length));
+}
+
+{
+  // 23. The edit-loop guard has its own budget precisely because the shared one
+  // cannot hold: tool_execution_end refills autoResumeCount on every keypress.
+  const { h, prompts, settle } = makeHarness();
+  const key = (k, id = `k${Math.random()}`) =>
+    finishTool(h, id, 'press_key_combination', { key: k });
+
+  // Burn the shared budget, then prove a tool call (a keypress!) refills it -
+  // which is why the loop never starved the old guards.
+  h.handleAgentEvent({ type: 'turn_start' });
+  for (let i = 0; i < 3; i++) {
+    key('Backspace');
+    key('Enter');
+    key('Backspace');
+    key('Enter');
+    key('Backspace');
+    key('Enter');
+    h.handleAgentEvent({ type: 'turn_end' });
+    await settle();
+  }
+  check('a keypress loop still exhausts its own budget', prompts.length === 2, String(prompts.length));
+  check('and does not borrow from the shared one', h.editLoopResumeCount >= FormAgentHarness.MAX_EDIT_LOOP_RESUMES);
+}
+
 rmSync(outPath, { force: true });
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

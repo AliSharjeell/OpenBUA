@@ -300,6 +300,24 @@ export class FormAgentHarness {
   private thinkingCharsThisTurn = 0;
   /** Set when the watchdog cut the stream, so turn_end resumes with a directive. */
   private thinkingBudgetTripped = false;
+  /** Recent merge/split edit keys, for detecting a Backspace/Enter oscillation. */
+  private editKeyKinds: Array<'merge' | 'split'> = [];
+  /** Set when the edit-loop guard cut the stream, so turn_end resumes with a directive. */
+  private editLoopTripped = false;
+  /**
+   * Resumes left for the edit-loop guard. Deliberately NOT the shared
+   * autoResumeCount: that one is refilled by every tool call (tool_execution_end),
+   * and an edit loop is nothing but tool calls, so it would never run out - the
+   * exact failure this guard exists to stop.
+   */
+  private editLoopResumeCount = 0;
+  private static readonly MAX_EDIT_LOOP_RESUMES = 2;
+  /**
+   * Alternating Backspace/Enter pairs, with no real content edit between them,
+   * that mean the run is stuck. Three pairs: one join/re-split can be a mistake,
+   * two is unlucky, three is a loop.
+   */
+  private static readonly EDIT_LOOP_PAIRS = 3;
   private sessionThinkingText = '';
   private chatHistory: ChatMessage[] = [];
   private sessionId: string = 'session_default';
@@ -990,6 +1008,54 @@ ${this.settings.systemInstruction || ''}`.trim();
     }
   }
 
+  /**
+   * Cut off a run that is oscillating on Backspace/Enter: it joins two lines,
+   * splits them again, and repeats. The document never changes, but every
+   * keypress is a tool call, so the shared retry budget keeps refilling and
+   * nothing else can stop it. A real run burned ~13 minutes this way, trying to
+   * delete a "blank line" that was actually heading paragraph spacing.
+   *
+   * The oscillation spans turns (each keypress was its own turn), so this state
+   * is deliberately NOT reset on turn_start - only real content edits and a new
+   * user prompt clear it.
+   */
+  private noteEditKeyForLoopGuard(toolName: string, args: any) {
+    // Typing or pasting is real progress: whatever came before was resolved.
+    if (toolName === 'type_text' || toolName === 'clipboard_action' || toolName === 'fill_form_fields') {
+      this.editKeyKinds = [];
+      return;
+    }
+    if (toolName !== 'press_key_combination') return;
+    // Ctrl/Alt/Meta combos (Ctrl+Z, Ctrl+B...) are commands, not line-break thrash.
+    if (args?.ctrlKey || args?.altKey || args?.metaKey) return;
+    const key = String(args?.key ?? '').toLowerCase();
+    const kind = key === 'enter' ? 'split' : key === 'backspace' || key === 'delete' || key === 'del' ? 'merge' : null;
+    if (!kind) return;
+    // Runs of the same key are ordinary editing (delete a word, add a blank
+    // line); only a merge/split alternation is the loop.
+    if (this.editKeyKinds[this.editKeyKinds.length - 1] === kind) return;
+    this.editKeyKinds.push(kind);
+    const window = FormAgentHarness.EDIT_LOOP_PAIRS * 2;
+    if (this.editKeyKinds.length > window) this.editKeyKinds.shift();
+    this.enforceEditLoopBudget();
+  }
+
+  private enforceEditLoopBudget() {
+    if (this.editLoopTripped) return;
+    if (this.editKeyKinds.length < FormAgentHarness.EDIT_LOOP_PAIRS * 2) return;
+
+    this.editLoopTripped = true;
+    console.warn(
+      `[FormAgentHarness] Backspace/Enter oscillation detected (${this.editKeyKinds.join('')}); cutting the stream short.`
+    );
+    this.editKeyKinds = [];
+    try {
+      this.agent?.abort();
+    } catch {
+      /* the stream may already be closing */
+    }
+  }
+
   /** Instruction injected after the watchdog trips, so the next turn acts. */
   private static readonly ACT_NOW_DIRECTIVE =
     'SYSTEM: your previous turn was cut off because you spent it reasoning instead of acting. ' +
@@ -1010,6 +1076,29 @@ ${this.settings.systemInstruction || ''}`.trim();
   private static readonly RAMBLING_GIVE_UP_MESSAGE =
     'I stopped this turn short again for reasoning without acting, and used up my automatic retries. ' +
     'Type continue and I will make progress with a tool call.';
+
+  /**
+   * Injected after the edit-loop guard cuts a Backspace/Enter oscillation. The
+   * model was trying to delete a blank line that does not exist: the gap between
+   * two heading-styled paragraphs is paragraph spacing, and Backspace joins the
+   * lines while Enter only splits them again.
+   */
+  private static readonly EDIT_LOOP_DIRECTIVE =
+    'SYSTEM: your previous turn was cut off because it kept pressing Backspace and Enter without changing ' +
+    'the document. Stop editing the line breaks. A visible gap between two heading-styled paragraphs is ' +
+    'paragraph spacing, not an empty line - it cannot be deleted, and pressing Backspace joins the two ' +
+    'lines into one while Enter only splits them again. The lines are already correct: leave them as they ' +
+    'are and move on to the next part of the task. Do not press Backspace or Enter to adjust spacing.';
+
+  /**
+   * Shown when the edit loop came back after every steer, so the user is told
+   * what happened instead of the stream adapter's "Agent interrupted."
+   */
+  private static readonly EDIT_LOOP_GIVE_UP_MESSAGE =
+    'I stopped this run because it was looping on Backspace/Enter trying to delete a blank line that is ' +
+    'actually paragraph spacing, and my automatic steers did not break the loop. The text you already have ' +
+    'is fine - the gap between the headings should stay. Type continue and I will continue the rest of the ' +
+    'task without touching line breaks.';
 
   /** How long to wait for a run to settle before giving up on acting around it. */
   private static readonly IDLE_WAIT_MS = 15000;
@@ -1132,8 +1221,11 @@ ${this.settings.systemInstruction || ''}`.trim();
         // Fresh budget each turn; acting resets it, so a legitimately long
         // multi-step task is never punished. The tripped flag must clear too, or
         // a guard that fired once would stay disabled for the rest of the session.
+        // editKeyKinds deliberately does NOT clear here: the oscillation spans
+        // turns (each keypress was its own turn).
         this.thinkingCharsThisTurn = 0;
         this.thinkingBudgetTripped = false;
+        this.editLoopTripped = false;
         break;
 
       case 'message_update':
@@ -1211,6 +1303,12 @@ ${this.settings.systemInstruction || ''}`.trim();
         const anyEvt = event as any;
         const toolCallId = anyEvt.toolCallId || anyEvt.toolCall?.id;
         const existing = toolCallId ? this.activeToolCalls.get(toolCallId) : null;
+        // A keypress is also "acting", so the shared budget cannot stop a
+        // Backspace/Enter oscillation. This guard can.
+        this.noteEditKeyForLoopGuard(
+          anyEvt.toolName || anyEvt.toolCall?.name || existing?.toolName || '',
+          anyEvt.args || anyEvt.toolCall?.args || existing?.args || {}
+        );
         if (existing) {
           existing.status = anyEvt.isError ? 'error' : 'success';
           existing.result = anyEvt.result?.details || anyEvt.result?.content?.[0]?.text || anyEvt.result;
@@ -1230,7 +1328,27 @@ ${this.settings.systemInstruction || ''}`.trim();
         // the exact failure it exists to prevent.
         const watchdogTripped = this.thinkingBudgetTripped;
         this.thinkingBudgetTripped = false;
+        const editLoopTripped = this.editLoopTripped;
+        this.editLoopTripped = false;
         let giveUpOnRambling = false;
+        let giveUpOnEditLoop = false;
+
+        // A Backspace/Enter oscillation is steered with a directive that names
+        // the mistake, not a generic "continue", or the next turn resumes the
+        // exact same key pattern.
+        if (editLoopTripped && !this.userAborted) {
+          this.currentThinkingText = '';
+          if (this.editLoopResumeCount < FormAgentHarness.MAX_EDIT_LOOP_RESUMES) {
+            if (this.resumeWithDirective(FormAgentHarness.EDIT_LOOP_DIRECTIVE)) {
+              this.editLoopResumeCount += 1;
+              console.warn(
+                `[FormAgentHarness] resumed with edit-loop directive (${this.editLoopResumeCount}/${FormAgentHarness.MAX_EDIT_LOOP_RESUMES})`
+              );
+            }
+            break;
+          }
+          giveUpOnEditLoop = true;
+        }
 
         // The watchdog cut this turn short for over-deliberating. Resume it with
         // an explicit directive rather than a bare continue, so the next turn
@@ -1265,7 +1383,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         const providerAborted =
           Boolean(event.message?.errorMessage) && !this.userAborted;
 
-        if (!this.userAborted && (stalledTurn || providerAborted)) {
+        if (!this.userAborted && !giveUpOnEditLoop && (stalledTurn || providerAborted)) {
           if (this.autoResumeCount < FormAgentHarness.MAX_AUTO_RESUMES) {
             const why = stalledTurn
               ? 'The previous turn stopped after planning without taking an action.'
@@ -1288,6 +1406,10 @@ ${this.settings.systemInstruction || ''}`.trim();
           // The stream's own error blames a "user interrupt" that never
           // happened; replace it with the honest account.
           this.listeners.onError?.(FormAgentHarness.RAMBLING_GIVE_UP_MESSAGE);
+        } else if (giveUpOnEditLoop) {
+          // Same here: the stream says "Agent interrupted." but the user
+          // interrupted nothing - the run was stuck in a key loop.
+          this.listeners.onError?.(FormAgentHarness.EDIT_LOOP_GIVE_UP_MESSAGE);
         } else if (event.message?.errorMessage) {
           this.listeners.onError?.(event.message.errorMessage);
         }
@@ -1328,6 +1450,8 @@ ${this.settings.systemInstruction || ''}`.trim();
     // settle, so bump the epoch and mark the takeover.
     this.userAborted = false;
     this.autoResumeCount = 0;
+    this.editKeyKinds = [];
+    this.editLoopResumeCount = 0;
     this.resumeEpoch += 1;
     this.userPromptInFlight = true;
 
@@ -1426,6 +1550,8 @@ ${this.settings.systemInstruction || ''}`.trim();
     this.sessionThinkingText = '';
     this.userAborted = false;
     this.autoResumeCount = 0;
+    this.editKeyKinds = [];
+    this.editLoopResumeCount = 0;
     this.resumeEpoch += 1;
     this.listeners.onStatusChange?.(false);
     this.setupAgent();
