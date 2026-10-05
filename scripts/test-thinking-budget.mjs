@@ -52,10 +52,12 @@ function makeHarness() {
   const prompts = [];
   const errors = [];
   const status = [];
+  const turns = [];
   let idleResolvers = [];
   const h = new FormAgentHarness({ selectedMode: 'free', free: {} }, [], {
     onError: (e) => errors.push(e),
     onStatusChange: (busy) => status.push(busy),
+    onTurnComplete: (text, tools, thinking) => turns.push({ text, tools, thinking }),
   }, [], 'test');
   h.agent = {
     abort: () => {
@@ -81,6 +83,7 @@ function makeHarness() {
     prompts,
     errors,
     status,
+    turns,
     /** Let the stubbed run settle, then give the resume a turn to act. */
     settle: async () => {
       const resolvers = idleResolvers;
@@ -279,6 +282,70 @@ function think(h, chars, chunk = 400) {
   h.resumeEpoch += 1; // what prompt()/abort()/reset() bump on takeover
   await settle();
   check('an auto-resume stands down once the user has taken over', prompts.length === 0);
+}
+
+{
+  // 17. Acting earns the retry budget back. The cap exists to stop a loop of
+  // cut -> resume -> cut with nothing to show for it, not to punish a long
+  // productive run - a real session had 4 watchdog cuts but 6 successful tool
+  // calls, and the 4th cut exhausted the budget and killed a healthy task.
+  const { h, prompts, errors, settle } = makeHarness();
+  const cut = async () => {
+    h.handleAgentEvent({ type: 'turn_start' });
+    think(h, BUDGET + 500);
+    h.handleAgentEvent({ type: 'turn_end' });
+    await settle();
+  };
+  await cut();
+  await cut();
+  await cut();
+  check('three actionless cuts spend the whole retry budget', prompts.length === 3, String(prompts.length));
+
+  // A tool call lands: the run is alive and making progress.
+  h.handleAgentEvent({ type: 'turn_start' });
+  h.handleAgentEvent({
+    type: 'message_update',
+    assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, partial: { content: [] } },
+  });
+  h.handleAgentEvent({ type: 'tool_execution_end', toolCallId: 't1' });
+  h.handleAgentEvent({ type: 'turn_end' });
+  await settle();
+  check('a finished tool call does not burn a retry', prompts.length === 3, String(prompts.length));
+
+  await cut();
+  check('and progress earns the retry budget back', prompts.length === 4, String(prompts.length));
+  check('with the same act-now directive as before', prompts[3] === FormAgentHarness.ACT_NOW_DIRECTIVE);
+  check('and the productive run never sees a give-up', errors.length === 0, errors.join(' | '));
+}
+
+{
+  // 18. When the retries are gone the run must stop honestly. The stream
+  // adapter's abort text says "Agent interrupted." but the user interrupted
+  // nothing - the watchdog cut the turn - so the harness must replace it.
+  const { h, prompts, errors, turns, settle } = makeHarness();
+  const giveUp = FormAgentHarness.RAMBLING_GIVE_UP_MESSAGE;
+  check('a rambling give-up message exists', typeof giveUp === 'string' && giveUp.length > 0);
+  check('and it never claims the user interrupted', !/cancel|abort|interrupt/i.test(giveUp), giveUp);
+
+  for (let i = 0; i < 4; i++) {
+    h.handleAgentEvent({ type: 'turn_start' });
+    think(h, BUDGET + 500);
+    // The exact shape a real cut produces: the stream adapter's abort message.
+    h.handleAgentEvent({
+      type: 'turn_end',
+      message: { errorMessage: 'Agent interrupted. Type continue to resume.' },
+    });
+    await settle();
+  }
+  check('a rambling loop gets exactly the retry budget', prompts.length === 3, String(prompts.length));
+  check('and then stops instead of looping forever', prompts.length === 3);
+  check(
+    'the stop is reported with the honest message',
+    errors.some((e) => e === giveUp),
+    errors.join(' | ')
+  );
+  check('and the misleading interrupt text is never shown', !errors.some((e) => /interrupt/i.test(e)), errors.join(' | '));
+  check('the give-up turn still finalizes for the UI', turns.length === 1, String(turns.length));
 }
 
 rmSync(outPath, { force: true });

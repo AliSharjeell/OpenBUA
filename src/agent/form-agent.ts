@@ -992,6 +992,15 @@ ${this.settings.systemInstruction || ''}`.trim();
     'SYSTEM: the previous turn ended before the task was finished. Continue the task now. ' +
     'Your next output MUST be a tool call that makes progress. Do not restate or extend the plan.';
 
+  /**
+   * Shown when a turn was cut for rambling and the auto-resume budget is gone.
+   * The stream adapter calls this "Agent interrupted." but the user interrupted
+   * nothing - say what actually happened instead of blaming them.
+   */
+  private static readonly RAMBLING_GIVE_UP_MESSAGE =
+    'I stopped this turn short again for reasoning without acting, and used up my automatic retries. ' +
+    'Type continue and I will make progress with a tool call.';
+
   /** How long to wait for a run to settle before giving up on acting around it. */
   private static readonly IDLE_WAIT_MS = 15000;
 
@@ -1211,6 +1220,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         // the exact failure it exists to prevent.
         const watchdogTripped = this.thinkingBudgetTripped;
         this.thinkingBudgetTripped = false;
+        let giveUpOnRambling = false;
 
         // The watchdog cut this turn short for over-deliberating. Resume it with
         // an explicit directive rather than a bare continue, so the next turn
@@ -1228,6 +1238,10 @@ ${this.settings.systemInstruction || ''}`.trim();
             // turn is covered: do not also report the abort as an error.
             break;
           }
+          // Out of retries. Fall through so the UI still finalizes the turn, but
+          // say what actually happened instead of the stream adapter's "Agent
+          // interrupted." - the user interrupted nothing.
+          giveUpOnRambling = true;
         }
 
         // A turn that produced neither an answer nor a tool call is a stall, and
@@ -1260,7 +1274,11 @@ ${this.settings.systemInstruction || ''}`.trim();
           }
         }
 
-        if (event.message?.errorMessage) {
+        if (giveUpOnRambling) {
+          // The stream's own error blames a "user interrupt" that never
+          // happened; replace it with the honest account.
+          this.listeners.onError?.(FormAgentHarness.RAMBLING_GIVE_UP_MESSAGE);
+        } else if (event.message?.errorMessage) {
           this.listeners.onError?.(event.message.errorMessage);
         }
         const hasTools = this.activeToolCalls.size > 0;
