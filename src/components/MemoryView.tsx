@@ -286,7 +286,7 @@ export function MemoryView({
     let attachedDuration = selectedDoc?.videoDuration;
 
     // If local path is provided and no dataUrl is attached, attempt loading
-    if (filePath.trim() && !attachedDataUrl) {
+    if (filePath.trim() && !attachedDataUrl && !selectedDoc?.blobKey) {
       try {
         const loaded = await tryLoadFileFromLocalPath(filePath.trim());
         if (loaded) {
@@ -326,6 +326,7 @@ export function MemoryView({
       fileName: attachedFileName,
       mimeType: attachedMime,
       dataUrl: attachedDataUrl,
+      blobKey: selectedDoc?.blobKey,
       ocrStatus: selectedDoc?.ocrStatus || 'done',
       fileCategory: finalCategory,
       filePath: filePath.trim() || selectedDoc?.filePath || undefined,
