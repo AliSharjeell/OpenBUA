@@ -280,6 +280,12 @@ export class FormAgentHarness {
   private userAborted = false;
   /** Guards against a pathological auto-resume loop. */
   private autoResumeCount = 0;
+  /** True while an auto-resume is queued, so a duplicated turn_end cannot queue a second. */
+  private resumePending = false;
+  /** Bumped when the user takes over; a resume queued before that stands down. */
+  private resumeEpoch = 0;
+  /** True from a user prompt's arrival until its run starts; auto-resumes stand down for it. */
+  private userPromptInFlight = false;
   private static readonly MAX_AUTO_RESUMES = 3;
   /**
    * Thinking budget per turn, in characters.
@@ -1023,11 +1029,21 @@ ${this.settings.systemInstruction || ''}`.trim();
    * refuses to continue from. Wait for waitForIdle(), then start the directive
    * as a fresh prompt.
    */
-  private resumeWithDirective(directive: string): void {
+  /**
+   * Queue a resume with `directive`. Returns false when one is already queued
+   * (a duplicated turn_end) or there is no agent to resume, so callers do not
+   * count a resume that will not happen.
+   */
+  private resumeWithDirective(directive: string): boolean {
+    // One cut-off turn, one resume. A duplicated turn_end would otherwise queue
+    // two resumes that race each other, and the loser surfaces "Agent is already
+    // processing a prompt" to the user.
+    if (this.resumePending) return false;
+
     const agentRef = this.agent;
     if (!agentRef) {
       this.listeners.onStatusChange?.(false);
-      return;
+      return false;
     }
 
     const fail = (err: any) => {
@@ -1038,6 +1054,9 @@ ${this.settings.systemInstruction || ''}`.trim();
       );
     };
 
+    this.resumePending = true;
+    const epoch = this.resumeEpoch;
+
     // Keep the spinner on across the settle, or the UI flickers idle mid-resume.
     this.listeners.onStatusChange?.(true);
 
@@ -1045,23 +1064,35 @@ ${this.settings.systemInstruction || ''}`.trim();
       try {
         await this.settleAgent(agentRef);
       } catch (err) {
+        this.resumePending = false;
         fail(err);
         return;
       }
 
-      // The user may have pressed stop, or a new prompt may have swapped in a
-      // fresh agent, while we waited. Never resume against their wishes.
-      if (this.userAborted || this.agent !== agentRef) {
+      // The user may have pressed stop, sent a new message, or otherwise taken
+      // over while we waited. Their turn wins; drop the stale directive.
+      if (
+        this.userAborted ||
+        this.userPromptInFlight ||
+        this.resumeEpoch !== epoch ||
+        this.agent !== agentRef
+      ) {
+        this.resumePending = false;
         this.listeners.onStatusChange?.(false);
         return;
       }
 
+      // Released before the run starts so a cut of the resumed run can itself
+      // queue a fresh resume.
+      this.resumePending = false;
       try {
         await agentRef.prompt(directive);
       } catch (err) {
         fail(err);
       }
     })();
+
+    return true;
   }
 
   private async handleAgentEvent(event: any) {
@@ -1183,11 +1214,14 @@ ${this.settings.systemInstruction || ''}`.trim();
         if (watchdogTripped && !this.userAborted) {
           this.currentThinkingText = '';
           if (this.autoResumeCount < FormAgentHarness.MAX_AUTO_RESUMES) {
-            this.autoResumeCount += 1;
-            console.warn(
-              `[FormAgentHarness] resumed with act-now directive (${this.autoResumeCount}/${FormAgentHarness.MAX_AUTO_RESUMES})`
-            );
-            this.resumeWithDirective(FormAgentHarness.ACT_NOW_DIRECTIVE);
+            if (this.resumeWithDirective(FormAgentHarness.ACT_NOW_DIRECTIVE)) {
+              this.autoResumeCount += 1;
+              console.warn(
+                `[FormAgentHarness] resumed with act-now directive (${this.autoResumeCount}/${FormAgentHarness.MAX_AUTO_RESUMES})`
+              );
+            }
+            // Whether we queued it or one was already queued for this cut, the
+            // turn is covered: do not also report the abort as an error.
             break;
           }
         }
@@ -1205,18 +1239,19 @@ ${this.settings.systemInstruction || ''}`.trim();
 
         if (!this.userAborted && (stalledTurn || providerAborted)) {
           if (this.autoResumeCount < FormAgentHarness.MAX_AUTO_RESUMES) {
-            this.autoResumeCount += 1;
             const why = stalledTurn
               ? 'The previous turn stopped after planning without taking an action.'
               : `The provider ended the turn early (${event.message?.errorMessage}).`;
-            console.warn(
-              `[FormAgentHarness] auto-resuming (${this.autoResumeCount}/${FormAgentHarness.MAX_AUTO_RESUMES}): ${why}`
-            );
             // Fire and forget: the resumed run emits its own turn_end/agent_end.
             // A directive prompt, not continue(): after a stall the last message
             // is the assistant's empty turn, which continue() refuses to resume
             // from ("Cannot continue from message role: assistant").
-            this.resumeWithDirective(FormAgentHarness.RESUME_DIRECTIVE);
+            if (this.resumeWithDirective(FormAgentHarness.RESUME_DIRECTIVE)) {
+              this.autoResumeCount += 1;
+              console.warn(
+                `[FormAgentHarness] auto-resuming (${this.autoResumeCount}/${FormAgentHarness.MAX_AUTO_RESUMES}): ${why}`
+              );
+            }
             break;
           }
         }
@@ -1256,9 +1291,13 @@ ${this.settings.systemInstruction || ''}`.trim();
     }
 
     // A fresh user message is a clean slate: clear the abort flag and the
-    // auto-resume budget so recovery is available again for this new task.
+    // auto-resume budget so recovery is available again for this new task. It
+    // also outranks any auto-resume still waiting for the previous run to
+    // settle, so bump the epoch and mark the takeover.
     this.userAborted = false;
     this.autoResumeCount = 0;
+    this.resumeEpoch += 1;
+    this.userPromptInFlight = true;
 
     // Proactively scan user input for personal details, student email, university, or interests
     await detectAndQueueMemorySuggestions(input, this.sessionId, this.documents);
@@ -1306,14 +1345,21 @@ ${this.settings.systemInstruction || ''}`.trim();
         lastMsg.role === 'user' &&
         (lastContent === input.trim() || (turnInput && lastContent === turnInput.trim()));
 
+      // Once the run has started, a cut of it may auto-resume like any other
+      // turn - so the takeover flag comes down at start, not at completion.
+      const runStarted = (run: Promise<void>) => {
+        this.userPromptInFlight = false;
+        return run;
+      };
+
       if (isAlreadyLastUserMsg) {
         try {
-          await this.agent.continue();
+          await runStarted(this.agent.continue());
         } catch {
-          await this.agent.prompt(turnInput);
+          await runStarted(this.agent.prompt(turnInput));
         }
       } else {
-        await this.agent.prompt(turnInput);
+        await runStarted(this.agent.prompt(turnInput));
       }
     } catch (err: any) {
       console.error('[FormAgentHarness] prompt execution error:', err);
@@ -1322,6 +1368,8 @@ ${this.settings.systemInstruction || ''}`.trim();
       this.setupAgent();
       throw err;
     } finally {
+      // Backstop for exits that never reached a run (settle failures, throws).
+      this.userPromptInFlight = false;
       this.listeners.onStatusChange?.(false);
     }
   }
@@ -1330,6 +1378,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     // Mark before tearing down, so the turn_end handler can tell a deliberate
     // stop apart from a provider-side abort and does not fight the user.
     this.userAborted = true;
+    this.resumeEpoch += 1;
     if (this.agent) {
       this.agent.abort();
       this.listeners.onStatusChange?.(false);
@@ -1345,6 +1394,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     this.sessionThinkingText = '';
     this.userAborted = false;
     this.autoResumeCount = 0;
+    this.resumeEpoch += 1;
     this.listeners.onStatusChange?.(false);
     this.setupAgent();
   }

@@ -246,6 +246,41 @@ function think(h, chars, chunk = 400) {
   check('a user abort never auto-resumes a stalled turn', prompts.length === 0);
 }
 
+{
+  // 14. A duplicated turn_end must not queue two resumes that race each other
+  // into "Agent is already processing a prompt".
+  const { h, prompts, settle } = makeHarness();
+  h.handleAgentEvent({ type: 'turn_start' });
+  think(h, 200); // under budget, no tools, no text: a stalled turn
+  h.handleAgentEvent({ type: 'turn_end' });
+  h.handleAgentEvent({ type: 'turn_end' });
+  await settle();
+  check('a duplicated turn_end queues exactly one resume', prompts.length === 1, String(prompts.length));
+}
+
+{
+  // 15. A user message arriving while the resume waits must win: their turn
+  // will do the work, the act-now directive is stale.
+  const { h, prompts, settle } = makeHarness();
+  h.handleAgentEvent({ type: 'turn_start' });
+  think(h, BUDGET + 500);
+  h.handleAgentEvent({ type: 'turn_end' });
+  h.userPromptInFlight = true; // what prompt() sets the moment the user sends
+  await settle();
+  check('an auto-resume stands down for a user message in flight', prompts.length === 0);
+}
+
+{
+  // 16. Same for a user who took over while the resume was waiting.
+  const { h, prompts, settle } = makeHarness();
+  h.handleAgentEvent({ type: 'turn_start' });
+  think(h, BUDGET + 500);
+  h.handleAgentEvent({ type: 'turn_end' });
+  h.resumeEpoch += 1; // what prompt()/abort()/reset() bump on takeover
+  await settle();
+  check('an auto-resume stands down once the user has taken over', prompts.length === 0);
+}
+
 rmSync(outPath, { force: true });
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
