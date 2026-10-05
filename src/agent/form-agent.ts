@@ -840,12 +840,21 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * STEP 5 — Edit only the TEXT of the clone: for each line, click at its start, shift-click at its
         end to select just that line's text, then 'type_text' the replacement. Formatting is untouched
         because you are replacing text, not recreating a paragraph.
+        Pass expectedCaretText with the old line text when it is available. Preserve each
+        paragraph break and each formatted run: replace the technology names separately
+        from the bold "Technologies:" label. Never replace the full clone with one
+        multi-line type_text call, because that discards the paragraph/run formatting.
       * STEP 6 — Verify the complete new entry with a screenshot: title, technologies,
         every bullet, placement in the requested section, and preserved original entry.
         When ADDING another entry, KEEP the original block. Cut it only when the user
         explicitly asked to move or replace it.
     Never enumerate competing plans for how to reproduce formatting. Choose this approach, run it, and
     fix what the screenshot shows is wrong. One wrong attempt costs seconds; a plan costs minutes.
+    Matching formatting is part of completion. Do not accept "slight formatting variance",
+    plain paragraphs instead of bullets, or all-bold body text. A toolbar showing Title,
+    Heading, or bold is current evidence; never dismiss it as stale without checking.
+    If type_text blocks inherited formatting, follow the clone workflow above; do not
+    enable allowUniformParagraphStyle for a mixed title/technologies/bullet entry.
     Write the WHOLE entry (title, technologies line, every bullet) in one pass before any cleanup -
     a title on its own is not the task, and spacing polish is not a substitute for the missing lines.
 
