@@ -1,5 +1,4 @@
 // Client-side PDF, image, video, and text document parser for extracting resume/profile text and raw file data
-import * as pdfjsLib from 'pdfjs-dist';
 import { DocumentFileType, UserDocument } from '../types';
 import { getMediaBlob, mediaBlobKeyFor, putMediaBlob } from './blob-store';
 import { loadSettings } from './storage';
@@ -11,11 +10,20 @@ import { loadSettings } from './storage';
  */
 export const INLINE_DATA_URL_MAX_BYTES = 3 * 1024 * 1024; // 3 MB
 
-// Configure pdfjs worker to use CDN or inline fallback
-try {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-} catch (e) {
-  console.warn('[AutoForm AI] Could not set pdfjs workerSrc:', e);
+// PDF decoding is not needed to open the panel or load saved memory metadata.
+// Load the large PDF engine only when a PDF actually needs parsing.
+let pdfLibraryPromise: Promise<typeof import('pdfjs-dist')> | undefined;
+function loadPdfLibrary(): Promise<typeof import('pdfjs-dist')> {
+  if (!pdfLibraryPromise) {
+    pdfLibraryPromise = import('pdfjs-dist').then((library) => {
+      library.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${library.version}/pdf.worker.min.mjs`;
+      return library;
+    }).catch((error) => {
+      pdfLibraryPromise = undefined;
+      throw error;
+    });
+  }
+  return pdfLibraryPromise;
 }
 
 /**
@@ -304,6 +312,7 @@ export async function extractTextWithVlm(
 export async function extractTextFromPdf(file: File): Promise<string> {
   try {
     const arrayBuffer = await file.arrayBuffer();
+    const pdfjsLib = await loadPdfLibrary();
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer),
       useWorkerFetch: false,
