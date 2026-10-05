@@ -13,19 +13,20 @@ export function inspectCanvasInsertion(
 ): CanvasTextCheck {
   if (!document.querySelector('.kix-appview, .docs-texteventtarget-iframe')) return { allowed: true };
 
-  let inputContext = '';
+  let selectedText = window.getSelection()?.toString() || '';
   for (const frame of Array.from(document.querySelectorAll('iframe'))) {
     if (!/texteventtarget/i.test(`${frame.className} ${frame.id}`)) continue;
     try {
-      inputContext = (frame.contentDocument?.body?.textContent || '').replace(/\s+/g, ' ').trim();
-    } catch { /* No readable input context; placement still needs a screenshot. */ }
+      selectedText ||= frame.contentWindow?.getSelection()?.toString() || '';
+    } catch { /* No readable selection; placement still needs a screenshot. */ }
     break;
   }
   const expected = expectedCaretText?.replace(/\s+/g, ' ').trim();
-  if (expected && inputContext && !inputContext.includes(expected)) {
+  const selection = selectedText.replace(/\s+/g, ' ').trim();
+  if (expected && selection && !selection.includes(expected)) {
     return {
       allowed: false,
-      message: `No text inserted. The editor input context is "${inputContext.slice(0, 220)}", which does not contain the expected "${expected}". Locate the intended section again and verify the caret with a screenshot before typing.`,
+      message: `No text inserted. The exposed selection is "${selection.slice(0, 220)}", which does not contain the expected "${expected}". Locate the intended section again and verify the selection with a screenshot before typing.`,
     };
   }
 

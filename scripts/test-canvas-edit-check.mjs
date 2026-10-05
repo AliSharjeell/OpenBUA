@@ -18,10 +18,10 @@ const document = {
     if (selector === '#boldButton') return { getAttribute: () => String(bold) };
     return null;
   },
-  querySelectorAll: () => [{ className: 'docs-texteventtarget-iframe', id: '', contentDocument: { body: { get textContent() { return context; } } } }],
+  querySelectorAll: () => [{ className: 'docs-texteventtarget-iframe', id: '', contentWindow: { getSelection: () => ({ toString: () => context }) } }],
 };
 // Rebuild the serialized function as Chrome does; no module helpers are available.
-const check = runInNewContext(`(${serialized})`, { document });
+const check = runInNewContext(`(${serialized})`, { document, window: { getSelection: () => ({ toString: () => '' }) } });
 assert.equal(check('Project\nTechnologies: Rust\nBuilt an app').allowed, false, 'mixed block cannot inherit title style');
 assert.equal(check('Replacement title', 'Termote').allowed, true, 'single-line title replacement remains possible');
 context = 'Designed a session-managed agent loop in ArmUP';
@@ -36,7 +36,7 @@ assert.equal(check('Body\nBody').allowed, false, 'all-bold body insertion is blo
 style = 'Heading 3'; bold = false;
 assert.equal(check('Body\nBody').allowed, false, 'heading-style body insertion is blocked');
 context = '';
-assert.equal(check('Title', 'Termote').allowed, true, 'missing mirror does not falsely claim a different caret location');
+assert.equal(check('Title', 'Termote').allowed, true, 'missing selection does not falsely claim a different caret location');
 isDocs = false;
 assert.equal(check('Text\nText').allowed, true, 'ordinary editors are unaffected');
 console.log('PASS serialized canvas formatting and caret-context guard');

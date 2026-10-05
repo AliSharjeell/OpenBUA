@@ -1174,7 +1174,7 @@ const TypeTextSchema = Type.Object({
     })
   ),
   expectedCaretText: Type.Optional(Type.String({
-    description: 'Existing text expected at the insertion point or selected line, such as the target project title. When the editor exposes a different input context, typing is blocked. Always verify placement with a screenshot too.',
+    description: 'Existing text expected in the selected range, such as the target project title. When the editor exposes a different selection, typing is blocked. An empty selection cannot verify the caret; always inspect a screenshot after moving it.',
   })),
   allowUniformParagraphStyle: Type.Optional(Type.Boolean({
     description: 'Allow multiple paragraphs to inherit the current heading/bold formatting ONLY when every inserted paragraph should intentionally have that same style. Keep false for a project title plus technologies and bullets; clone the source formatting and edit each line separately.',
