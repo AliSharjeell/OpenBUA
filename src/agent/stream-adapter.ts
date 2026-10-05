@@ -305,7 +305,7 @@ async function streamOpenAI(
       if (isOlderTurn) {
         // Prune older vision screenshots to preserve model inference speed and tokens
         if (imageBlocks.length > 0) {
-          text = (text ? text + '\n' : '') + '[Prior screenshot inspected & verified - image pruned to preserve tokens]';
+          text = (text ? text + '\n' : '') + '[Older screenshot omitted; this does not verify any action or caret placement.]';
         }
         // Compact older turn bulky DOM/HTML dumps (never prune scratchpad notes)
         if (!isScratchpad && text.length > 350) {
@@ -1059,7 +1059,7 @@ async function streamAnthropic(
       if (isOlderTurn) {
         // Prune older screenshots to prevent massive multi-megabyte vision token payloads
         if (imageBlocks.length > 0) {
-          textParts = (textParts ? textParts + '\n' : '') + '[Prior screenshot inspected & verified - image pruned to preserve tokens]';
+          textParts = (textParts ? textParts + '\n' : '') + '[Older screenshot omitted; this does not verify any action or caret placement.]';
         }
         // Compact older turn bulky DOM/HTML dumps (never prune scratchpad notes)
         if (!isScratchpad && textParts.length > 350) {
