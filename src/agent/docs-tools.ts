@@ -1,6 +1,6 @@
 import { Type } from '@sinclair/typebox';
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
-import { runDocsInspection, runDocsToggle, runDocsClipboard } from './docs-editor';
+import { runDocsInspection, runDocsToggle, runDocsClipboard, runDocsTextLookup } from './docs-editor';
 import { captureTabScreenshot, clickAtPosition } from './browser-bridge';
 
 async function observedResult(details: unknown): Promise<AgentToolResult> {
@@ -14,6 +14,17 @@ async function observedResult(details: unknown): Promise<AgentToolResult> {
 }
 
 const InspectSchema = Type.Object({});
+const FindSchema = Type.Object({ text: Type.String({ minLength: 1, description: 'Existing heading or text from the document body to locate, e.g. Termote.' }) });
+export const findDocsTextTool: AgentTool<typeof FindSchema> = {
+  name: 'find_docs_text', label: 'Locate Rendered Docs Text',
+  description: 'Locate existing Google Docs body text using visible rendered SVG/accessibility labels and report screenshot coordinates for the labeled runs. Excludes the document outline and hidden input buffers. Returns a fresh screenshot. Use before selecting or clicking a project heading instead of guessing coordinates. Empty matches mean the text is not exposed or not visible, not that it is absent from the document.',
+  parameters: FindSchema,
+  execute: async (_id, params) => {
+    try { return await observedResult(await runDocsTextLookup(params.text)); }
+    catch (error) { return { content: [{ type: 'text', text: String(error) }], details: { success: false } }; }
+  },
+};
+
 export const inspectDocsEditorTool: AgentTool<typeof InspectSchema> = {
   name: 'inspect_docs_editor', label: 'Inspect Docs Toolbar and Selection',
   description: 'Inspect Google Docs toolbar DOM: bold, italic, underline, list controls, paragraph style, font and size, with actual pressed/checked states and screenshot coordinates. Also returns visible selection text when exposed and a fresh screenshot. Use after selecting text and before changing formatting. Canvas body text is not a normal DOM text field.',

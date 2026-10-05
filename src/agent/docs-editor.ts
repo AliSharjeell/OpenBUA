@@ -86,3 +86,33 @@ export async function runDocsClipboard(action: string) {
   const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: commandDocsClipboard, args: [action] });
   return results[0]?.result || { success: false, message: 'Clipboard command returned no result.' };
 }
+
+// Read only rendered page labels, never sidebar outlines or the typing buffer.
+export function findDocsRenderedText(query: string) {
+  const needle = query.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!needle) return { matches: [], message: 'Supply existing document text to locate.' };
+  const matches: Array<{ text: string; start: { x: number; y: number }; end: { x: number; y: number }; exactLine: boolean }> = [];
+  const seen = new Set<string>();
+  for (const node of Array.from(document.querySelectorAll('.kix-page svg [aria-label], .kix-canvas-tile-content [aria-label]'))) {
+    const text = (node.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+    if (!text.toLowerCase().includes(needle)) continue;
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) continue;
+    const key = `${text}:${rect.x}:${rect.y}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    matches.push({ text, exactLine: text.toLowerCase() === needle,
+      start: { x: Math.max(0, rect.left + 1) * devicePixelRatio, y: (rect.top + rect.height / 2) * devicePixelRatio },
+      end: { x: Math.min(innerWidth - 1, rect.right - 1) * devicePixelRatio, y: (rect.top + rect.height / 2) * devicePixelRatio },
+    });
+    if (matches.length >= 30) break;
+  }
+  return { matches, message: matches.length ? 'Coordinates come from rendered document labels. They bracket the entire labeled run, not just the query substring. Verify them against the screenshot before selecting or editing.' : 'No visible rendered document label matches. Do not invent coordinates or assume the sidebar is document text. Scroll to the target and inspect a fresh screenshot. Some Docs versions expose only a canvas.' };
+}
+
+export async function runDocsTextLookup(query: string) {
+  const tab = await getActiveTab();
+  if (!tab?.id || !/^https:\/\/docs\.google\.com\/document\//.test(tab.url || '')) throw new Error('Activate a Google Docs document first.');
+  const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: findDocsRenderedText, args: [query] });
+  return results[0]?.result || { matches: [], message: 'Document label lookup returned no result.' };
+}

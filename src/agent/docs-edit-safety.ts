@@ -9,7 +9,7 @@ const blocked = (message: string): AgentToolResult => ({
 export function protectDocsEdits(tools: AgentTool<any>[]): AgentTool<any>[] {
   const documents = new Map<string, { observed: boolean; undoAvailable: boolean }>();
   const relevant = new Set(['type_text', 'press_key_combination', 'click_at_position', 'click_element',
-    'scroll_page', 'capture_tab_screenshot', 'inspect_docs_editor', 'select_docs_text',
+    'scroll_page', 'capture_tab_screenshot', 'inspect_docs_editor', 'find_docs_text', 'select_docs_text',
     'set_docs_formatting', 'docs_clipboard', 'clipboard_action']);
   return tools.map(tool => !relevant.has(tool.name) ? tool : {
     ...tool,
