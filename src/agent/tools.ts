@@ -2,6 +2,7 @@
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { checkCanvasTextInsertion } from './canvas-edit-check';
+import { protectDocsEdits } from './docs-edit-safety';
 import { inspectDocsEditorTool, selectDocsTextTool, setDocsFormattingTool, docsClipboardTool } from './docs-tools';
 import {
   inspectActiveTabForm,
@@ -1248,7 +1249,7 @@ export const clipboardActionTool: AgentTool<typeof ClipboardActionSchema> = {
 
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string): AgentTool<any>[] {
-  return [
+  return protectDocsEdits([
     getActiveTabFormTool,
     inspectDocsEditorTool,
     selectDocsTextTool,
@@ -1278,7 +1279,7 @@ export function createAgentTools(sessionId?: string): AgentTool<any>[] {
     waitSecondsTool,
     openNewTabTool,
     closeTabTool,
-  ];
+  ]);
 }
 
 // All available tools for the OpenBUA Agent (default session fallback)
