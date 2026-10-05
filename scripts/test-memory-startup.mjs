@@ -136,7 +136,9 @@ try {
   assert.equal(stored.autoform_global_memory[0].dataUrl, video.dataUrl);
   failBlob = false;
   failMetadata = true;
+  const blobsBeforeFailedMetadata = blobs.size;
   await assert.rejects(storage.migrateGlobalMemoryMedia([video]), /quota failure/);
+  assert.equal(blobs.size, blobsBeforeFailedMetadata, 'failed migration does not retain another full video blob');
   assert.equal((await storage.loadGlobalMemories())[0].dataUrl, video.dataUrl, 'startup still loads after failed maintenance');
   assert.equal(stored.autoform_global_memory[0].dataUrl, video.dataUrl, 'failed metadata save leaves original storage untouched');
   await assert.rejects(storage.saveSettings(storage.DEFAULT_SETTINGS), /quota failure/);
