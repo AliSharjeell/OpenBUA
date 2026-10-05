@@ -3,6 +3,7 @@ import { Agent, AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
 import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS, createAgentTools } from './tools';
 import { DocsEditPolicy } from './docs-edit-safety';
+import { DOCS_EDITOR_INSTRUCTIONS } from './docs-workflow';
 import { createCustomModel, createStreamFn } from './stream-adapter';
 import { getActiveTab, isExtensionPage } from './browser-bridge';
 import { describePlatforms } from './social-platforms';
@@ -823,115 +824,7 @@ ${(this.settings.autoConfirmSubmit ?? true)
     * After sending, verify the message actually appears in the conversation with the
       attachment; a clicked button is not confirmation of delivery.
 
-23. CANVAS EDITORS (GOOGLE DOCS, SHEETS, SLIDES, FIGMA, CANVA, WORD ONLINE) - READ THIS FIRST:
-    - THESE EDITORS HAVE NO DOM TEXT. They paint every character onto a <canvas>. This changes
-      everything you know about how to edit a page:
-      * 'get_active_tab_form' will show only toolbar chrome (Rename, Zoom, Menus). An empty or
-        useless form summary in Google Docs does NOT mean the page failed to load.
-      * 'get_page_content' will return ruler numbers and stray digits, not the document.
-      * DOM tools cannot edit canvas body text. They CAN inspect and click normal toolbar
-        buttons and style menus. Setting contenteditable values does not edit the document.
-      * Use find_docs_text to locate visible body labels when available; it excludes the
-        sidebar and hidden input buffer. Empty results require visual inspection, not
-        guessed coordinates. Document text is not a normal editable HTML paragraph.
-    *** WHEN THE USER SAYS "KEEP / MATCH THE FORMATTING LIKE <EXISTING BLOCK>" - DO THIS, DO NOT REASON ABOUT IT ***
-    This is the single biggest time sink in a canvas editor. NEVER try to work out how the editor will
-    inherit bold, heading styles or list formatting from the line you are typing into. That reasoning
-    is unanswerable without testing, it produces no progress, and it can burn ten minutes in one turn.
-    Instead COPY the existing block and edit the clone using the editor's rich clipboard path:
-      * STEP 1 — screenshot, and note where the existing block starts and ends.
-      * STEP 2 — SELECT it with select_docs_text using start and end screenshot coordinates.
-        Verify the highlighted range before copying. Inspect the toolbar states it returns.
-      * STEP 3 — 'docs_clipboard({ action: "copy" })'. Check command acceptance.
-      * STEP 4 — 'click_at_position({ x: <where the new content goes> })', then
-        Verify the destination caret, then 'docs_clipboard({ action: "paste" })'.
-        Inspect the returned screenshot to confirm a complete, correctly formatted clone.
-      * STEP 5 — Edit only the TEXT of the clone: for each line, click at its start, shift-click at its
-        end to select just that line's text, then 'type_text' the replacement. Formatting is untouched
-        because you are replacing text, not recreating a paragraph.
-        Pass expectedCaretText with the old line text when it is available. Preserve each
-        paragraph break and each formatted run: replace the technology names separately
-        from the bold "Technologies:" label. Never replace the full clone with one
-        multi-line type_text call, because that discards the paragraph/run formatting.
-      * STEP 6 — Verify the complete new entry with a screenshot: title, technologies,
-        every bullet, placement in the requested section, and preserved original entry.
-        When ADDING another entry, KEEP the original block. Cut it only when the user
-        explicitly asked to move or replace it.
-    Never enumerate competing plans for how to reproduce formatting. Choose this approach, run it, and
-    verify what the screenshot shows before editing. Never trade uncertain placement for speed.
-    Matching formatting is part of completion. Do not accept "slight formatting variance",
-    plain paragraphs instead of bullets, or all-bold body text. A toolbar showing Title,
-    Heading, or bold is current evidence; never dismiss it as stale without checking.
-    If type_text blocks inherited formatting, follow the clone workflow above; do not
-    enable allowUniformParagraphStyle for a mixed title/technologies/bullet entry.
-    Write the WHOLE entry (title, technologies line, every bullet) in one pass before any cleanup -
-    a title on its own is not the task, and spacing polish is not a substitute for the missing lines.
-
-    - THE WORKING SEQUENCE, always in this order:
-      * STEP 1 — find_docs_text with the existing heading, then inspect its screenshot.
-        Use returned rendered label coordinates, or capture_tab_screenshot if no labels
-        are exposed. The outline is not the body and cannot locate a caret.
-        Read the layout, the existing text, and the pixel position of where the text must go.
-        The tool also reports the CSS viewport and device pixel ratio, and 'click_at_position'
-        accepts the SAME screenshot pixel coordinates and converts them for you. So just read a
-        position off the image and pass it through unchanged. NEVER scale coordinates by hand or
-        try to work out a ratio: that wastes many calls and lands clicks in the wrong place.
-      * STEP 2 — PLACE THE CARET. Click the position where the text must go:
-        'click_at_position({ x: <px from screenshot>, y: <px from screenshot> })'.
-        A successful click only means mouse events were dispatched; it does NOT prove
-        the caret is at the heading you intended. Hidden input text is a typing buffer,
-        not authoritative caret-line text or proof of document insertion.
-        Before the first edit or paste, capture a screenshot AFTER the click and check
-        the visible caret/selection against the requested heading in the document body.
-        Outline/sidebar text is not the document body. Never invent a target position
-        or claim you can see a caret that is absent. If placement stays unclear after
-        one corrected click, report the blocker without writing into another section.
-        After scroll, zoom, navigation or an edit changes the layout, capture a new
-        screenshot before using coordinates again. The retained image may be stale.
-        type_text primes editor focus itself. Do NOT try to "wake" the editor by pressing
-        keys that move the caret: they reach the document, and pressing them blindly has
-        corrupted documents before. If typing misses, click again at a more precise spot -
-        never mash keys.
-        To replace the whole document, use Ctrl+A then type_text with clearFirst: true.
-      * STEP 3 — WRITE with 'type_text({ text: "...\\n...\\n..." })'. Each \n becomes a real
-        Enter, so multi-line documents work in one call. For formatting-match tasks use
-        the clone workflow instead. Canvas text dispatch is unverified: inspect a fresh
-        screenshot before retrying and compare against the BEFORE screenshot.
-      * STEP 4 — VERIFY with 'capture_tab_screenshot()'. This step is mandatory. If nothing
-        appears, the caret was not in the document: re-screenshot, click again at the exact
-        line, and retry ONCE. If it still fails, report the blocker instead of retrying the
-        same call. Text already visible before this run is pre-existing, not a new
-        mistake to undo. Never repeatedly undo because an old string remains visible.
-        One Undo for your latest edit may be used after inspection; inspect the result
-        and stop undoing. If no visible new edit occurred, do not undo historical content.
-      * STEP 5 — SPACING IS ALREADY CORRECT. A visible gap between two heading-styled lines is
-        the paragraph style's spacing, NOT an empty line. It is not in the document text and
-        there is nothing to delete. Do not press Backspace or Enter to "remove the gap": at a
-        line start Backspace joins the two lines into one, and Enter just splits them again -
-        the gap stays either way, and that join/split loop has burned whole runs. If a merge
-        already happened, ONE Enter separates the lines again; then stop touching line breaks
-        and continue with the content.
-    - GOOGLE DOCS TOOLS: use inspect_docs_editor to read the toolbar DOM and current
-      bold/list states, paragraph style, font size, and selection screenshot. These are
-      observations; null states mean unknown/mixed, not off. The canvas body still needs
-      visual inspection. Use select_docs_text to select a complete visible block or a
-      specific text run, then verify its highlighted range in the returned screenshot.
-      For matching an existing project: select its heading, technologies and final bullet;
-      docs_clipboard copy; place and verify the destination caret; docs_clipboard paste;
-      verify the clone, then select and replace individual text runs without paragraph
-      breaks. Keep the source entry intact. Use docs_clipboard rather than synthetic
-      clipboard_action shortcuts in Docs; never assume command acceptance proves a paste.
-      Use set_docs_formatting with an explicit desired state to fix bold or native lists.
-      If a native list is on, do not type literal bullet characters. Keep project titles
-      outside the list, body paragraphs normal weight, and only Technologies: bold.
-      Open paragraph-style controls reported by inspect_docs_editor with click_element
-      and choose the desired menu item, then inspect again. Never blindly toggle styles.
-    - BEFORE YOU ACT: if the page is Google Docs or another editor on this list, do not spend a
-      turn describing your reasoning to the user. Take the screenshot, click, type, verify. Only
-      report back once you have either written the text or have a concrete error to report.
-    - DOCUMENT TITENING: the title lives in a normal input at the top, so 'fill_form_fields'
-      with a selector like 'input.docs-title-input' or the Rename button DOES work there. Only
-      the document body needs the canvas sequence.
+${DOCS_EDITOR_INSTRUCTIONS}
 
 ${docsSummary}
 
