@@ -184,7 +184,14 @@ function migrateMemoryMedia(key: string, snapshot: UserDocument[]): Promise<User
       applied.add(doc.id);
       const { dataUrl: _inlineBytes, ...metadata } = doc;
       return { ...metadata, blobKey: change.after.blobKey };
-    }));
+    })).catch(async (error) => {
+      // These keys were created solely for this attempt. Failed metadata
+      // persistence must not leave a full extra video behind on every retry.
+      for (const change of changes.values()) {
+        if (change.after.blobKey) await deleteMediaBlob(change.after.blobKey);
+      }
+      throw error;
+    });
     for (const [id, change] of changes) {
       if (!applied.has(id) && change.after.blobKey) await deleteMediaBlob(change.after.blobKey);
     }
