@@ -2,6 +2,7 @@
 
 import { AppSettings, UserDocument, ChatMessage, ChatSession, SuggestedMemory } from '../types';
 import { compactMemoryMedia } from './memory-media';
+import { deleteMediaBlob, mediaBlobKeyFor } from './blob-store';
 
 const SETTINGS_KEY = 'autoform_settings';
 const GLOBAL_MEMORY_KEY = 'autoform_global_memory';
@@ -158,6 +159,49 @@ function updateMemoryList(
     if (pendingMemoryWrites.get(key) === write) pendingMemoryWrites.delete(key);
   }).catch(() => {});
   return write;
+}
+
+const pendingMediaMigrations = new Map<string, Promise<UserDocument[]>>();
+
+function migrateMemoryMedia(key: string, snapshot: UserDocument[]): Promise<UserDocument[]> {
+  const pending = pendingMediaMigrations.get(key);
+  if (pending) return pending;
+  const migration = (async () => {
+    const changes = new Map<string, { before: UserDocument; after: UserDocument }>();
+    for (const doc of snapshot) {
+      if (!doc.dataUrl) continue;
+      // Use a separate blob key so an old migration cannot overwrite a newer
+      // attachment saved while this document was being decoded.
+      const candidate = { ...doc, blobKey: `${mediaBlobKeyFor(doc.id)}:legacy:${crypto.randomUUID()}` };
+      const compacted = await compactMemoryMedia(candidate);
+      if (compacted !== candidate) changes.set(doc.id, { before: doc, after: compacted });
+    }
+    if (!changes.size) return snapshot;
+    const applied = new Set<string>();
+    const latest = await updateMemoryList(key, (docs) => docs.map((doc) => {
+      const change = changes.get(doc.id);
+      if (!change || doc.dataUrl !== change.before.dataUrl || doc.blobKey !== change.before.blobKey) return doc;
+      applied.add(doc.id);
+      const { dataUrl: _inlineBytes, ...metadata } = doc;
+      return { ...metadata, blobKey: change.after.blobKey };
+    }));
+    for (const [id, change] of changes) {
+      if (!applied.has(id) && change.after.blobKey) await deleteMediaBlob(change.after.blobKey);
+    }
+    return latest;
+  })();
+  pendingMediaMigrations.set(key, migration);
+  void migration.finally(() => pendingMediaMigrations.delete(key)).catch(() => {});
+  return migration;
+}
+
+/** Explicit maintenance: run after startup has rendered, never inside a load. */
+export function migrateGlobalMemoryMedia(snapshot: UserDocument[]): Promise<UserDocument[]> {
+  return migrateMemoryMedia(GLOBAL_MEMORY_KEY, snapshot);
+}
+
+export function migrateTabMemoryMedia(tabKey: string, snapshot: UserDocument[]): Promise<UserDocument[]> {
+  return migrateMemoryMedia(`${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`, snapshot);
 }
 
 export async function loadGlobalMemories(): Promise<UserDocument[]> {
