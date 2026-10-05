@@ -83,11 +83,11 @@ export async function createStreamFn(
  * - The most recent 2 assistant turns that invoked tools retain 100% full fidelity
  *   (full DOM text, forms, elements, and vision screenshots).
  * - Assistant turns older than 2 turns have:
- *   1. Vision screenshots pruned (base64 stripped, replaced with concise marker).
+ *   1. Vision screenshots pruned except the latest visual observation.
  *   2. Bulky DOM text (>350 chars) truncated to ~300 chars.
  *   3. 'scratchpad' results are strictly preserved (never truncated).
  */
-function analyzeAssistantTurns(messages: any[]): {
+export function analyzeAssistantTurns(messages: any[]): {
   olderToolCallIds: Set<string>;
   toolCallIdToName: Map<string, string>;
 } {
@@ -121,6 +121,15 @@ function analyzeAssistantTurns(messages: any[]): {
       }
     }
   }
+
+  // Keep the newest visual observation available through intervening clicks,
+  // keypresses and text reads. Tool age is not evidence that an image was
+  // superseded, and dropping it makes canvas editing depend on memory alone.
+  const latestImageResult = [...messages].reverse().find((m: any) =>
+    m.role === 'toolResult' && Array.isArray(m.content) &&
+    m.content.some((block: any) => block.type === 'image' && block.data)
+  );
+  if (latestImageResult) olderToolCallIds.delete(latestImageResult.toolCallId);
 
   return { olderToolCallIds, toolCallIdToName };
 }
