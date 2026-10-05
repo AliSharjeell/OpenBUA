@@ -24,6 +24,10 @@ export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolic
       let state = documents.get(key);
       if (!state) { state = { observed: false, undoAvailable: false, copied: false, cloned: false }; documents.set(key, state); }
       const params = args[1] as Record<string, any>;
+      const inputKey = String(params.key || '').toLowerCase();
+      if (tool.name === 'clipboard_action' || (tool.name === 'press_key_combination' && params.ctrlKey && ['c', 'v', 'x', 'd'].includes(inputKey))) {
+        return blocked('No clipboard shortcut dispatched. Use docs_clipboard for Docs copy, cut or paste and inspect the returned screenshot. Synthetic shortcuts do not prove a clipboard operation, and Ctrl+D is not block duplication.');
+      }
       if (policy?.cloneRequired && !state.cloned && tool.name === 'type_text') {
         return blocked('No text inserted. This task asks to match existing formatting. Locate the source with find_docs_text, select its complete project block with select_docs_text, verify the highlight, docs_clipboard copy, place and inspect the destination caret, then docs_clipboard paste. Verify the clone before replacing individual text runs. Do not build a mixed-format project by typing into its title paragraph.');
       }
@@ -37,7 +41,8 @@ export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolic
         state.undoAvailable = false; // Reserve before awaiting: a batch cannot issue multiple undos.
         state.observed = false;
       }
-      if ((tool.name === 'type_text' || (tool.name === 'docs_clipboard' && params.action !== 'copy')) && !state.observed) {
+      const deletes = tool.name === 'press_key_combination' && ['backspace', 'delete'].includes(inputKey);
+      if ((tool.name === 'type_text' || tool.name === 'docs_clipboard' || deletes) && !state.observed) {
         return blocked('No edit dispatched. Capture or inspect the document AFTER the most recent caret/selection movement and verify the intended location before typing or pasting. A successful coordinate click does not prove caret placement.');
       }
       const moves = ['click_at_position', 'click_element', 'scroll_page', 'select_docs_text', 'press_key_combination'].includes(tool.name);
@@ -45,7 +50,7 @@ export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolic
       const result = await tool.execute(...args);
       const details = result.details as Record<string, any> | undefined;
       if (result.content.some(item => item.type === 'image')) state.observed = true;
-      if (tool.name === 'type_text' && details?.inserted !== false && !details?.error) {
+      if (tool.name === 'type_text' && details?.inserted !== false && !details?.error && (details?.success || details?.chars > 0)) {
         state.observed = false;
         state.undoAvailable = true;
         // Old typing implementations check substring presence, not an actual edit.
