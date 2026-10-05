@@ -7,7 +7,7 @@ export async function readDocsClipboard(expectedText: string) {
       if (!text && item.types.includes('text/plain')) text = await (await item.getType('text/plain')).text();
       if (!html && item.types.includes('text/html')) html = await (await item.getType('text/html')).text();
     }
-    const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
+    const normalize = (value: string) => value.replace(/^[ \t]*[•●◦▪‣]\s*/gm, '').replace(/\s+/g, ' ').trim();
     const matchesSelection = Boolean(normalize(expectedText)) && normalize(text) === normalize(expectedText);
     if (!matchesSelection || !html.trim()) return { success: false, text: '', html: '', message: 'Clipboard content does not match the copied selection or has no rich HTML. No formatted copy is verified; do not paste or edit the source.' };
     if (html.length > 2_000_000 || text.length > 200_000) return { success: false, text: '', html: '', message: 'Selected block is too large for a formatted project copy. Select only the source project.' };

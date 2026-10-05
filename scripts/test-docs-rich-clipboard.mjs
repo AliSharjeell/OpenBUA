@@ -9,6 +9,7 @@ const pasteSource = source.slice(source.indexOf('function dispatchDocsRichPaste(
 let clipboardText = 'Termote\nTechnologies: Rust\nBuilt an app\n', clipboardHtml = '<h3>Termote</h3><p><b>Technologies:</b> Rust</p><ul><li>Built an app</li></ul>';
 const read = runInNewContext(`(${readSource})`, { navigator: { clipboard: { read: async () => [{ types: ['text/plain', 'text/html'], getType: async type => new Blob([type === 'text/plain' ? clipboardText : clipboardHtml]) }] } } });
 assert.equal((await read(clipboardText)).success, true, 'actual clipboard text and HTML are verified');
+assert.equal((await read(clipboardText.replace('Built an app', '• Built an app'))).success, true, 'native list marker differences do not reject matching source content');
 assert.equal((await read('Different source')).success, false, 'stale clipboard cannot masquerade as the source');
 assert.equal((await read('\u00a0')).success, false, 'placeholder selection cannot verify copy');
 clipboardHtml = '';
