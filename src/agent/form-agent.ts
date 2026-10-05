@@ -1489,29 +1489,31 @@ ${this.settings.systemInstruction || ''}`.trim();
     this.editLoopResumeCount = 0;
     this.resumeEpoch += 1;
     this.userPromptInFlight = true;
-
-    // Proactively scan user input for personal details, student email, university, or interests
-    await detectAndQueueMemorySuggestions(input, this.sessionId, this.documents);
-
-    if (!this.agent) {
-      this.setupAgent();
-    }
-    if (!this.agent) throw new Error('Agent failed to initialize');
-
-    // Query active browser tab to inject current live tab context directly into prompt
-    let turnInput = input;
-    try {
-      const activeTab = await getActiveTab(1200);
-      if (activeTab && activeTab.url && !isExtensionPage(activeTab)) {
-        const cleanTitle = (activeTab.title || 'Web page').trim().slice(0, 70);
-        turnInput = `${input}\n\n[Current Active Browser Tab: "${cleanTitle}" - ${activeTab.url}]`;
-      }
-    } catch {}
-
+    const epoch = this.resumeEpoch;
     const runToken = Symbol('user-request');
     this.activePromptRuns.add(runToken);
+    this.reportActivity(true);
+
     try {
-      this.reportActivity(true);
+      // Proactively scan user input for personal details, student email, university, or interests
+      await detectAndQueueMemorySuggestions(input, this.sessionId, this.documents);
+
+      if (!this.agent) {
+        this.setupAgent();
+      }
+      if (!this.agent) throw new Error('Agent failed to initialize');
+
+      // Query active browser tab to inject current live tab context directly into prompt
+      let turnInput = input;
+      try {
+        const activeTab = await getActiveTab(1200);
+        if (activeTab && activeTab.url && !isExtensionPage(activeTab)) {
+          const cleanTitle = (activeTab.title || 'Web page').trim().slice(0, 70);
+          turnInput = `${input}\n\n[Current Active Browser Tab: "${cleanTitle}" - ${activeTab.url}]`;
+        }
+      } catch {}
+
+      if (this.userAborted || this.resumeEpoch !== epoch) return;
 
       // A previous run may still be unwinding (right after a watchdog cut, for
       // example). prompt()/continue() are refused while it is, so wait it out
@@ -1524,6 +1526,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         );
       }
 
+      if (this.userAborted || this.resumeEpoch !== epoch) return;
       const currentMsgs = this.agent.state.messages;
       const lastMsg = currentMsgs[currentMsgs.length - 1] as any;
       const lastContent =
@@ -1555,6 +1558,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         await runStarted(this.agent.prompt(turnInput));
       }
     } catch (err: any) {
+      if (this.userAborted || this.resumeEpoch !== epoch) return;
       console.error('[FormAgentHarness] prompt execution error:', err);
       this.listeners.onError?.(err?.message || String(err));
       // Re-setup agent on error so state is not locked, preserving history
@@ -1562,7 +1566,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       throw err;
     } finally {
       // Backstop for exits that never reached a run (settle failures, throws).
-      this.userPromptInFlight = false;
+      if (this.resumeEpoch === epoch) this.userPromptInFlight = false;
       this.activePromptRuns.delete(runToken);
       this.reportActivity(false);
     }
