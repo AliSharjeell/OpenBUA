@@ -59,9 +59,9 @@ function extractFunction(name) {
   if (start < 0) throw new Error(`${name} not found in compiled output`);
   let i = haystack.indexOf('(', start);
   let depth = 0;
-  for (; i < src.length; i++) {
-    if (src[i] === '(') depth++;
-    else if (src[i] === ')') {
+  for (; i < haystack.length; i++) {
+    if (haystack[i] === '(') depth++;
+    else if (haystack[i] === ')') {
       depth--;
       if (depth === 0) break;
     }
@@ -135,6 +135,16 @@ function makeDocsPage(opts = {}) {
     focus() {},
     dispatchEvent(e) {
       innerBody._events.push(e);
+      // Google Docs reads keypress char codes and commits the character to the
+      // DOCUMENT (what get_page_content and the user see), never to this hidden
+      // frame's DOM - a synthetic insertText can grow textContent here while
+      // the document stays unchanged. rejectInput models an editor that
+      // discards the events entirely.
+      if (!rejectInput && e.type === 'keypress' && typeof e.which === 'number' && e.which >= 32) {
+        page.docText += String.fromCharCode(e.which);
+      } else if (!rejectInput && e.type === 'keydown' && e.keyCode === 13) {
+        page.docText += '\n';
+      }
       return true;
     },
   };
@@ -164,6 +174,9 @@ function makeDocsPage(opts = {}) {
 
   const page = {
     execCalls: [],
+    // The document text the user sees - what get_page_content reads and what
+    // typing verification must measure against.
+    docText: '',
     body: {
       tagName: 'BODY',
       isContentEditable: false,
@@ -196,6 +209,11 @@ function makeDocsPage(opts = {}) {
     elementFromPoint: () => canvas,
   };
   page.body.ownerDocument = page;
+  // body.innerText is the real page text surface (see inPageGetPageContent).
+  Object.defineProperty(page.body, 'innerText', {
+    get: () => page.docText,
+    configurable: true,
+  });
   return { page, canvas, frame, innerBody };
 }
 
@@ -224,9 +242,25 @@ function makeDocsPage(opts = {}) {
   );
   check('reports 3 lines', res.lines === 3, String(res.lines));
   check(
-    'one insertText per non-empty line',
-    page.execCalls.filter((c) => c === 'insertText').length === 3,
+    'a canvas editor is typed with real key events, not execCommand insertText',
+    page.execCalls.filter((c) => c === 'insertText').length === 0,
     JSON.stringify(page.execCalls)
+  );
+  check(
+    'the typed characters reach the DOCUMENT (what Docs commits from keypresses)',
+    page.docText === 'First line\nSecond line\nThird line',
+    JSON.stringify(page.docText)
+  );
+  const charPresses = innerBody._events.filter((e) => e.type === 'keypress' && e.which >= 32);
+  check(
+    'one keypress per typed character',
+    charPresses.length === 31,
+    `got ${charPresses.length}`
+  );
+  check(
+    'keypresses carry the character codes Docs turns into text',
+    charPresses[0] && charPresses[0].which === 'F'.charCodeAt(0),
+    JSON.stringify(charPresses[0])
   );
   const enters = innerBody._events.filter((e) => e.type === 'keydown' && e.keyCode === 13);
   check(
@@ -249,6 +283,9 @@ function makeDocsPage(opts = {}) {
 // --- 1b. an editor that silently discards input must NOT report success ----
 {
   const { page, innerBody } = makeDocsPage({ rejectInput: true });
+  // Even a grown hidden-frame buffer must not count: that buffer is exactly the
+  // signal that used to report "Typed 44 characters" into an unchanged doc.
+  innerBody.textContent = 'Z';
   const { fn } = rebuild('inPageTypeText', { document: page, Event: makeEvent, InputEvent: makeInputEvent });
 
   const res = fn('Z', true);
@@ -258,16 +295,139 @@ function makeDocsPage(opts = {}) {
     JSON.stringify(res)
   );
   check(
-    'the failure explains a coordinate click alone does not give the editor focus',
-    /keyboard focus/i.test(res.message),
+    'the failure says the document text did not change',
+    /document text did not change/i.test(res.message),
     res.message
   );
   check(
-    'the failure tells the agent what to do next (click, press a key, retry)',
-    /Home|End|navigation key/i.test(res.message) && /again/i.test(res.message),
+    'the failure tells the agent to click and retry once',
+    /click/i.test(res.message) && /again once/i.test(res.message),
     res.message
   );
-  check('the target content really did not change', innerBody.textContent === '', JSON.stringify(innerBody.textContent));
+  check(
+    'and never recommends Home/End - that is what corrupted the document',
+    !/\b(Home|End)\b|navigation key/i.test(res.message),
+    res.message
+  );
+  check('the document really did not change', page.docText === '', JSON.stringify(page.docText));
+  check(
+    'hidden-frame buffer growth alone is not accepted as proof',
+    innerBody.textContent === 'Z' && res.success === false,
+    JSON.stringify(innerBody.textContent)
+  );
+}
+
+// --- 1c. typeTextIntoPage: the content-script path (what actually ran) -----
+// The content script is injected as a file, not serialized, so these may call
+// module-scope helpers - but each helper still has to be rebuilt standalone
+// here because the test runs them without the module.
+function buildTypeTextIntoPageHelpers(globals) {
+  const SPECIAL_KEYS = {
+    ENTER: { code: 'Enter', keyCode: 13, text: '\r' },
+    TAB: { code: 'Tab', keyCode: 9, text: '\t' },
+    ESCAPE: { code: 'Escape', keyCode: 27 },
+    ESC: { code: 'Escape', keyCode: 27 },
+    BACKSPACE: { code: 'Backspace', keyCode: 8 },
+    DELETE: { code: 'Delete', keyCode: 46 },
+    SPACE: { code: 'Space', keyCode: 32, text: ' ' },
+    ARROWUP: { code: 'ArrowUp', keyCode: 38 },
+    ARROWDOWN: { code: 'ArrowDown', keyCode: 40 },
+    ARROWLEFT: { code: 'ArrowLeft', keyCode: 37 },
+    ARROWRIGHT: { code: 'ArrowRight', keyCode: 39 },
+    HOME: { code: 'Home', keyCode: 36 },
+    END: { code: 'End', keyCode: 35 },
+    PAGEUP: { code: 'PageUp', keyCode: 33 },
+    PAGEDOWN: { code: 'PageDown', keyCode: 34 },
+  };
+  const detect = rebuild('detectCanvasEditor', globals).fn;
+  const prime = rebuild('primeEditorFocus', globals).fn;
+  const resolve = rebuild('resolveTypingTarget', { ...globals, detectCanvasEditor: detect }).fn;
+  const insert = rebuild('insertTextAtCaret', { ...globals, Event: makeEvent, InputEvent: makeInputEvent }).fn;
+  const resolveSpecial = rebuild('resolveSpecialKey', { SPECIAL_KEYS }).fn;
+  const dispatch = rebuild('dispatchSpecialKey', { ...globals, resolveSpecialKey: resolveSpecial }).fn;
+  const typeKeys = rebuild('typeCharactersAsKeys', globals).fn;
+  return { detect, prime, resolve, insert, dispatch, typeKeys };
+}
+{
+  const { page, innerBody } = makeDocsPage();
+  const base = {
+    document: page,
+    location: { hostname: 'docs.google.com' },
+    Event: makeEvent,
+    InputEvent: makeInputEvent,
+  };
+  const h = buildTypeTextIntoPageHelpers(base);
+  const { fn } = rebuild('typeTextIntoPage', {
+    ...base,
+    resolveTypingTarget: h.resolve,
+    detectCanvasEditor: h.detect,
+    insertTextAtCaret: h.insert,
+    dispatchSpecialKey: h.dispatch,
+    primeEditorFocus: h.prime,
+    typeCharactersAsKeys: h.typeKeys,
+  });
+
+  const res = fn('PathPilot — AI\nLive Link', {});
+  check('typeTextIntoPage (content script) succeeds on a Docs page', res.success === true, JSON.stringify(res));
+  check('and reports verified', res.verified === true, JSON.stringify(res));
+  check('and names the editor', /Google Docs/.test(res.target), res.target);
+  check(
+    'the text lands in the DOCUMENT, not just the hidden input frame',
+    page.docText === 'PathPilot — AI\nLive Link',
+    JSON.stringify(page.docText)
+  );
+  check(
+    'and is typed character by character as keypresses',
+    page.execCalls.length === 0 &&
+      innerBody._events.filter((e) => e.type === 'keypress' && e.which >= 32).length === 23,
+    JSON.stringify(page.execCalls)
+  );
+  check(
+    'newlines become Enter keydowns the editor can see',
+    innerBody._events.filter((e) => e.type === 'keydown' && e.keyCode === 13).length === 1
+  );
+}
+
+{
+  const { page, innerBody } = makeDocsPage({ rejectInput: true });
+  innerBody.textContent = 'Z'; // the old false-positive signal
+  const base = {
+    document: page,
+    location: { hostname: 'docs.google.com' },
+    Event: makeEvent,
+    InputEvent: makeInputEvent,
+  };
+  const h = buildTypeTextIntoPageHelpers(base);
+  const { fn } = rebuild('typeTextIntoPage', {
+    ...base,
+    resolveTypingTarget: h.resolve,
+    detectCanvasEditor: h.detect,
+    insertTextAtCaret: h.insert,
+    dispatchSpecialKey: h.dispatch,
+    primeEditorFocus: h.prime,
+    typeCharactersAsKeys: h.typeKeys,
+  });
+
+  const res = fn('Z', {});
+  check(
+    'typeTextIntoPage on a rejecting editor reports failure with verified false',
+    res.success === false && res.verified === false,
+    JSON.stringify(res)
+  );
+  check(
+    'and never recommends Home/End - that is what corrupted the document',
+    !/\b(Home|End)\b|navigation key/i.test(res.message),
+    res.message
+  );
+  check(
+    'but does recommend a click and exactly one retry',
+    /click/i.test(res.message) && /again once/i.test(res.message),
+    res.message
+  );
+  check(
+    'hidden-frame buffer growth is not accepted as proof of typing',
+    innerBody.textContent === 'Z' && res.success === false
+  );
 }
 
 // --- 2. plain textarea path -------------------------------------------------

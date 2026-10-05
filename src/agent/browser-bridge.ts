@@ -1857,6 +1857,44 @@ function inPageTypeText(
     target.dispatchEvent(new view.KeyboardEvent('keyup', init));
   };
 
+  // Type one character per keydown/keypress/keyup, the way a keyboard does.
+  // Canvas editors never read the hidden input frame's DOM - execCommand
+  // grows that frame's textContent while the document stays unchanged. They
+  // consume key events: the editor reads the keypress's legacy char code and
+  // commits String.fromCharCode(which) to the document (this is why a
+  // keypress on Home once typed "$" - its keyCode is 36).
+  const typeChars = (str: string): void => {
+    const view = (doc.defaultView || window) as unknown as Window & typeof globalThis;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      const charCode = str.charCodeAt(i);
+      // keydown carries the physical key code (letters report their uppercase
+      // code); symbols stay at 0 so char codes 33-40 (PageUp/Down/End/Home/
+      // arrows) cannot move the caret before the insert lands.
+      const isLetter = /^[A-Za-z]$/.test(ch);
+      const isDigit = /^[0-9]$/.test(ch);
+      const physical = isLetter
+        ? ch.toUpperCase().charCodeAt(0)
+        : isDigit
+          ? ch.charCodeAt(0)
+          : 0;
+      const init: KeyboardEventInit = {
+        key: ch,
+        code: isLetter ? `Key${ch.toUpperCase()}` : isDigit ? `Digit${ch}` : '',
+        keyCode: physical,
+        which: physical,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      };
+      target.dispatchEvent(new view.KeyboardEvent('keydown', init));
+      target.dispatchEvent(
+        new view.KeyboardEvent('keypress', { ...init, keyCode: charCode, which: charCode })
+      );
+      target.dispatchEvent(new view.KeyboardEvent('keyup', init));
+    }
+  };
+
   if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') {
     const el = target as HTMLTextAreaElement;
     el.value = text;
@@ -1876,29 +1914,33 @@ function inPageTypeText(
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.length) {
-      let ok = false;
-      try {
-        ok = doc.execCommand('insertText', false, line);
-      } catch {
-        ok = false;
-      }
-      if (!ok) {
-        const sel = doc.getSelection();
-        if (sel && sel.rangeCount > 0) {
-          const range = sel.getRangeAt(0);
-          range.deleteContents();
-          const node = doc.createTextNode(line);
-          range.insertNode(node);
-          range.setStartAfter(node);
-          range.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        } else {
-          target.textContent = (target.textContent || '') + line;
+      if (isCanvas) {
+        typeChars(line);
+      } else {
+        let ok = false;
+        try {
+          ok = doc.execCommand('insertText', false, line);
+        } catch {
+          ok = false;
         }
-        target.dispatchEvent(
-          new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: line })
-        );
+        if (!ok) {
+          const sel = doc.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0);
+            range.deleteContents();
+            const node = doc.createTextNode(line);
+            range.insertNode(node);
+            range.setStartAfter(node);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          } else {
+            target.textContent = (target.textContent || '') + line;
+          }
+          target.dispatchEvent(
+            new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: line })
+          );
+        }
       }
       chars += line.length;
     }
@@ -1915,16 +1957,54 @@ function inPageTypeText(
     }
   }
 
-  // execCommand reports dispatch, not acceptance. Only claim the text landed
-  // when the target's own content actually grew.
+  const failureMessage =
+    `The caret is probably not inside the document. Take a screenshot, click at the exact spot in the document ` +
+    `where the text must go, and call type_text again once. Do NOT try to "give the editor focus" by pressing ` +
+    `caret-movement keys - they reach the document and move the caret. If the one retry also fails, report ` +
+    `the blocker instead of looping.`;
+
+  if (isCanvas) {
+    // The hidden input frame's textContent is not proof - it grows even when
+    // the editor discards the text, which is how type_text reported "Typed 44
+    // characters" into a Google Doc that never changed. Confirm against the
+    // page text the user sees instead.
+    const squash = (s: string) => s.replace(/\s+/g, '');
+    let pageText = '';
+    try {
+      pageText = (document.body && (document.body.innerText || document.body.textContent || '')) || '';
+    } catch {
+      pageText = '';
+    }
+    const after = squash(pageText);
+    const wanted = lines.map(squash).filter(Boolean);
+    const confirmed = wanted.length === 0 || wanted.every((chunk) => after.includes(chunk));
+    if (!confirmed) {
+      return {
+        success: false,
+        message:
+          `Dispatched ${chars} character(s) to the canvas editor, but the document text did not change, so the ` +
+          `editor did not accept the text. ${failureMessage}`,
+        lines: lines.length,
+        chars,
+      };
+    }
+    return {
+      success: true,
+      message: `Typed ${chars} character(s) and ${breaks} line break(s) into the canvas editor. Verified against the document text.`,
+      lines: lines.length,
+      chars,
+    };
+  }
+
+  // Plain contenteditable: the target's own DOM is the document here. Only
+  // claim the text landed when that content actually grew.
   const afterLength = (target.textContent || '').length;
   if (afterLength <= beforeLength) {
     return {
       success: false,
       message:
-        `Dispatched ${chars} character(s) to the canvas editor, but its content did not change, so the editor did ` +
-        `not accept the text. A coordinate click sets the caret without giving the editor keyboard focus. ` +
-        `Click the target again, press a navigation key such as Home, then call type_text again.`,
+        `Dispatched ${chars} character(s), but the target's content did not change, so the editor did not accept ` +
+        `the text. ${failureMessage}`,
       lines: lines.length,
       chars,
     };
@@ -1932,7 +2012,7 @@ function inPageTypeText(
 
   return {
     success: true,
-    message: `Typed ${chars} character(s) and ${breaks} line break(s)${isCanvas ? ' into the canvas editor' : ''}.`,
+    message: `Typed ${chars} character(s) and ${breaks} line break(s).`,
     lines: lines.length,
     chars,
   };

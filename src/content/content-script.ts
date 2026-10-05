@@ -1916,6 +1916,51 @@ function insertTextAtCaret(target: HTMLElement, text: string): boolean {
 }
 
 /**
+ * Type text the way a keyboard does: one character per keydown/keypress/keyup.
+ *
+ * Canvas editors never read their hidden input frame's DOM -
+ * execCommand('insertText') grows that frame's textContent while the document
+ * stays unchanged. They consume key events: the editor reads the keypress's
+ * legacy char code and commits String.fromCharCode(which) to the document.
+ * That is why a keypress on Home typed "$" into a real Google Doc (Home's
+ * keyCode is 36) - proof this route reaches the editor's model, and the only
+ * one observed to change a canvas editor's content at all.
+ */
+function typeCharactersAsKeys(target: HTMLElement, text: string): void {
+  const doc = target.ownerDocument || document;
+  const view = (doc.defaultView || window) as unknown as Window & typeof globalThis;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const charCode = text.charCodeAt(i);
+    // keydown carries the physical key code (a letter reports its uppercase
+    // code, as on a real keyboard). Symbols stay at 0: char codes 33-40 are
+    // PageUp/Down/End/Home/arrows, and a keydown carrying one of those would
+    // move the caret before the insert lands.
+    const isLetter = /^[A-Za-z]$/.test(ch);
+    const isDigit = /^[0-9]$/.test(ch);
+    const physical = isLetter
+      ? ch.toUpperCase().charCodeAt(0)
+      : isDigit
+        ? ch.charCodeAt(0)
+        : 0;
+    const init: KeyboardEventInit = {
+      key: ch,
+      code: isLetter ? `Key${ch.toUpperCase()}` : isDigit ? `Digit${ch}` : '',
+      keyCode: physical,
+      which: physical,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    };
+    target.dispatchEvent(new view.KeyboardEvent('keydown', init));
+    target.dispatchEvent(
+      new view.KeyboardEvent('keypress', { ...init, keyCode: charCode, which: charCode })
+    );
+    target.dispatchEvent(new view.KeyboardEvent('keyup', init));
+  }
+}
+
+/**
  * Give a canvas editor real keyboard focus before inserting text.
  *
  * A coordinate click sets the editor's internal caret but leaves DOM focus on
@@ -1983,7 +2028,6 @@ function typeTextIntoPage(
     }
 
     // Snapshot what we can observe so we never report success we cannot back up.
-    const docRef = target.ownerDocument || document;
     const beforeLength = (target.textContent || '').length;
 
     if (opts.clearFirst) {
@@ -2007,7 +2051,12 @@ function typeTextIntoPage(
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (line.length > 0) {
-        insertTextAtCaret(target, line);
+        if (jsDriven) {
+          // Real key events are the only input a canvas editor's model reads.
+          typeCharactersAsKeys(target, line);
+        } else {
+          insertTextAtCaret(target, line);
+        }
         typed += line.length;
       }
       if (i < lines.length - 1) {
@@ -2026,15 +2075,31 @@ function typeTextIntoPage(
     }
 
     const where = editor.name ? `${editor.name} (canvas-rendered editor)` : target.tagName.toLowerCase();
-    const afterLength = (target.textContent || '').length;
-    const grew = afterLength > beforeLength;
     const isPlainTextField = /^(INPUT|TEXTAREA)$/.test(target.tagName);
 
-    // execCommand reports whether it dispatched an edit, not whether the editor
-    // accepted it. Claiming "typed N characters" when nothing changed is what
-    // makes an agent retry the same call forever, so only say that when the
-    // target's own content actually grew.
-    const confirmed = grew || isPlainTextField;
+    // Claiming "Typed N characters" when the document never changed is what
+    // makes an agent retry the same call forever. For a canvas editor the
+    // hidden input frame's textContent is NOT proof - it grows even when the
+    // editor discards the text - so confirm against the page text the user
+    // sees, the same source get_page_content reads.
+    let confirmed: boolean;
+    if (isPlainTextField) {
+      confirmed = true;
+    } else if (jsDriven) {
+      const squash = (s: string) => s.replace(/\s+/g, '');
+      let pageText = '';
+      try {
+        const body = document.body as HTMLElement | null;
+        pageText = (body && (body.innerText || body.textContent || '')) || '';
+      } catch {
+        pageText = '';
+      }
+      const after = squash(pageText);
+      const wanted = lines.map(squash).filter(Boolean);
+      confirmed = wanted.length === 0 || wanted.every((chunk) => after.includes(chunk));
+    } else {
+      confirmed = (target.textContent || '').length > beforeLength;
+    }
     const newlineNote =
       opts.pressEnterForNewlines === false && newlines > 0
         ? ' Newlines were NOT sent as Enter, so they were typed literally.'
@@ -2045,11 +2110,11 @@ function typeTextIntoPage(
         success: false,
         verified: false,
         message:
-          `Dispatched ${typed} character(s) to ${where}, but the target's content did not change, so the editor ` +
-          `did not accept the text. A coordinate click sets the caret without giving the editor keyboard focus, and ` +
-          `Google Docs discards input until a key event reaches its hidden input frame. ` +
-          `To fix: click the target again, then immediately press any navigation key such as Home or End to give the ` +
-          `editor focus, and call type_text again. Verify with capture_tab_screenshot before assuming it worked.`,
+          `Dispatched ${typed} character(s) to ${where}, but the document text did not change, so the editor ` +
+          `did not accept the text. The caret is probably not inside the document. Take a capture_tab_screenshot, ` +
+          `click_at_position on the exact line where the text must go, and call type_text again once. ` +
+          `Do NOT try to "give the editor focus" by pressing caret-movement keys - they reach the document and ` +
+          `move the caret. If the one retry also fails, report the blocker instead of looping.`,
         target: where,
         lines: lines.length,
         chars: typed,
@@ -2061,7 +2126,9 @@ function typeTextIntoPage(
       verified: true,
       message:
         `Typed ${typed} character(s) and ${newlines} line break(s) into ${where}.${newlineNote}` +
-        (isPlainTextField ? '' : ' Confirm with capture_tab_screenshot that the document shows the text.'),
+        (isPlainTextField
+          ? ''
+          : ' Verified against the document text. Confirm with capture_tab_screenshot if the formatting matters.'),
       target: where,
       lines: lines.length,
       chars: typed,
