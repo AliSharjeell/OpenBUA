@@ -558,7 +558,7 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - In modern SPAs like Gmail, URLs often retain parameters like '?compose=new' or '?view=cm', and DOM templates for dialogs persist invisibly.
    - Once a 'Message sent' toast appears, the compose dialog closes, or the message is visible in Sent mail, mark the action complete immediately!
    - Do NOT attempt to close, clean up, or inspect background template elements. Do NOT enter an overthinking loop verifying already submitted actions.
-   - BAN POST-ACTION SCREENSHOTS: Taking screenshots to verify form typing, sending, navigation, or sorting consumes high model inference time (vision token processing) and adds 15-20 seconds of unnecessary latency. NEVER call 'capture_tab_screenshot' to "confirm visually" after routine form submissions, fills, navigations, clicks, or sorting. Screenshots are strictly reserved for unhandled errors or when visually blocked.
+   - Avoid screenshots after routine DOM form submissions, fills, navigation or sorting when reliable text verification is available. Canvas document editing is an exception: screenshots before writing and after edits are required to verify caret placement, section and formatting (see CANVAS EDITORS).
 
 10. ANTI-LOOP STATE CHECKLIST & SATURATION CRITERIA (EXPLORATION BUDGET):
     - Prevent the "State-Drift & Unbounded Exploration Loop" when inspecting lists, search results, or candidate threads:
