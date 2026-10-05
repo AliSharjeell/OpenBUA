@@ -439,7 +439,7 @@ export function ChatView({
 
   const handleSend = async (textToSend?: string) => {
     const promptText = (textToSend || input).trim();
-    if (!promptText || isBusy) return;
+    if (!promptText || isBusy || !harness) return;
 
     if (!hasKey) {
       onNavigateToSettings();
@@ -855,7 +855,7 @@ export function ChatView({
           <Textarea
             ref={textareaRef}
             rows={1}
-            placeholder="Ask OpenBUA"
+            placeholder={harness ? 'Ask OpenBUA' : 'Loading saved data…'}
             value={input}
             onChange={(e) => {
               handleInputChange(e.target.value);
@@ -867,7 +867,7 @@ export function ChatView({
             }}
             onKeyDown={handleKeyDown}
             className="border-0 bg-transparent min-h-[32px] max-h-[136px] resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans flex-1"
-            disabled={isBusy || !hasKey}
+            disabled={isBusy || !hasKey || !harness}
           />
 
           {/* End of Bar: Send / Stop Button */}
@@ -887,8 +887,8 @@ export function ChatView({
                 size="icon"
                 className="h-7 w-7 rounded-full bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF] shadow-sm transition-colors cursor-pointer flex items-center justify-center"
                 onClick={() => handleSend()}
-                disabled={!input.trim() || !hasKey}
-                title="Send (Enter)"
+                disabled={!input.trim() || !hasKey || !harness}
+                title={harness ? 'Send (Enter)' : 'Loading saved data…'}
               >
                 <Send className="w-3.5 h-3.5 text-white" />
               </Button>
