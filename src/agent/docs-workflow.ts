@@ -27,6 +27,8 @@ blocker; never invented coordinates or writing into a different section.
 OTHER EDITS: inspect, place/select the intended text, inspect the fresh caret/range,
 then type and inspect again. Screenshot coordinates are image pixels; tools convert
 device pixel ratio. After scrolling, zooming or edits, use a fresh screenshot.
+type_text primes editor focus itself. Never mash keys to wake the editor: click again
+at the correct position and inspect the caret before retrying once.
 inspect_docs_editor reports actual toolbar states; set_docs_formatting requests an
 explicit on/off state. Open style menus using click_element and inspect afterward.
 Null states are unknown/mixed. Native lists need text without literal bullet dots.
