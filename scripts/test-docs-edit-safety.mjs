@@ -12,7 +12,7 @@ const { protectDocsEdits } = await import(`data:text/javascript;base64,${Buffer.
 globalThis.__docsSafetyTab = { id: 1, url: 'https://docs.google.com/document/d/test/edit' };
 const calls = [];
 const policy = { cloneRequired: false, taskEpoch: 0 };
-const names = ['type_text', 'press_key_combination', 'click_at_position', 'capture_tab_screenshot', 'docs_clipboard', 'select_docs_text'];
+const names = ['type_text', 'press_key_combination', 'click_at_position', 'capture_tab_screenshot', 'docs_clipboard', 'select_docs_text', 'clipboard_action'];
 const tools = protectDocsEdits(names.map(name => ({ name, execute: async (_id, params) => {
   calls.push({ name, params });
   if (name === 'capture_tab_screenshot' || name === 'select_docs_text') return { content: [{ type: 'image', mimeType: 'image/png', data: 'test' }], details: {} };
@@ -23,6 +23,10 @@ const run = (name, params = {}) => tools.find(tool => tool.name === name).execut
 assert.equal((await run('type_text', { text: 'title' })).details.blocked, true, 'cannot type before inspecting location');
 await run('capture_tab_screenshot');
 await run('click_at_position', { x: 10, y: 20 });
+assert.equal((await run('press_key_combination', { key: 'Delete' })).details.blocked, true, 'deleting at an unchecked selection is blocked');
+assert.equal((await run('docs_clipboard', { action: 'copy' })).details.blocked, true, 'copying an unchecked range is blocked');
+assert.equal((await run('clipboard_action', { action: 'copy' })).details.blocked, true, 'Docs shortcuts must use the browser command tool');
+assert.equal((await run('press_key_combination', { key: 'd', ctrlKey: true })).details.blocked, true, 'Ctrl+D must not be treated as block duplication');
 assert.equal((await run('type_text', { text: 'title' })).details.blocked, true, 'click invalidates the previous screenshot');
 await run('capture_tab_screenshot');
 const typed = await run('type_text', { text: 'title' });
