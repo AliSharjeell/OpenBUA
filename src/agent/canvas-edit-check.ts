@@ -52,7 +52,7 @@ export async function checkCanvasTextInsertion(
   }
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id }, func: inspectCanvasInsertion,
-    args: [text, expectedCaretText, Boolean(allowUniformParagraphStyle)],
+    args: [text, expectedCaretText || '', Boolean(allowUniformParagraphStyle)],
   });
   return results[0]?.result || { allowed: false, message: 'No text inserted: could not inspect Google Docs formatting.' };
 }
