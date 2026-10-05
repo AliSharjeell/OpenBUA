@@ -1,6 +1,7 @@
 // Local storage service using chrome.storage.local with browser fallback for dev/testing
 
 import { AppSettings, UserDocument, ChatMessage, ChatSession, SuggestedMemory } from '../types';
+import { compactMemoryMedia } from './memory-media';
 
 const SETTINGS_KEY = 'autoform_settings';
 const GLOBAL_MEMORY_KEY = 'autoform_global_memory';
@@ -128,15 +129,36 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
 // ========================================================
 // Global Memories (Consistent across all tabs)
 // ========================================================
+const pendingMemoryLoads = new Map<string, Promise<UserDocument[]>>();
+
+function loadMemoryList(key: string, defaults: UserDocument[] = []): Promise<UserDocument[]> {
+  const pending = pendingMemoryLoads.get(key);
+  if (pending) return pending;
+  const load = (async () => {
+    const docs = await getStorageItem<UserDocument[]>(key, defaults);
+    const compacted: UserDocument[] = [];
+    // Sequential conversion bounds peak memory when several legacy videos exist.
+    for (const doc of docs) compacted.push(await compactMemoryMedia(doc));
+    if (compacted.some((doc, index) => doc !== docs[index])) {
+      // A failed metadata write leaves the old inline bytes intact in storage.
+      await setStorageItem(key, compacted);
+    }
+    return compacted;
+  })();
+  pendingMemoryLoads.set(key, load);
+  void load.finally(() => pendingMemoryLoads.delete(key)).catch(() => {});
+  return load;
+}
+
 export async function loadGlobalMemories(): Promise<UserDocument[]> {
-  const list = await getStorageItem<UserDocument[]>(GLOBAL_MEMORY_KEY, DEFAULT_GLOBAL_MEMORIES);
+  const list = await loadMemoryList(GLOBAL_MEMORY_KEY, DEFAULT_GLOBAL_MEMORIES);
   return list.filter((m) => m.id !== 'mem-default-profile');
 }
 
 export async function saveGlobalMemory(doc: UserDocument): Promise<void> {
   const memories = await loadGlobalMemories();
   const index = memories.findIndex((m) => m.id === doc.id);
-  const toSave = { ...doc, isGlobal: true };
+  const toSave = await compactMemoryMedia({ ...doc, isGlobal: true });
   if (index >= 0) {
     memories[index] = toSave;
   } else {
@@ -165,14 +187,14 @@ export async function toggleGlobalMemoryActive(id: string): Promise<UserDocument
 // ========================================================
 export async function loadTabMemories(tabKey: string): Promise<UserDocument[]> {
   const key = `${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`;
-  return await getStorageItem<UserDocument[]>(key, []);
+  return await loadMemoryList(key);
 }
 
 export async function saveTabMemory(tabKey: string, doc: UserDocument): Promise<void> {
   const key = `${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`;
   const memories = await loadTabMemories(tabKey);
   const index = memories.findIndex((m) => m.id === doc.id);
-  const toSave = { ...doc, isGlobal: false, tabUrlPattern: tabKey };
+  const toSave = await compactMemoryMedia({ ...doc, isGlobal: false, tabUrlPattern: tabKey });
   if (index >= 0) {
     memories[index] = toSave;
   } else {
