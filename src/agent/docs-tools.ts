@@ -1,6 +1,6 @@
 import { Type } from '@sinclair/typebox';
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
-import { runDocsInspection, runDocsToggle } from './docs-editor';
+import { runDocsInspection, runDocsToggle, runDocsClipboard } from './docs-editor';
 import { captureTabScreenshot, clickAtPosition } from './browser-bridge';
 
 async function observedResult(details: unknown): Promise<AgentToolResult> {
@@ -54,5 +54,16 @@ export const selectDocsTextTool: AgentTool<typeof SelectSchema> = {
       const end = await clickAtPosition({ ...params.end, shiftKey: true });
       return await observedResult({ dispatched: end.success, start, end, editor: await runDocsInspection(), note: 'Verify the highlighted range in the screenshot. Dispatch success does not establish selection correctness.' });
     } catch (error) { return { content: [{ type: 'text', text: String(error) }], details: { success: false } }; }
+  },
+};
+
+const ClipboardSchema = Type.Object({ action: Type.Union([Type.Literal('copy'), Type.Literal('paste'), Type.Literal('cut')]) });
+export const docsClipboardTool: AgentTool<typeof ClipboardSchema> = {
+  name: 'docs_clipboard', label: 'Copy or Paste Formatted Docs Selection',
+  description: 'Run the browser copy/paste/cut command in the focused Google Docs input, allowing Docs rich-text clipboard handlers to preserve source formatting. First select_docs_text and visually verify the complete source block; copy, place the caret at the insertion point, verify, then paste. Inspect the returned screenshot before further edits or retries. Cut only if moving/removing was requested. This uses the system clipboard and overwrites it on copy/cut. Command acceptance does not verify content or formatting.',
+  parameters: ClipboardSchema,
+  execute: async (_id, params) => {
+    try { return await observedResult({ action: await runDocsClipboard(params.action), editor: await runDocsInspection() }); }
+    catch (error) { return { content: [{ type: 'text', text: String(error) }], details: { success: false } }; }
   },
 };

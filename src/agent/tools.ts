@@ -2,7 +2,7 @@
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { checkCanvasTextInsertion } from './canvas-edit-check';
-import { inspectDocsEditorTool, selectDocsTextTool, setDocsFormattingTool } from './docs-tools';
+import { inspectDocsEditorTool, selectDocsTextTool, setDocsFormattingTool, docsClipboardTool } from './docs-tools';
 import {
   inspectActiveTabForm,
   fillActiveTabFields,
@@ -1253,6 +1253,7 @@ export function createAgentTools(sessionId?: string): AgentTool<any>[] {
     inspectDocsEditorTool,
     selectDocsTextTool,
     setDocsFormattingTool,
+    docsClipboardTool,
     fillFormFieldsTool,
     uploadFileToFormTool,
     postToSocialTool,

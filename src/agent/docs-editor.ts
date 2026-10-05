@@ -56,3 +56,33 @@ export async function runDocsToggle(controlId: string, enabled: boolean) {
   const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: setDocsToggle, args: [controlId, enabled] });
   return results[0]?.result || { success: false, message: 'Formatting action could not be inspected.' };
 }
+
+export function commandDocsClipboard(action: string) {
+  if (!['copy', 'paste', 'cut'].includes(action)) return { success: false, message: 'Use copy, paste, or cut.' };
+  let editorDocument = document;
+  for (const frame of Array.from(document.querySelectorAll('iframe'))) {
+    if (!/texteventtarget/i.test(`${frame.id} ${frame.className}`)) continue;
+    try {
+      if (frame.contentDocument) editorDocument = frame.contentDocument;
+    } catch { /* fall back to outer active document */ }
+    break;
+  }
+  const target = editorDocument.activeElement as HTMLElement | null;
+  if (!target || !(target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
+    return { success: false, message: 'Document input is not focused. Select or place the caret in the document body and verify a screenshot first.' };
+  }
+  // Browser command triggers clipboard events, including Docs rich-text handlers.
+  // Never fall back to typing or retry a paste automatically.
+  try {
+    const accepted = editorDocument.execCommand(action);
+    return { success: accepted, commandAccepted: accepted, placementVerified: false,
+      message: accepted ? `${action} command accepted. Verify the selection/result in the screenshot; command acceptance does not prove content or formatting.` : `${action} was rejected by the browser. Check clipboard permissions and editor focus. Do not assume it completed.` };
+  } catch (error) { return { success: false, message: `Clipboard command failed: ${String(error)}` }; }
+}
+
+export async function runDocsClipboard(action: string) {
+  const tab = await getActiveTab();
+  if (!tab?.id || !/^https:\/\/docs\.google\.com\/document\//.test(tab.url || '')) throw new Error('Activate a Google Docs document first.');
+  const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: commandDocsClipboard, args: [action] });
+  return results[0]?.result || { success: false, message: 'Clipboard command returned no result.' };
+}
