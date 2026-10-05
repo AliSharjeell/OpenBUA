@@ -1210,7 +1210,7 @@ export const typeTextTool: AgentTool<typeof TypeTextSchema> = {
 const ClipboardActionSchema = Type.Object({
   action: Type.String({
     description:
-      'copy, cut, paste, selectAll, or duplicate. These dispatch the real shortcut into the editor, so Google Docs runs its own native path and heading styles, bold runs and bullet lists are preserved exactly.',
+      'copy, cut, paste, selectAll, or duplicate. Dispatches keyboard events; inspect the result because dispatch does not prove a clipboard operation occurred. In Google Docs use docs_clipboard for copy, cut and paste.',
   }),
 });
 
@@ -1218,7 +1218,7 @@ export const clipboardActionTool: AgentTool<typeof ClipboardActionSchema> = {
   name: 'clipboard_action',
   label: 'Clipboard (Copy / Paste)',
   description:
-    'Copy, cut, paste, select all, or duplicate in the active tab, using the editor\'s own native clipboard so formatting is preserved exactly. USE THIS to match existing formatting: if the user says "keep the formatting like <existing block>", select that block with click_at_position plus shiftKey, copy it, click where the new content should go, paste it, then edit the text of the pasted clone. This is far faster and far more reliable than trying to work out which bold and list styles a renderer will inherit. Select a range by clicking at its start, then click at its end with shiftKey: true.',
+    'Dispatch a clipboard keyboard shortcut in the active tab. Dispatch success does not verify clipboard contents or document changes. In Google Docs use select_docs_text and docs_clipboard to clone formatted blocks, and inspect_docs_editor to inspect formatting. Do not use duplicate in Docs: Ctrl+D is not a document block duplication command. Verify selection and placement with screenshots.',
   parameters: ClipboardActionSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     const allowed = ['copy', 'cut', 'paste', 'selectAll', 'duplicate'];
@@ -1236,7 +1236,7 @@ export const clipboardActionTool: AgentTool<typeof ClipboardActionSchema> = {
     }
     try {
       const res = await clipboardAction(action as 'copy' | 'cut' | 'paste' | 'selectAll' | 'duplicate');
-      return { content: [{ type: 'text', text: res.message }], details: res };
+      return { content: [{ type: 'text', text: `Clipboard shortcut dispatched. Verify the result with a screenshot; clipboard contents and document changes are unverified.` }], details: { action, dispatched: res.success, verified: false } };
     } catch (err: any) {
       return {
         content: [{ type: 'text', text: `Clipboard action failed: ${err?.message || err}` }],
