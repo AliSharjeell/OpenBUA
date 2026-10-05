@@ -288,6 +288,7 @@ export class FormAgentHarness {
   private userPromptInFlight = false;
   /** Covers entire requests, including auto-resume handoffs between agent runs. */
   private activePromptRuns = new Set<symbol>();
+  private configRefreshPending = false;
   private static readonly MAX_AUTO_RESUMES = 3;
   /**
    * Thinking budget per turn, in characters.
@@ -352,6 +353,12 @@ export class FormAgentHarness {
   public updateConfig(settings: AppSettings, documents: UserDocument[]) {
     this.settings = settings;
     this.documents = documents;
+    if (this.activePromptRuns.size || this.resumePending || this.userPromptInFlight || this.agent?.state.isStreaming) {
+      // Background media maintenance changes attachment references while the
+      // panel is usable. Retain the running agent and refresh at the next request.
+      this.configRefreshPending = true;
+      return;
+    }
     this.setupAgent();
   }
 
@@ -952,6 +959,7 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public setupAgent(initialHistory?: ChatMessage[]) {
+    this.configRefreshPending = false;
     if (initialHistory) {
       this.chatHistory = initialHistory;
     }
@@ -1536,6 +1544,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       }
 
       if (this.userAborted || this.resumeEpoch !== epoch) return;
+      if (this.configRefreshPending) this.setupAgent();
       const currentMsgs = this.agent.state.messages;
       const lastMsg = currentMsgs[currentMsgs.length - 1] as any;
       const lastContent =
