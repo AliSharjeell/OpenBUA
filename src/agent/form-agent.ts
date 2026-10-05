@@ -827,23 +827,22 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * 'get_active_tab_form' will show only toolbar chrome (Rename, Zoom, Menus). An empty or
         useless form summary in Google Docs does NOT mean the page failed to load.
       * 'get_page_content' will return ruler numbers and stray digits, not the document.
-      * 'click_element', 'fill_form_fields' and innerHTML manipulation DO NOT WORK. Setting a
-        contenteditable's value does not change the document. Do not attempt either.
+      * DOM tools cannot edit canvas body text. They CAN inspect and click normal toolbar
+        buttons and style menus. Setting contenteditable values does not edit the document.
       * NEVER search for a text node, a paragraph div, or a caret element. They do not exist.
         Do not describe a plan for how you might click. Just use the two tools below.
     *** WHEN THE USER SAYS "KEEP / MATCH THE FORMATTING LIKE <EXISTING BLOCK>" - DO THIS, DO NOT REASON ABOUT IT ***
     This is the single biggest time sink in a canvas editor. NEVER try to work out how the editor will
     inherit bold, heading styles or list formatting from the line you are typing into. That reasoning
     is unanswerable without testing, it produces no progress, and it can burn ten minutes in one turn.
-    Instead COPY the existing block and edit the clone, because the editor's own copy path preserves
-    formatting exactly:
+    Instead COPY the existing block and edit the clone using the editor's rich clipboard path:
       * STEP 1 — screenshot, and note where the existing block starts and ends.
-      * STEP 2 — SELECT it: 'click_at_position({ x: <start> })', then
-        'click_at_position({ x: <end>, y: <end>, shiftKey: true })'. The second click extends the
-        selection from the first. 'click_at_position' with shiftKey is the only way to select a range.
-      * STEP 3 — 'clipboard_action({ action: "copy" })'.
+      * STEP 2 — SELECT it with select_docs_text using start and end screenshot coordinates.
+        Verify the highlighted range before copying. Inspect the toolbar states it returns.
+      * STEP 3 — 'docs_clipboard({ action: "copy" })'. Check command acceptance.
       * STEP 4 — 'click_at_position({ x: <where the new content goes> })', then
-        'clipboard_action({ action: "paste" })'. You now have a pixel-identical clone.
+        Verify the destination caret, then 'docs_clipboard({ action: "paste" })'.
+        Inspect the returned screenshot to confirm a complete, correctly formatted clone.
       * STEP 5 — Edit only the TEXT of the clone: for each line, click at its start, shift-click at its
         end to select just that line's text, then 'type_text' the replacement. Formatting is untouched
         because you are replacing text, not recreating a paragraph.
