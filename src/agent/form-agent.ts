@@ -1505,8 +1505,10 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public async prompt(input: string): Promise<void> {
-    this.docsEditPolicy.taskEpoch += 1;
-    this.docsEditPolicy.cloneRequired = /format/i.test(input) && /like|same|match/i.test(input);
+    if (!/^(continue|resume|try again|keep going)[.!]*$/i.test(input.trim())) {
+      this.docsEditPolicy.taskEpoch += 1;
+      this.docsEditPolicy.cloneRequired = /format/i.test(input) && /like|same|match/i.test(input);
+    }
     const config = this.getActiveConfig();
     if (!config.apiKey || !config.apiKey.trim()) {
       const modeLabel =
