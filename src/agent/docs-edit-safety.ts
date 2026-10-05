@@ -10,10 +10,10 @@ export interface DocsEditPolicy { cloneRequired: boolean; taskEpoch: number }
 // Per tool-set/session and per document: observations never replenish undo credit.
 export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolicy): AgentTool<any>[] {
   let epoch = policy?.taskEpoch;
-  const documents = new Map<string, { observed: boolean; undoAvailable: boolean; copied: boolean; cloned: boolean }>();
+  const documents = new Map<string, { observed: boolean; undoAvailable: boolean; copied: boolean; cloned: boolean; pendingPaste: boolean; pasteAttempted: boolean; pasteFailed: boolean }>();
   const relevant = new Set(['type_text', 'press_key_combination', 'click_at_position', 'click_element',
     'scroll_page', 'capture_tab_screenshot', 'inspect_docs_editor', 'find_docs_text', 'select_docs_text',
-    'set_docs_formatting', 'docs_clipboard', 'clipboard_action']);
+    'set_docs_formatting', 'docs_clipboard', 'confirm_docs_clone', 'clipboard_action']);
   return tools.map(tool => !relevant.has(tool.name) ? tool : {
     ...tool,
     execute: async (...args: Parameters<typeof tool.execute>) => {
@@ -22,8 +22,17 @@ export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolic
       if (epoch !== policy?.taskEpoch) { documents.clear(); epoch = policy?.taskEpoch; }
       const key = `${tab.id}:${(tab.url || '').split('#')[0]}`;
       let state = documents.get(key);
-      if (!state) { state = { observed: false, undoAvailable: false, copied: false, cloned: false }; documents.set(key, state); }
+      if (!state) { state = { observed: false, undoAvailable: false, copied: false, cloned: false, pendingPaste: false, pasteAttempted: false, pasteFailed: false }; documents.set(key, state); }
       const params = args[1] as Record<string, any>;
+      if (tool.name === 'confirm_docs_clone') {
+        if (!state.pendingPaste || !state.observed) return blocked('No clone confirmation recorded. Inspect a fresh screenshot of a dispatched paste first.');
+        state.cloned = params.outcome === 'duplicated';
+        state.pendingPaste = false;
+        state.pasteFailed = !state.cloned;
+      }
+      if (policy?.cloneRequired && tool.name === 'docs_clipboard' && params.action === 'paste' && state.pasteAttempted) {
+        return blocked('No second paste dispatched. Inspect and report the previous paste with confirm_docs_clone. If no duplicate appeared, stop and report the clipboard failure instead of pasting repeatedly or editing the original.');
+      }
       const inputKey = String(params.key || '').toLowerCase();
       if (tool.name === 'clipboard_action' || (tool.name === 'press_key_combination' && params.ctrlKey && ['c', 'v', 'x', 'd'].includes(inputKey))) {
         return blocked('No clipboard shortcut dispatched. Use docs_clipboard for Docs copy, cut or paste and inspect the returned screenshot. Synthetic shortcuts do not prove a clipboard operation, and Ctrl+D is not block duplication.');
@@ -45,8 +54,9 @@ export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolic
       if ((tool.name === 'type_text' || tool.name === 'docs_clipboard' || deletes) && !state.observed) {
         return blocked('No edit dispatched. Capture or inspect the document AFTER the most recent caret/selection movement and verify the intended location before typing or pasting. A successful coordinate click does not prove caret placement.');
       }
-      const moves = ['click_at_position', 'click_element', 'scroll_page', 'select_docs_text', 'press_key_combination'].includes(tool.name);
+      const moves = ['click_at_position', 'click_element', 'scroll_page', 'select_docs_text', 'press_key_combination'].includes(tool.name) || (tool.name === 'docs_clipboard' && params.action !== 'copy');
       if (moves) state.observed = false;
+      if (tool.name === 'docs_clipboard' && params.action === 'paste') state.pasteAttempted = true;
       const result = await tool.execute(...args);
       const details = result.details as Record<string, any> | undefined;
       if (result.content.some(item => item.type === 'image')) state.observed = true;
@@ -60,12 +70,22 @@ export function protectDocsEdits(tools: AgentTool<any>[], policy?: DocsEditPolic
           details: { ...details, success: false, dispatched: true, verified: false, placementVerified: false },
         };
       }
-      if (tool.name === 'docs_clipboard' && params.action !== 'copy' && details?.action?.commandAccepted) state.undoAvailable = true;
-      if (tool.name === 'docs_clipboard' && params.action === 'copy') state.copied = Boolean(details?.action?.commandAccepted);
-      if (tool.name === 'docs_clipboard' && params.action === 'paste' && details?.action?.commandAccepted && state.copied) state.cloned = true;
+      if (tool.name === 'docs_clipboard' && params.action === 'copy') {
+        state.copied = Boolean(details?.action?.clipboardVerified);
+        state.cloned = false;
+        state.pendingPaste = false;
+      }
+      if (tool.name === 'docs_clipboard' && params.action === 'paste') {
+        state.pendingPaste = Boolean(details?.action?.dispatched);
+        state.cloned = false;
+        if (!state.pendingPaste) state.pasteAttempted = false; // No event sent: fixing focus can retry safely.
+        else state.undoAvailable = true;
+      }
       if (policy?.cloneRequired && state.observed) {
         let nextAction: string;
-        if (state.cloned) nextAction = 'Next: select_docs_text for one text run in the pasted clone, inspect its highlight, then type_text its replacement without paragraph breaks.';
+        if (state.pasteFailed) nextAction = 'No complete duplicate was confirmed. Keep the original unchanged and report the clipboard failure. Do not repeat paste or edit the original as if it were a clone.';
+        else if (state.pendingPaste) nextAction = 'Next: inspect this screenshot and call confirm_docs_clone. Report duplicated only if a second complete block and the preserved original are visible; otherwise report no_change, merged or wrong_location. Do not edit the source or retry paste.';
+        else if (state.cloned) nextAction = 'Next: select_docs_text for one text run in the pasted clone, inspect its highlight, then type_text its replacement without paragraph breaks.';
         else if (tool.name === 'docs_clipboard' && params.action === 'copy' && state.copied) nextAction = 'Next: click_at_position at the start of the source heading to insert above it, then inspect the destination caret before docs_clipboard paste.';
         else if (state.copied) nextAction = 'Next: if the destination caret is correct in this image, call docs_clipboard paste. Otherwise correct its location and inspect again.';
         else if (tool.name === 'select_docs_text' && details?.dispatched) nextAction = 'Next: if the highlight covers the complete source project, call docs_clipboard copy. Otherwise correct the selection.';
