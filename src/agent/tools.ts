@@ -1176,7 +1176,7 @@ export const typeTextTool: AgentTool<typeof TypeTextSchema> = {
   name: 'type_text',
   label: 'Type Text at Caret',
   description:
-    'Types text at the current cursor position, one line at a time. Required for Google Docs, Sheets, Slides, Figma, Canva and Word Online, which render on a canvas and ignore anything fill_form_fields does. Always place the caret first with click_at_position and then call this. The result is verified against the document text: if it reports failure, the document did not change. Line breaks in the text are typed as Enter.',
+    'Types text at the current cursor position, one line at a time. Required for canvas editors such as Google Docs. Place the caret with click_at_position, then inspect a screenshot and any reported caret-line text before writing into a specific section. Text verification does not verify placement or formatting. An unverified insert may have landed: inspect a screenshot before retrying. Line breaks are typed as Enter.',
   parameters: TypeTextSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
