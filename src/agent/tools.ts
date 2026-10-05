@@ -2,6 +2,7 @@
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { checkCanvasTextInsertion } from './canvas-edit-check';
+import { inspectDocsEditorTool, selectDocsTextTool, setDocsFormattingTool } from './docs-tools';
 import {
   inspectActiveTabForm,
   fillActiveTabFields,
@@ -1249,6 +1250,9 @@ export const clipboardActionTool: AgentTool<typeof ClipboardActionSchema> = {
 export function createAgentTools(sessionId?: string): AgentTool<any>[] {
   return [
     getActiveTabFormTool,
+    inspectDocsEditorTool,
+    selectDocsTextTool,
+    setDocsFormattingTool,
     fillFormFieldsTool,
     uploadFileToFormTool,
     postToSocialTool,
