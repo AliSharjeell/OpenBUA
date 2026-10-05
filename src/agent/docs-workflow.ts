@@ -11,9 +11,16 @@ MATCH AN EXISTING PROJECT'S FORMATTING: follow exactly one workflow.
 2. Once heading through final bullet are visible, immediately call select_docs_text
    with start/end pixels read from the screenshot. Inspect the returned highlight.
    You do not need to reason about Enter, paragraph splitting or bold inheritance.
-3. docs_clipboard copy. Keep the original entry intact when adding another project.
-4. click_at_position at the source heading's start to insert above it, then inspect
-   the new caret screenshot. docs_clipboard paste and inspect the complete clone.
+3. docs_clipboard copy verifies actual clipboard text and rich HTML. Command acceptance
+   or selection text alone is not proof of clipboard contents. Preserve the source.
+4. click_at_position at the source heading's first letter with Shift off to clear the
+   highlight, then inspect the collapsed caret. Paste must not replace the selection.
+   docs_clipboard paste, then confirm_docs_clone from its screenshot. Report duplicated
+   only when both the complete new block and preserved original are visible. If only
+   one block remains, report no_change and stop; never edit the original or retry paste.
+   The copied block may already include its final paragraph break. Add Enter only if
+   a visible new block actually merged at its boundary with the original; do not press
+   Enter merely because a paste command was accepted or no duplicate appeared.
 5. Replace individual text runs of the clone using select_docs_text then type_text.
    Preserve paragraph breaks, title style, native list markers and bold label runs.
    Replace technology names separately from the bold Technologies: label. Do not
@@ -33,6 +40,8 @@ inspect_docs_editor reports actual toolbar states; set_docs_formatting requests 
 explicit on/off state. Open style menus using click_element and inspect afterward.
 Null states are unknown/mixed. Native lists need text without literal bullet dots.
 
+The missing Google Docs Offline extension banner does not establish a clipboard failure.
+Use observed clipboard/paste results rather than attributing failures to that banner.
 Canvas typing is unverified until compared with the BEFORE screenshot. Pre-existing
 text is not proof of a new insert or grounds for undoing old document history.
 At most one Undo for the current edit is allowed after inspection. Never repeatedly
