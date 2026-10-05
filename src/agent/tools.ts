@@ -1189,7 +1189,7 @@ export const typeTextTool: AgentTool<typeof TypeTextSchema> = {
     try {
       const check = await checkCanvasTextInsertion(params.text, params.expectedCaretText, params.allowUniformParagraphStyle);
       if (!check.allowed) {
-        return { content: [{ type: 'text', text: check.message || 'Insertion blocked.' }], details: { success: false, inserted: false }, isError: true };
+        return { content: [{ type: 'text', text: check.message || 'Insertion blocked.' }], details: { success: false, inserted: false } };
       }
       const res = await typeActiveTabText({
         text: params.text,
