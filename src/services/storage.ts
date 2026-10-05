@@ -134,23 +134,8 @@ const pendingMemoryLoads = new Map<string, Promise<UserDocument[]>>();
 function loadMemoryList(key: string, defaults: UserDocument[] = []): Promise<UserDocument[]> {
   const pending = pendingMemoryLoads.get(key);
   if (pending) return pending;
-  const load = (async () => {
-    const docs = await getStorageItem<UserDocument[]>(key, defaults);
-    const compacted: UserDocument[] = [];
-    // Sequential conversion bounds peak memory when several legacy videos exist.
-    for (const doc of docs) compacted.push(await compactMemoryMedia(doc));
-    if (compacted.some((doc, index) => doc !== docs[index])) {
-      // A failed metadata write leaves the old inline bytes intact in storage.
-      try {
-        await setStorageItem(key, compacted);
-      } catch (error) {
-        // The blob was committed, so this launch can use the compact metadata
-        // even if persistence needs retrying next time. Never block panel init.
-        console.warn('[OpenBUA] Could not persist media migration:', error);
-      }
-    }
-    return compacted;
-  })();
+  // Reads never decode media or wait for IndexedDB. Migration is explicit.
+  const load = getStorageItem<UserDocument[]>(key, defaults);
   pendingMemoryLoads.set(key, load);
   void load.finally(() => pendingMemoryLoads.delete(key)).catch(() => {});
   return load;
