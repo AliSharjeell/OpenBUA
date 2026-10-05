@@ -1229,6 +1229,11 @@ async function streamAnthropic(
 
     if (response) {
       const errorBody = await response.text();
+      if (payload.tool_choice?.type === 'any' && toolChoiceRejected(response.status, errorBody) && attempt < maxRetries) {
+        console.warn('[streamAnthropic] Provider rejected forced tool choice; retrying recovery with auto tool choice.');
+        payload.tool_choice = { type: 'auto' };
+        continue;
+      }
       throw new Error(`Anthropic Provider error (${response.status}): ${errorBody || response.statusText}`);
     }
   }
