@@ -371,6 +371,19 @@ function think(h, chars, chunk = 400) {
     'and to click precisely instead of mashing keys',
     /never mash keys/i.test(prompt) && /click again/i.test(prompt)
   );
+  check(
+    'it warns that a gap between headings is paragraph spacing, not a blank line',
+    /paragraph style's spacing, NOT an empty line/i.test(prompt)
+  );
+  check(
+    'and forbids Backspace/Enter as a way to "remove the gap"',
+    /Do not press Backspace or Enter/i.test(prompt) &&
+      /Backspace joins the two lines/i.test(prompt)
+  );
+  check(
+    'it demands the whole entry in one pass, not a title then spacing polish',
+    /Write the WHOLE entry/i.test(prompt) && /spacing polish is not a substitute/i.test(prompt)
+  );
 }
 
 rmSync(outPath, { force: true });

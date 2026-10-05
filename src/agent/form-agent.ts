@@ -825,6 +825,8 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * STEP 6 — Verify with a screenshot.
     Never enumerate competing plans for how to reproduce formatting. Choose this approach, run it, and
     fix what the screenshot shows is wrong. One wrong attempt costs seconds; a plan costs minutes.
+    Write the WHOLE entry (title, technologies line, every bullet) in one pass before any cleanup -
+    a title on its own is not the task, and spacing polish is not a substitute for the missing lines.
 
     - THE WORKING SEQUENCE, always in this order:
       * STEP 1 — 'capture_tab_screenshot()'. A screenshot is your only view of the content.
@@ -847,6 +849,13 @@ ${(this.settings.autoConfirmSubmit ?? true)
         appears, the caret was not in the document: re-screenshot, click again at the exact
         line, and retry ONCE. If it still fails, report the blocker instead of retrying the
         same call.
+      * STEP 5 — SPACING IS ALREADY CORRECT. A visible gap between two heading-styled lines is
+        the paragraph style's spacing, NOT an empty line. It is not in the document text and
+        there is nothing to delete. Do not press Backspace or Enter to "remove the gap": at a
+        line start Backspace joins the two lines into one, and Enter just splits them again -
+        the gap stays either way, and that join/split loop has burned whole runs. If a merge
+        already happened, ONE Enter separates the lines again; then stop touching line breaks
+        and continue with the content.
     - FORMATTING: select text first (drag is not available, so use 'click_at_position' with
       'clickCount: 2' to select a word, or 'Ctrl+a' to select everything), then use
       'press_key_combination' for formatting shortcuts: Ctrl+B bold, Ctrl+I italic, Ctrl+U
