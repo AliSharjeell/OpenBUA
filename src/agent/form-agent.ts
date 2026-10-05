@@ -281,6 +281,19 @@ export class FormAgentHarness {
   /** Guards against a pathological auto-resume loop. */
   private autoResumeCount = 0;
   private static readonly MAX_AUTO_RESUMES = 3;
+  /**
+   * Thinking budget per turn, in characters.
+   *
+   * The prompt already forbids long deliberation, and the model ignored it: one
+   * real run spent 3m 23s reasoning about how a renderer inherits bold and list
+   * styles before making a single call. A prompt rule is advice, not a limit, so
+   * this enforces it. When a turn spends more than this thinking without
+   * calling a tool, the stream is cut off and the agent is told to act.
+   */
+  private static readonly THINKING_BUDGET_PER_TURN = 2500;
+  private thinkingCharsThisTurn = 0;
+  /** Set when the watchdog cut the stream, so turn_end resumes with a directive. */
+  private thinkingBudgetTripped = false;
   private sessionThinkingText = '';
   private chatHistory: ChatMessage[] = [];
   private sessionId: string = 'session_default';
@@ -939,6 +952,35 @@ ${this.settings.systemInstruction || ''}`.trim();
     }
   }
 
+  /**
+   * Cut off a turn that is thinking without acting, and remember to resume it
+   * with a directive. Deliberation is useful up to a point; past it the model is
+   * reasoning about things it cannot know without trying, and the user waits
+   * minutes for nothing.
+   */
+  private enforceThinkingBudget() {
+    if (this.thinkingBudgetTripped) return;
+    if (this.thinkingCharsThisTurn <= FormAgentHarness.THINKING_BUDGET_PER_TURN) return;
+
+    this.thinkingBudgetTripped = true;
+    console.warn(
+      `[FormAgentHarness] thinking budget exceeded (${this.thinkingCharsThisTurn} chars with no tool call); cutting the stream short.`
+    );
+    this.thinkingCharsThisTurn = 0;
+    try {
+      this.agent?.abort();
+    } catch {
+      /* the stream may already be closing */
+    }
+  }
+
+  /** Instruction injected after the watchdog trips, so the next turn acts. */
+  private static readonly ACT_NOW_DIRECTIVE =
+    'SYSTEM: your previous turn was cut off because you spent it reasoning instead of acting. ' +
+    'Do not deliberate further and do not restate a plan. Your next output MUST be a tool call. ' +
+    'If you were weighing how an editor will format something, stop guessing: use the tool that changes it ' +
+    'and check the result. One wrong attempt is cheaper than any amount of reasoning.';
+
   private async handleAgentEvent(event: any) {
     switch (event.type) {
       case 'agent_start':
@@ -954,6 +996,11 @@ ${this.settings.systemInstruction || ''}`.trim();
         this.currentStreamingText = '';
         this.currentThinkingText = '';
         this.activeToolCalls.clear();
+        // Fresh budget each turn; acting resets it, so a legitimately long
+        // multi-step task is never punished. The tripped flag must clear too, or
+        // a guard that fired once would stay disabled for the rest of the session.
+        this.thinkingCharsThisTurn = 0;
+        this.thinkingBudgetTripped = false;
         break;
 
       case 'message_update':
@@ -964,8 +1011,12 @@ ${this.settings.systemInstruction || ''}`.trim();
             this.listeners.onMessageDelta?.(this.currentStreamingText);
           } else if (ame.type === 'thinking_delta') {
             this.currentThinkingText += ame.delta;
+            this.thinkingCharsThisTurn += ame.delta.length;
             this.listeners.onThinkingDelta?.(this.currentThinkingText);
+            this.enforceThinkingBudget();
           } else if (ame.type === 'toolcall_start') {
+            // Acting refills the budget: only uninterrupted deliberation is capped.
+            this.thinkingCharsThisTurn = 0;
             const tc = ame.partial?.content?.[ame.contentIndex];
             if (tc && tc.type === 'toolCall') {
               const toolState: ToolCallState = {
@@ -1036,6 +1087,41 @@ ${this.settings.systemInstruction || ''}`.trim();
 
       case 'turn_end': {
         this.pruneAgentStateMessages();
+
+        // Clear the tripped flag on every exit path. Leaving it set would
+        // silently disable the watchdog for the rest of the session, which is
+        // the exact failure it exists to prevent.
+        const watchdogTripped = this.thinkingBudgetTripped;
+        this.thinkingBudgetTripped = false;
+
+        // The watchdog cut this turn short for over-deliberating. Resume it with
+        // an explicit directive rather than a bare continue, so the next turn
+        // actually calls a tool instead of thinking some more.
+        if (watchdogTripped && !this.userAborted) {
+          this.currentThinkingText = '';
+          if (this.autoResumeCount < FormAgentHarness.MAX_AUTO_RESUMES) {
+            this.autoResumeCount += 1;
+            console.warn(
+              `[FormAgentHarness] resumed with act-now directive (${this.autoResumeCount}/${FormAgentHarness.MAX_AUTO_RESUMES})`
+            );
+            this.listeners.onStatusChange?.(true);
+            const agentRef = this.agent;
+            if (agentRef) {
+              agentRef
+                .prompt(FormAgentHarness.ACT_NOW_DIRECTIVE)
+                .catch((err) => {
+                  console.warn('[FormAgentHarness] act-now resume failed:', err);
+                  this.listeners.onStatusChange?.(false);
+                  this.listeners.onError?.(
+                    `Could not resume automatically: ${err?.message || err}. Please type continue.`
+                  );
+                });
+            } else {
+              this.listeners.onStatusChange?.(false);
+            }
+            break;
+          }
+        }
 
         // A turn that produced neither an answer nor a tool call is a stall, and
         // one that was aborted by anything other than the user (rate limit,
