@@ -1,6 +1,7 @@
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
+import { checkCanvasTextInsertion } from './canvas-edit-check';
 import {
   inspectActiveTabForm,
   fillActiveTabFields,
@@ -1170,6 +1171,12 @@ const TypeTextSchema = Type.Object({
         'Select-all and delete before typing. Use this to replace an existing document rather than append to it. Default false.',
     })
   ),
+  expectedCaretText: Type.Optional(Type.String({
+    description: 'Existing text expected at the insertion point or selected line, such as the target project title. When the editor exposes a different input context, typing is blocked. Always verify placement with a screenshot too.',
+  })),
+  allowUniformParagraphStyle: Type.Optional(Type.Boolean({
+    description: 'Allow multiple paragraphs to inherit the current heading/bold formatting ONLY when every inserted paragraph should intentionally have that same style. Keep false for a project title plus technologies and bullets; clone the source formatting and edit each line separately.',
+  })),
 });
 
 export const typeTextTool: AgentTool<typeof TypeTextSchema> = {
@@ -1180,6 +1187,10 @@ export const typeTextTool: AgentTool<typeof TypeTextSchema> = {
   parameters: TypeTextSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
+      const check = await checkCanvasTextInsertion(params.text, params.expectedCaretText, params.allowUniformParagraphStyle);
+      if (!check.allowed) {
+        return { content: [{ type: 'text', text: check.message || 'Insertion blocked.' }], details: { success: false, inserted: false }, isError: true };
+      }
       const res = await typeActiveTabText({
         text: params.text,
         clearFirst: params.clearFirst,
