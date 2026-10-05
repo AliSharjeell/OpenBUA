@@ -286,6 +286,8 @@ export class FormAgentHarness {
   private resumeEpoch = 0;
   /** True from a user prompt's arrival until its run starts; auto-resumes stand down for it. */
   private userPromptInFlight = false;
+  /** Covers entire requests, including auto-resume handoffs between agent runs. */
+  private activePromptRuns = new Set<symbol>();
   private static readonly MAX_AUTO_RESUMES = 3;
   /**
    * Thinking budget per turn, in characters.
@@ -1169,13 +1171,13 @@ ${this.settings.systemInstruction || ''}`.trim();
 
     const agentRef = this.agent;
     if (!agentRef) {
-      this.listeners.onStatusChange?.(false);
+      this.reportActivity(false);
       return false;
     }
 
     const fail = (err: any) => {
       console.warn('[FormAgentHarness] auto-resume failed:', err);
-      this.listeners.onStatusChange?.(false);
+      this.reportActivity(false);
       this.listeners.onError?.(
         `Could not resume automatically: ${err?.message || err}. Please type continue.`
       );
@@ -1185,7 +1187,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     const epoch = this.resumeEpoch;
 
     // Keep the spinner on across the settle, or the UI flickers idle mid-resume.
-    this.listeners.onStatusChange?.(true);
+    this.reportActivity(true);
 
     void (async () => {
       try {
@@ -1205,27 +1207,40 @@ ${this.settings.systemInstruction || ''}`.trim();
         this.agent !== agentRef
       ) {
         this.resumePending = false;
-        this.listeners.onStatusChange?.(false);
+        this.reportActivity(false);
         return;
       }
 
       // Released before the run starts so a cut of the resumed run can itself
       // queue a fresh resume.
       this.resumePending = false;
+      const runToken = Symbol('auto-resume');
+      this.activePromptRuns.add(runToken);
       try {
         await agentRef.prompt(directive);
       } catch (err) {
         fail(err);
+      } finally {
+        this.activePromptRuns.delete(runToken);
+        this.reportActivity(false);
       }
     })();
 
     return true;
   }
 
+  private reportActivity(busy: boolean) {
+    // agent_end belongs to one run, not necessarily the entire user request.
+    // A queued retry or another awaited run keeps both the pill and Stop active.
+    const active = !this.userAborted && (busy || this.resumePending ||
+      this.userPromptInFlight || this.activePromptRuns.size > 0);
+    this.listeners.onStatusChange?.(active);
+  }
+
   private async handleAgentEvent(event: any) {
     switch (event.type) {
       case 'agent_start':
-        this.listeners.onStatusChange?.(true);
+        this.reportActivity(true);
         this.currentStreamingText = '';
         this.currentThinkingText = '';
         this.sessionThinkingText = '';
@@ -1447,7 +1462,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       }
 
       case 'agent_end':
-        this.listeners.onStatusChange?.(false);
+        this.reportActivity(false);
         break;
     }
   }
@@ -1459,7 +1474,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         this.settings.selectedMode === 'free' ? 'Gemini Free' : this.settings.activeProvider.toUpperCase();
       const err = `Please enter your ${modeLabel} API Key in Settings to continue.`;
       this.listeners.onError?.(err);
-      this.listeners.onStatusChange?.(false);
+      this.reportActivity(false);
       throw new Error(err);
     }
 
@@ -1492,8 +1507,10 @@ ${this.settings.systemInstruction || ''}`.trim();
       }
     } catch {}
 
+    const runToken = Symbol('user-request');
+    this.activePromptRuns.add(runToken);
     try {
-      this.listeners.onStatusChange?.(true);
+      this.reportActivity(true);
 
       // A previous run may still be unwinding (right after a watchdog cut, for
       // example). prompt()/continue() are refused while it is, so wait it out
@@ -1545,7 +1562,8 @@ ${this.settings.systemInstruction || ''}`.trim();
     } finally {
       // Backstop for exits that never reached a run (settle failures, throws).
       this.userPromptInFlight = false;
-      this.listeners.onStatusChange?.(false);
+      this.activePromptRuns.delete(runToken);
+      this.reportActivity(false);
     }
   }
 
@@ -1556,7 +1574,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     this.resumeEpoch += 1;
     if (this.agent) {
       this.agent.abort();
-      this.listeners.onStatusChange?.(false);
+      this.reportActivity(false);
       this.setupAgent();
     }
   }
@@ -1572,7 +1590,10 @@ ${this.settings.systemInstruction || ''}`.trim();
     this.editKeyKinds = [];
     this.editLoopResumeCount = 0;
     this.resumeEpoch += 1;
-    this.listeners.onStatusChange?.(false);
+    this.userPromptInFlight = false;
+    this.resumePending = false;
+    this.activePromptRuns.clear();
+    this.reportActivity(false);
     this.setupAgent();
   }
 }
