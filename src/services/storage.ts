@@ -141,36 +141,47 @@ function loadMemoryList(key: string, defaults: UserDocument[] = []): Promise<Use
   return load;
 }
 
+const pendingMemoryWrites = new Map<string, Promise<UserDocument[]>>();
+
+function updateMemoryList(
+  key: string, update: (docs: UserDocument[]) => UserDocument[] | Promise<UserDocument[]>
+): Promise<UserDocument[]> {
+  const previous = pendingMemoryWrites.get(key) || Promise.resolve([]);
+  const write = previous.catch(() => []).then(async () => {
+    const current = await loadMemoryList(key);
+    const updated = await update(current);
+    if (updated !== current) await setStorageItem(key, updated);
+    return updated;
+  });
+  pendingMemoryWrites.set(key, write);
+  void write.finally(() => {
+    if (pendingMemoryWrites.get(key) === write) pendingMemoryWrites.delete(key);
+  }).catch(() => {});
+  return write;
+}
+
 export async function loadGlobalMemories(): Promise<UserDocument[]> {
   const list = await loadMemoryList(GLOBAL_MEMORY_KEY, DEFAULT_GLOBAL_MEMORIES);
   return list.filter((m) => m.id !== 'mem-default-profile');
 }
 
 export async function saveGlobalMemory(doc: UserDocument): Promise<void> {
-  const memories = await loadGlobalMemories();
-  const index = memories.findIndex((m) => m.id === doc.id);
   const toSave = await compactMemoryMedia({ ...doc, isGlobal: true });
-  if (index >= 0) {
-    memories[index] = toSave;
-  } else {
-    memories.unshift(toSave);
-  }
-  await setStorageItem(GLOBAL_MEMORY_KEY, memories);
+  await updateMemoryList(GLOBAL_MEMORY_KEY, (docs) =>
+    docs.some((m) => m.id === doc.id)
+      ? docs.map((m) => m.id === doc.id ? toSave : m)
+      : [toSave, ...docs]
+  );
 }
 
 export async function deleteGlobalMemory(id: string): Promise<void> {
-  const memories = await loadGlobalMemories();
-  const filtered = memories.filter((m) => m.id !== id);
-  await setStorageItem(GLOBAL_MEMORY_KEY, filtered);
+  await updateMemoryList(GLOBAL_MEMORY_KEY, (docs) => docs.filter((m) => m.id !== id));
 }
 
 export async function toggleGlobalMemoryActive(id: string): Promise<UserDocument[]> {
-  const memories = await loadGlobalMemories();
-  const updated = memories.map((m) =>
+  return updateMemoryList(GLOBAL_MEMORY_KEY, (docs) => docs.map((m) =>
     m.id === id ? { ...m, isActiveForContext: !m.isActiveForContext } : m
-  );
-  await setStorageItem(GLOBAL_MEMORY_KEY, updated);
-  return updated;
+  ));
 }
 
 // ========================================================
@@ -183,32 +194,24 @@ export async function loadTabMemories(tabKey: string): Promise<UserDocument[]> {
 
 export async function saveTabMemory(tabKey: string, doc: UserDocument): Promise<void> {
   const key = `${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`;
-  const memories = await loadTabMemories(tabKey);
-  const index = memories.findIndex((m) => m.id === doc.id);
   const toSave = await compactMemoryMedia({ ...doc, isGlobal: false, tabUrlPattern: tabKey });
-  if (index >= 0) {
-    memories[index] = toSave;
-  } else {
-    memories.unshift(toSave);
-  }
-  await setStorageItem(key, memories);
+  await updateMemoryList(key, (docs) =>
+    docs.some((m) => m.id === doc.id)
+      ? docs.map((m) => m.id === doc.id ? toSave : m)
+      : [toSave, ...docs]
+  );
 }
 
 export async function deleteTabMemory(tabKey: string, id: string): Promise<void> {
   const key = `${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`;
-  const memories = await loadTabMemories(tabKey);
-  const filtered = memories.filter((m) => m.id !== id);
-  await setStorageItem(key, filtered);
+  await updateMemoryList(key, (docs) => docs.filter((m) => m.id !== id));
 }
 
 export async function toggleTabMemoryActive(tabKey: string, id: string): Promise<UserDocument[]> {
   const key = `${TAB_MEMORY_PREFIX}${encodeURIComponent(tabKey)}`;
-  const memories = await loadTabMemories(tabKey);
-  const updated = memories.map((m) =>
+  return updateMemoryList(key, (docs) => docs.map((m) =>
     m.id === id ? { ...m, isActiveForContext: !m.isActiveForContext } : m
-  );
-  await setStorageItem(key, updated);
-  return updated;
+  ));
 }
 
 // Get all active memories for a tab (Active Global + Active Tab)
