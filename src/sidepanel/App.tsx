@@ -193,23 +193,20 @@ export function App() {
         loadSuggestedMemories(targetSessionId),
       ]);
 
-      // Auto-name any existing sessions that still have generic default titles like "Chat 1"
-      let sessionsUpdated = false;
-      for (const sess of loadedSessions) {
-        if (isGenericSessionTitle(sess.title)) {
-          const hist = sess.id === targetSessionId ? loadedChat : await loadChatHistoryForTab(sess.id);
-          const firstUser = hist.find((m) => m.role === 'user' && m.content && m.content.trim().length > 0);
-          if (firstUser) {
-            const autoTitle = generateSessionTitle(firstUser.content);
-            if (autoTitle && autoTitle !== sess.title) {
-              sess.title = autoTitle;
-              sessionsUpdated = true;
-            }
+      // Only the open chat is needed on launch. Other histories are read when
+      // their session is selected, where handleMessagesChange can name it.
+      const activeSession = loadedSessions.find((s) => s.id === targetSessionId);
+      if (activeSession && isGenericSessionTitle(activeSession.title)) {
+        const firstUser = loadedChat.find((m) => m.role === 'user' && m.content?.trim());
+        if (firstUser) {
+          const title = generateSessionTitle(firstUser.content);
+          if (title && title !== activeSession.title) {
+            activeSession.title = title;
+            void saveChatSessions(loadedSessions).catch((error) =>
+              console.warn('[OpenBUA] Could not save session title:', error)
+            );
           }
         }
-      }
-      if (sessionsUpdated) {
-        await saveChatSessions(loadedSessions);
       }
 
       setSettings(loadedSettings);
