@@ -23,7 +23,7 @@ export function inspectDocsEditor() {
     if (!/texteventtarget/i.test(`${frame.id} ${frame.className}`)) continue;
     try { selectionText ||= frame.contentWindow?.getSelection()?.toString() || ''; } catch { /* inaccessible frame */ }
   }
-  return { controls, selectionText: selectionText.slice(0, 12000), selectionVerified: Boolean(selectionText),
+  return { controls, selectionText: selectionText.slice(0, 12000), selectionVerified: Boolean(selectionText.trim()),
     note: 'Toolbar states are DOM observations. Null states mean unknown or mixed. Canvas document text and caret location require a screenshot; an empty DOM selection does not prove nothing is selected.' };
 }
 
