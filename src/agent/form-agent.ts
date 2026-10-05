@@ -981,6 +981,89 @@ ${this.settings.systemInstruction || ''}`.trim();
     'If you were weighing how an editor will format something, stop guessing: use the tool that changes it ' +
     'and check the result. One wrong attempt is cheaper than any amount of reasoning.';
 
+  /** Instruction injected when a turn ended before the task was finished. */
+  private static readonly RESUME_DIRECTIVE =
+    'SYSTEM: the previous turn ended before the task was finished. Continue the task now. ' +
+    'Your next output MUST be a tool call that makes progress. Do not restate or extend the plan.';
+
+  /** How long to wait for a run to settle before giving up on acting around it. */
+  private static readonly IDLE_WAIT_MS = 15000;
+
+  /**
+   * Resolve once the agent has no run left, or reject after IDLE_WAIT_MS.
+   *
+   * turn_end and even agent_end fire while the run is still active: pi-agent-core
+   * keeps activeRun until after its agent_end listeners settle, and prompt()/
+   * continue() throw "Agent is already processing..." for that whole window.
+   */
+  private async settleAgent(agentRef: Agent): Promise<void> {
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        agentRef.waitForIdle(),
+        new Promise<never>((_, reject) => {
+          idleTimer = setTimeout(
+            () => reject(new Error('the previous run is still finishing')),
+            FormAgentHarness.IDLE_WAIT_MS
+          );
+        }),
+      ]);
+    } finally {
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+    }
+  }
+
+  /**
+   * Resume a cut-off turn with `directive` once the agent is actually idle.
+   *
+   * Resuming from turn_end itself is hopeless: the run is still active there, so
+   * prompt() throws "Agent is already processing a prompt" and continue() throws
+   * the same class of error - and continue() would fail anyway, because after a
+   * cut-off turn the last message is the interrupted assistant turn, which it
+   * refuses to continue from. Wait for waitForIdle(), then start the directive
+   * as a fresh prompt.
+   */
+  private resumeWithDirective(directive: string): void {
+    const agentRef = this.agent;
+    if (!agentRef) {
+      this.listeners.onStatusChange?.(false);
+      return;
+    }
+
+    const fail = (err: any) => {
+      console.warn('[FormAgentHarness] auto-resume failed:', err);
+      this.listeners.onStatusChange?.(false);
+      this.listeners.onError?.(
+        `Could not resume automatically: ${err?.message || err}. Please type continue.`
+      );
+    };
+
+    // Keep the spinner on across the settle, or the UI flickers idle mid-resume.
+    this.listeners.onStatusChange?.(true);
+
+    void (async () => {
+      try {
+        await this.settleAgent(agentRef);
+      } catch (err) {
+        fail(err);
+        return;
+      }
+
+      // The user may have pressed stop, or a new prompt may have swapped in a
+      // fresh agent, while we waited. Never resume against their wishes.
+      if (this.userAborted || this.agent !== agentRef) {
+        this.listeners.onStatusChange?.(false);
+        return;
+      }
+
+      try {
+        await agentRef.prompt(directive);
+      } catch (err) {
+        fail(err);
+      }
+    })();
+  }
+
   private async handleAgentEvent(event: any) {
     switch (event.type) {
       case 'agent_start':
@@ -1104,21 +1187,7 @@ ${this.settings.systemInstruction || ''}`.trim();
             console.warn(
               `[FormAgentHarness] resumed with act-now directive (${this.autoResumeCount}/${FormAgentHarness.MAX_AUTO_RESUMES})`
             );
-            this.listeners.onStatusChange?.(true);
-            const agentRef = this.agent;
-            if (agentRef) {
-              agentRef
-                .prompt(FormAgentHarness.ACT_NOW_DIRECTIVE)
-                .catch((err) => {
-                  console.warn('[FormAgentHarness] act-now resume failed:', err);
-                  this.listeners.onStatusChange?.(false);
-                  this.listeners.onError?.(
-                    `Could not resume automatically: ${err?.message || err}. Please type continue.`
-                  );
-                });
-            } else {
-              this.listeners.onStatusChange?.(false);
-            }
+            this.resumeWithDirective(FormAgentHarness.ACT_NOW_DIRECTIVE);
             break;
           }
         }
@@ -1143,22 +1212,11 @@ ${this.settings.systemInstruction || ''}`.trim();
             console.warn(
               `[FormAgentHarness] auto-resuming (${this.autoResumeCount}/${FormAgentHarness.MAX_AUTO_RESUMES}): ${why}`
             );
-            this.listeners.onStatusChange?.(true);
-            const agentRef = this.agent;
-            if (agentRef) {
-              // Fire and forget: the resumed run emits its own turn_end/agent_end.
-              agentRef
-                .continue()
-                .catch((err) => {
-                  console.warn('[FormAgentHarness] auto-resume failed:', err);
-                  this.listeners.onStatusChange?.(false);
-                  this.listeners.onError?.(
-                    `Could not resume automatically: ${err?.message || err}. Please type continue.`
-                  );
-                });
-            } else {
-              this.listeners.onStatusChange?.(false);
-            }
+            // Fire and forget: the resumed run emits its own turn_end/agent_end.
+            // A directive prompt, not continue(): after a stall the last message
+            // is the assistant's empty turn, which continue() refuses to resume
+            // from ("Cannot continue from message role: assistant").
+            this.resumeWithDirective(FormAgentHarness.RESUME_DIRECTIVE);
             break;
           }
         }

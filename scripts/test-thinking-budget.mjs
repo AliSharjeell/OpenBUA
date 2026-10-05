@@ -46,16 +46,49 @@ const BUDGET = FormAgentHarness.THINKING_BUDGET_PER_TURN;
 check('a thinking budget is defined', typeof BUDGET === 'number' && BUDGET > 0, String(BUDGET));
 check('budget is small enough to cut a 3-minute spiral', BUDGET <= 4000, `${BUDGET} chars`);
 
-/** Build a harness with a stub agent so abort() is observable and harmless. */
+/** Build a harness with a stub agent so abort()/prompt() are observable and harmless. */
 function makeHarness() {
   let aborts = 0;
-  const h = new FormAgentHarness({ selectedMode: 'free', free: {} }, [], {}, [], 'test');
+  const prompts = [];
+  const errors = [];
+  const status = [];
+  let idleResolvers = [];
+  const h = new FormAgentHarness({ selectedMode: 'free', free: {} }, [], {
+    onError: (e) => errors.push(e),
+    onStatusChange: (busy) => status.push(busy),
+  }, [], 'test');
   h.agent = {
     abort: () => {
       aborts += 1;
     },
+    // The real one resolves only once the run has settled; hold it open until
+    // the test says otherwise so "resumes too early" is detectable.
+    waitForIdle: () =>
+      new Promise((resolve) => {
+        idleResolvers.push(resolve);
+      }),
+    prompt: async (msg) => {
+      prompts.push(msg);
+    },
+    continue: async () => {
+      throw new Error('Cannot continue from message role: assistant');
+    },
+    state: { messages: [] },
   };
-  return { h, aborts: () => aborts };
+  return {
+    h,
+    aborts: () => aborts,
+    prompts,
+    errors,
+    status,
+    /** Let the stubbed run settle, then give the resume a turn to act. */
+    settle: async () => {
+      const resolvers = idleResolvers;
+      idleResolvers = [];
+      for (const r of resolvers) r();
+      await new Promise((r) => setTimeout(r, 0));
+    },
+  };
 }
 
 /** Feed thinking_delta events of `chars` total length into one turn. */
@@ -139,6 +172,78 @@ function think(h, chars, chunk = 400) {
   check('the watchdog still trips internally', h.thinkingBudgetTripped === true);
   h.handleAgentEvent({ type: 'turn_end' });
   check('but a user abort clears the flag instead of auto-resuming', h.thinkingBudgetTripped === false);
+}
+
+{
+  // 8. A watchdog resume must wait for the run to settle before prompting.
+  // This is the exact failure from a real session: turn_end fires while the run
+  // is still active, prompt() throws "Agent is already processing a prompt",
+  // and the user was told "Please type continue." by hand.
+  const { h, prompts, settle } = makeHarness();
+  h.handleAgentEvent({ type: 'turn_start' });
+  think(h, BUDGET + 500);
+  h.handleAgentEvent({ type: 'turn_end' });
+  check('resume does not prompt while the run is still active', prompts.length === 0);
+  await settle();
+  check('resume prompts once the agent is idle', prompts.length === 1, String(prompts.length));
+  check('and it sends the act-now directive', prompts[0] === FormAgentHarness.ACT_NOW_DIRECTIVE);
+}
+
+{
+  // 9. A user pressing stop while the resume waits must cancel the resume.
+  const { h, prompts, settle } = makeHarness();
+  h.handleAgentEvent({ type: 'turn_start' });
+  think(h, BUDGET + 500);
+  h.handleAgentEvent({ type: 'turn_end' });
+  h.userAborted = true;
+  await settle();
+  check('a stop during the settle window suppresses the resume', prompts.length === 0);
+}
+
+{
+  // 10. A turn that only planned is resumed with a directive too - and with
+  // prompt(), not continue(), which refuses to continue from an assistant turn.
+  const { h, prompts, settle } = makeHarness();
+  h.handleAgentEvent({ type: 'turn_start' });
+  think(h, 200);
+  h.handleAgentEvent({ type: 'turn_end' });
+  await settle();
+  check('a stalled turn auto-resumes', prompts.length === 1, String(prompts.length));
+  check('with the resume directive', prompts[0] === FormAgentHarness.RESUME_DIRECTIVE);
+}
+
+{
+  // 11. A provider-side abort is recoverable the same way.
+  const { h, prompts, errors, settle } = makeHarness();
+  h.handleAgentEvent({ type: 'turn_start' });
+  h.handleAgentEvent({ type: 'turn_end', message: { errorMessage: 'rate limited' } });
+  await settle();
+  check('a provider abort auto-resumes with a directive', prompts.length === 1);
+  check('and never surfaces "Please type continue" to the user', !errors.some((e) => /Please type continue/.test(e)), errors.join(' | '));
+}
+
+{
+  // 12. If the resume itself is refused, the user gets one clear error.
+  const { h, prompts, errors, settle } = makeHarness();
+  h.agent.prompt = async () => {
+    throw new Error('Agent is already processing a prompt.');
+  };
+  h.handleAgentEvent({ type: 'turn_start' });
+  think(h, BUDGET + 500);
+  h.handleAgentEvent({ type: 'turn_end' });
+  await settle();
+  check('a failed resume reports it could not resume', errors.some((e) => /Could not resume automatically/.test(e)), errors.join(' | '));
+}
+
+{
+  // 13. The stall path must not fire when the user pressed stop.
+  const { h, prompts, settle } = makeHarness();
+  h.handleAgentEvent({ type: 'turn_start' });
+  think(h, 200);
+  h.userAborted = true;
+  h.handleAgentEvent({ type: 'turn_end' });
+  await settle();
+  check('a user abort never auto-resumes a stalled turn', prompts.length === 0);
 }
 
 rmSync(outPath, { force: true });
