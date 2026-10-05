@@ -973,10 +973,17 @@ ${this.settings.systemInstruction || ''}`.trim();
     const total = messages.length;
     if (total <= 3) return;
 
-    // Prune older turn tool results and purge base64 image data to prevent compounding context bloat
+    // Preserve the latest visual observation even after several intervening tools.
+    const latestImageResult = [...messages].reverse().find((msg: any) =>
+      msg.role === 'toolResult' && Array.isArray(msg.content) &&
+      msg.content.some((item: any) => item.type === 'image' && item.data)
+    );
+
+    // Prune older tool results, retaining the newest image until superseded.
     for (let i = 0; i < total - 3; i++) {
       const msg = messages[i] as any;
       if (msg.role === 'toolResult' && Array.isArray(msg.content)) {
+        if (msg === latestImageResult) continue;
         // Keep scratchpad and append_to_preview unpruned so accumulated working notes remain intact
         if (msg.toolName === 'scratchpad' || msg.toolName === 'append_to_preview') {
           continue;
@@ -986,7 +993,7 @@ ${this.settings.systemInstruction || ''}`.trim();
           // Purge heavy base64 image data from previous turns
           if (item.type === 'image' || item.data || (item.text && item.text.startsWith('data:image/'))) {
             item.type = 'text';
-            item.text = '[Screenshot previously captured and evaluated]';
+            item.text = '[Older screenshot omitted; caret placement and edits are not verified by this marker.]';
             delete item.data;
             delete item.mimeType;
           } else if (item.type === 'text' && typeof item.text === 'string' && item.text.length > 350) {
