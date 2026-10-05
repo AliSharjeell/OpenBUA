@@ -16,6 +16,7 @@
     "test:startup": "node scripts/test-memory-startup.mjs",
     "test:canvas-check": "node scripts/test-canvas-edit-check.mjs",
     "test:docs": "node scripts/test-docs-editor.mjs",
+    "test:docs-safety": "node scripts/test-docs-edit-safety.mjs",
     "test:budget": "node scripts/test-thinking-budget.mjs",
     "test:resume": "node scripts/test-auto-resume.mjs",
     "typecheck": "tsc --noEmit"
