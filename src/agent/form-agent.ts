@@ -838,9 +838,10 @@ ${(this.settings.autoConfirmSubmit ?? true)
       * STEP 5 — Edit only the TEXT of the clone: for each line, click at its start, shift-click at its
         end to select just that line's text, then 'type_text' the replacement. Formatting is untouched
         because you are replacing text, not recreating a paragraph.
-      * STEP 6 — Delete the ORIGINAL block: select it the same way, then
-        'clipboard_action({ action: "cut" })'.
-      * STEP 6 — Verify with a screenshot.
+      * STEP 6 — Verify the complete new entry with a screenshot: title, technologies,
+        every bullet, placement in the requested section, and preserved original entry.
+        When ADDING another entry, KEEP the original block. Cut it only when the user
+        explicitly asked to move or replace it.
     Never enumerate competing plans for how to reproduce formatting. Choose this approach, run it, and
     fix what the screenshot shows is wrong. One wrong attempt costs seconds; a plan costs minutes.
     Write the WHOLE entry (title, technologies line, every bullet) in one pass before any cleanup -
