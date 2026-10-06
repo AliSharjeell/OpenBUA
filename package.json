@@ -21,6 +21,7 @@
     "test:recovery-tools": "node scripts/test-recovery-tool-choice.mjs",
     "test:budget": "node scripts/test-thinking-budget.mjs",
     "test:resume": "node scripts/test-auto-resume.mjs",
+    "test:pdf": "node scripts/test-pdf-extraction.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -567,9 +567,10 @@ export function MemoryView({
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {/* OCR trigger button (hidden once extraction is done) */}
+                  {/* PDFs can be re-extracted to repair previously saved content. */}
                   {(selectedDoc.type === 'image' || selectedDoc.type === 'pdf') &&
-                    selectedDoc.ocrStatus !== 'done' && (
+                    (selectedDoc.dataUrl || selectedDoc.blobKey) &&
+                    (selectedDoc.type === 'pdf' || selectedDoc.ocrStatus !== 'done') && (
                     <Button
                       size="sm"
                       className="h-6 px-2.5 text-[10px] gap-1 rounded-full bg-[#007AFF] text-white hover:bg-[#0071EB] shadow-xs cursor-pointer border-0"
@@ -580,7 +581,7 @@ export function MemoryView({
                       {ocrLoadingId === selectedDoc.id && (
                         <Loader2 className="w-3 h-3 animate-spin text-white" />
                       )}
-                      {ocrLoadingId === selectedDoc.id ? 'Extracting...' : 'Extract info into memory'}
+                      {ocrLoadingId === selectedDoc.id ? 'Extracting...' : selectedDoc.ocrStatus === 'done' ? 'Re-extract info' : 'Extract info into memory'}
                     </Button>
                   )}
 
@@ -799,9 +800,10 @@ export function MemoryView({
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">
-                            {/* OCR Extraction Button (hidden once extraction is done) */}
+                            {/* Keep PDF extraction available for saved documents. */}
                             {(doc.type === 'image' || doc.type === 'pdf') &&
-                              doc.ocrStatus !== 'done' && (
+                              hasRawFile &&
+                              (doc.type === 'pdf' || doc.ocrStatus !== 'done') && (
                               <div className="flex items-center gap-1.5">
                                 <button
                                   type="button"
@@ -813,7 +815,7 @@ export function MemoryView({
                                   {isOcrLoading && (
                                     <Loader2 className="w-3 h-3 animate-spin text-white" />
                                   )}
-                                  {isOcrLoading ? 'Extracting info...' : 'Extract info into memory'}
+                                  {isOcrLoading ? 'Extracting info...' : doc.ocrStatus === 'done' ? 'Re-extract info' : 'Extract info into memory'}
                                 </button>
                               </div>
                             )}

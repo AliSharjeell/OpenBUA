@@ -2,6 +2,7 @@
 import { DocumentFileType, UserDocument } from '../types';
 import { getMediaBlob, mediaBlobKeyFor, putMediaBlob } from './blob-store';
 import { loadSettings } from './storage';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 /**
  * Files at or below this size keep an inline base64 dataUrl, which keeps the
@@ -16,7 +17,9 @@ let pdfLibraryPromise: Promise<typeof import('pdfjs-dist')> | undefined;
 function loadPdfLibrary(): Promise<typeof import('pdfjs-dist')> {
   if (!pdfLibraryPromise) {
     pdfLibraryPromise = import('pdfjs-dist').then((library) => {
-      library.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${library.version}/pdf.worker.min.mjs`;
+      // Extension CSP forbids remote worker code. Vite emits the matching worker
+      // alongside our own assets, so extraction also works without CDN access.
+      library.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
       return library;
     }).catch((error) => {
       pdfLibraryPromise = undefined;
@@ -376,22 +379,13 @@ export async function extractTextFromPdf(file: File): Promise<string> {
       return ocrPages.join('\n\n');
     }
 
-    // If OCR failed or was unavailable, return the sparse text if any
-    return pageTexts.join('\n\n');
+    // Preserve short text documents, but do not report empty OCR as success.
+    if (totalChars > 0) return pageTexts.join('\n\n');
+    throw new Error('No readable text found. Scanned PDF extraction requires a working vision provider.');
   } catch (error: any) {
     console.error('[AutoForm AI] Error parsing PDF with pdfjs:', error);
-    // Fallback: try reading raw strings from array buffer
-    try {
-      const buffer = await file.arrayBuffer();
-      const decoder = new TextDecoder('utf-8', { fatal: false });
-      const raw = decoder.decode(buffer);
-      const matches = raw.match(/\(([^()]{2,})\)/g);
-      if (matches && matches.length > 10) {
-        return matches.map((m) => m.slice(1, -1)).join(' ');
-      }
-    } catch {
-      // Ignore fallback failure
-    }
+    // PDF streams are binary and often compressed; decoding their bytes as
+    // UTF-8 can turn a parser failure into apparently successful garbage text.
     throw new Error(`Failed to extract text from PDF: ${error?.message || error}`);
   }
 }
