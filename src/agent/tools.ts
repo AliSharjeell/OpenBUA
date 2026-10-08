@@ -5,6 +5,7 @@ import { readCommunityRules, observeRulesPage, completedRulesNavigation, describ
 import { writeRedditDraft } from './reddit-editor';
 import { inPageReadYouTubeVideos } from './youtube-page';
 import { redditPostAction } from './reddit-submit';
+import { protectPageTrust, type PageTrustPolicy } from './page-trust';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -1459,8 +1460,8 @@ export const clipboardActionTool: AgentTool<typeof ClipboardActionSchema> = {
 };
 
 // Factory to create session-bound tools for the OpenBUA Agent
-export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy): AgentTool<any>[] {
-  return protectDocsEdits([
+export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy, pagePolicy: PageTrustPolicy = { userRequests: [] }): AgentTool<any>[] {
+  return protectPageTrust(protectDocsEdits([
     getActiveTabFormTool,
     inspectDocsEditorTool,
     findDocsTextTool,
@@ -1498,7 +1499,7 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     waitSecondsTool,
     openNewTabTool,
     closeTabTool,
-  ], docsPolicy);
+  ], docsPolicy), pagePolicy);
 }
 
 // All available tools for the OpenBUA Agent (default session fallback)
