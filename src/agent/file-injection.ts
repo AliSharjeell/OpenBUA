@@ -293,7 +293,7 @@ function inPageFindUploadTarget(fileName: string, mimeType: string, refId?: stri
       ? [root as HTMLInputElement] : queryDeep(root, 'input[type="file"]') as HTMLInputElement[];
     for (const input of fields) {
       if (input.disabled) continue;
-      const accept = input.accept.toLowerCase().trim();
+      const accept = (input.getAttribute('accept') || '').toLowerCase().trim();
       const tokens = accept.split(',').map(token => token.trim());
       const allowed = !accept || tokens.some(token => token === '*' || token === '*/*' ||
         token === mimeType.toLowerCase() || (token.endsWith('/*') && mimeType.startsWith(token.slice(0, -1))) ||
