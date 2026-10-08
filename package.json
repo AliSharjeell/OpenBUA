@@ -37,6 +37,7 @@
     "test:youtube-videos": "node scripts/test-youtube-videos.mjs",
     "test:session-title": "node scripts/test-session-title.mjs",
     "test:reddit-submit": "node scripts/test-reddit-submit.mjs",
+    "test:reddit-review": "node scripts/test-reddit-review.mjs",
     "test:old-reddit-trust": "node scripts/test-old-reddit-trust.mjs"
   },
   "dependencies": {
