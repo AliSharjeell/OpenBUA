@@ -22,5 +22,12 @@ try {
   assert.equal(globalThis.lastFill.assignments[0].fileData, undefined);
   stored.autoform_tab_mem_session_job[0].isActiveForContext = false;
   assert.equal((await api.resolveStoredFile({fileName: 'resume.pdf'})).doc.id, 'old');
+  let dispatches=0;
+  chrome.scripting={executeScript:async()=>{throw new Error('Selection inspection unavailable');}};
+  chrome.tabs.sendMessage=(_tab,message,cb)=>{dispatches++;cb({success:true,data:{successCount:1,errors:[],verifications:[{refId:'af_1',requestedValue:'Karachi',actualValue:'Karachi',verified:true}]}});};
+  const uncertain=await api.fillActiveTabFields([{refId:'af_1',value:'Karachi'}]);
+  assert.equal(dispatches,1,'post-fill inspection failure must not replay the fill');
+  assert.equal(uncertain.successCount,0);assert.equal(uncertain.verifications[0].verified,false);
+  assert.match(uncertain.errors[0],/text may already be present/);
   console.log('PASS session attachment lookup, current-session precedence, exact ID, missing-file isolation and inactive memory');
 } finally {rmSync(output, {force: true});}

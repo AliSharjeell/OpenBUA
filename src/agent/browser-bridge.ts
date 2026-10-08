@@ -1381,7 +1381,16 @@ export async function inspectActiveTabForm(selector?: string): Promise<PageFormS
 }
 
 async function verifyAutocompleteFill(tabId:number, assignments:Array<{refId?:string;selector?:string;value:string}>, result:FormFillResult):Promise<FormFillResult> {
-  const observations=await inspectAutocomplete(tabId,assignments,true);
+  if(typeof chrome==='undefined' || !chrome.scripting) return result;
+  let observations;
+  try {observations=await inspectAutocomplete(tabId,assignments,true);}
+  catch {
+    // Filling already dispatched. A verification failure must not replay it.
+    for(const verification of result.verifications) {verification.verified=false;verification.status='not-inspected';}
+    result.successCount=0;
+    result.errors.push('Could not inspect selection/validation after filling. Inspect the current field before retrying; the text may already be present.');
+    return result;
+  }
   for(const observed of observations) {
     if(!observed.autocomplete && !observed.invalid) continue;
     const verification=result.verifications.find(v=>observed.refId ? v.refId===observed.refId : v.selector===observed.selector);
