@@ -38,6 +38,7 @@
     "test:session-title": "node scripts/test-session-title.mjs",
     "test:reddit-submit": "node scripts/test-reddit-submit.mjs",
     "test:reddit-review": "node scripts/test-reddit-review.mjs",
+    "test:x-community": "node scripts/test-x-community.mjs",
     "test:old-reddit-trust": "node scripts/test-old-reddit-trust.mjs"
   },
   "dependencies": {
