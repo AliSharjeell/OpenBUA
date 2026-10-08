@@ -2342,7 +2342,8 @@ function clickAtPoint(
       success: true,
       message:
         `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>${clickCount > 1 ? ` (${clickCount} clicks)` : ''}` +
-        `${opts.shiftKey ? ' with Shift held, extending the selection' : ''}.${hint} Now use type_text to write at the caret.`,
+        `${opts.shiftKey ? ' with Shift held, extending the selection' : ''}.${hint} ` +
+        (editor.isCanvas ? 'Inspect caret placement before typing.' : 'Click dispatched. This does not confirm navigation or a text caret. Prefer the actual link/control if the page has not changed.'),
       element: tag,
       canvasEditor: editor.isCanvas ? editor.name : null,
       viewport,

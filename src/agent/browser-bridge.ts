@@ -1960,7 +1960,7 @@ function inPageClickAtPoint(
     success: true,
     message:
       `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>${count > 1 ? ` (${count} clicks)` : ''}` +
-      `${shiftKey ? ' with Shift held, extending the selection' : ''}. Now use type_text to write at the caret.`,
+      `${shiftKey ? ' with Shift held, extending the selection' : ''}. Click dispatched. A click alone does not confirm navigation or establish a text caret; use the actual link/control when the page has not changed.`,
     element: tag,
     viewport,
   };
