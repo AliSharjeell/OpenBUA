@@ -32,7 +32,8 @@
     "test:form-identity": "node scripts/test-form-identity.mjs",
     "test:community-rules": "node scripts/test-community-rules.mjs",
     "test:screenshots": "node scripts/test-screenshot-scheduling.mjs",
-    "test:shadow-composer": "node scripts/test-shadow-composer.mjs"
+    "test:shadow-composer": "node scripts/test-shadow-composer.mjs",
+    "test:reddit-editor": "node scripts/test-reddit-editor.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",
