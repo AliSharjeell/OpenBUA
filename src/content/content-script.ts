@@ -1179,7 +1179,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   if (refId && elementRefMap.has(refId)) {
     target = elementRefMap.get(refId)!;
   } else if (refId) {
-    target = document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
+    target = queryUploadTargets(`[data-autoform-ref="${CSS.escape(refId)}"]`)[0];
   } else if (selector) {
     try {
       target = document.querySelector(selector);
@@ -2514,9 +2514,18 @@ function isFileVisible(el: HTMLElement): boolean {
   return el.offsetParent !== null;
 }
 
+/** Find controls inside open shadow DOM as well as the page DOM. */
+function queryUploadTargets(selector: string, root: ParentNode = document): Element[] {
+  const results = Array.from(root.querySelectorAll(selector));
+  for (const host of Array.from(root.querySelectorAll('*'))) {
+    if (host.shadowRoot) results.push(...queryUploadTargets(selector, host.shadowRoot));
+  }
+  return results;
+}
+
 /** Best-scoring file input on the page, or null when nothing accepts the file. */
 function bestFileInputFor(file: File): { input: HTMLInputElement | null; score: number } {
-  const candidates = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]'));
+  const candidates = queryUploadTargets('input[type="file"]') as HTMLInputElement[];
   let best: HTMLInputElement | null = null;
   let bestScore = -1;
 
@@ -2625,17 +2634,17 @@ async function attachFileToComposer(
   let input: HTMLInputElement | null = null;
   let explicit = false;
   const target = refId
-    ? document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`) || document.getElementById(refId)
+    ? queryUploadTargets(`[data-autoform-ref="${CSS.escape(refId)}"]`)[0] || document.getElementById(refId)
     : null;
   let candidates: Element[] = target ? [target] : [];
   if (!target && selector) {
-    try { candidates = Array.from(document.querySelectorAll(selector)); }
+    try { candidates = queryUploadTargets(selector); }
     catch { return { success: false, attached: false, message: 'Invalid file input selector.' }; }
   }
   for (const candidate of candidates) {
     const fields = candidate.matches('input[type="file"]')
       ? [candidate as HTMLInputElement]
-      : Array.from(candidate.querySelectorAll<HTMLInputElement>('input[type="file"]'));
+      : queryUploadTargets('input[type="file"]', candidate) as HTMLInputElement[];
     input = fields.find(field => !field.disabled && acceptAllowsFile(field.accept, file)) || null;
     if (input) { explicit = true; break; }
   }

@@ -103,6 +103,9 @@ function makeInput(accept, files) {
   return {
     accept,
     type: 'file',
+    matches: selector => selector === 'input[type="file"]',
+    querySelectorAll: () => [],
+    disabled: false,
     multiple: false,
     files: null,
     getAttribute: (k) => (k === 'accept' ? accept : null),
@@ -193,6 +196,32 @@ check(
   `media=${Boolean(mediaInput._set)} doc=${Boolean(docInput._set)}`
 );
 check('media attach succeeds', mediaResult.success === true, JSON.stringify(mediaResult));
+
+// Easy Apply-style hidden PDF controls: an explicit selector must win over DOM order.
+const resumeInput = makeInput('.pdf,.doc,.docx', null);
+const videoTransfer = () => ({meta: {fileName:'resume.pdf', mimeType:'application/pdf', totalChunks:1}, chunks:[Buffer.from('resume bytes').toString('base64')]});
+const originalQuery = fakeDocument.querySelectorAll;
+fakeDocument.querySelectorAll = sel => sel === '#resume-upload' ? [resumeInput] : originalQuery(sel);
+transferStore.targeted = videoTransfer();
+const targeted = commit('targeted', undefined, '#resume-upload', false);
+check('explicit Easy Apply resume target accepts PDF extension', targeted.success && resumeInput.files?.length === 1);
+resumeInput.files = null;
+resumeInput.disabled = true;
+transferStore.disabled = videoTransfer();
+check('disabled explicit input never receives a file', !commit('disabled', undefined, '#resume-upload').success && !resumeInput.files);
+resumeInput.disabled = false;
+transferStore.missingTarget = videoTransfer();
+check('missing explicit selector never uploads to another control', !commit('missingTarget', undefined, '#missing').success);
+const shadowInput = makeInput('application/pdf', null);
+const shadowRoot = {querySelectorAll: sel => sel === 'input[type="file"]' ? [shadowInput] : []};
+fakeDocument.querySelectorAll = sel => sel === '*' ? [{shadowRoot}] : originalQuery(sel);
+transferStore.shadow = videoTransfer();
+check('PDF upload finds an input inside open shadow DOM', commit('shadow').success && shadowInput.files?.length === 1);
+// Frame discovery is also serialized independently by Chrome.
+const probeSrc = extractFunction('inPageFindUploadTarget');
+const probe = new Function('document', `return (${probeSrc});`)(fakeDocument);
+check('frame probe finds compatible shadow upload without mutating it', probe('resume.pdf', 'application/pdf') >= 0);
+check('frame probe rejects incompatible explicit upload', probe('resume.pdf', 'application/pdf', undefined, '#media-only') < 0);
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

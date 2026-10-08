@@ -143,6 +143,13 @@ function inPageCommitTransfer(transferId: string, refId?: string, selector?: str
   if (!tx) return { success: false, message: 'No active file transfer on this page.', bytes: 0 };
 
   // --- local helpers (must stay inside this function) ---
+  const queryDeep = (root: ParentNode, selector: string): Element[] => {
+    const results = Array.from(root.querySelectorAll(selector));
+    for (const host of Array.from(root.querySelectorAll('*'))) {
+      if (host.shadowRoot) results.push(...queryDeep(host.shadowRoot, selector));
+    }
+    return results;
+  };
   const acceptAllows = (accept: string | null, file: File): boolean => {
     const raw = (accept || '').trim().toLowerCase();
     if (!raw || raw === '*' || raw.split(',').some((t: string) => t.trim() === '*/*')) return true;
@@ -171,11 +178,11 @@ function inPageCommitTransfer(transferId: string, refId?: string, selector?: str
   // rejects the file as "not supported".
   const bestInput = (file: File): HTMLInputElement | null => {
     const target = refId
-      ? document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`) || document.getElementById(refId)
+      ? queryDeep(document, `[data-autoform-ref="${CSS.escape(refId)}"]`)[0] || document.getElementById(refId)
       : null;
-    const roots = target ? [target] : selector ? Array.from(document.querySelectorAll(selector)) : [document];
+    const roots = target ? [target] : selector ? queryDeep(document, selector) : [document];
     const inputs = roots.flatMap(root => 'matches' in root && root.matches('input[type="file"]')
-      ? [root as HTMLInputElement] : Array.from(root.querySelectorAll<HTMLInputElement>('input[type="file"]')));
+      ? [root as HTMLInputElement] : queryDeep(root, 'input[type="file"]') as HTMLInputElement[]);
     let best: HTMLInputElement | null = null;
     let bestScore = -1;
     for (const el of inputs) {
@@ -269,6 +276,36 @@ function inPageCommitTransfer(transferId: string, refId?: string, selector?: str
     return { success: false, message: `Failed to attach file: ${err?.message || err}`, bytes: 0 };
   }
 }
+/** Locate an upload control in accessible frames without attaching anything. */
+function inPageFindUploadTarget(fileName: string, mimeType: string, refId?: string, selector?: string): number {
+  const queryDeep = (root: ParentNode, selector: string): Element[] => {
+    const results = Array.from(root.querySelectorAll(selector));
+    for (const host of Array.from(root.querySelectorAll('*'))) {
+      if (host.shadowRoot) results.push(...queryDeep(host.shadowRoot, selector));
+    }
+    return results;
+  };
+  const reference = refId ? queryDeep(document, `[data-autoform-ref="${CSS.escape(refId)}"]`)[0] || document.getElementById(refId) : null;
+  const roots: ParentNode[] = reference ? [reference] : selector ? queryDeep(document, selector) : [document];
+  let best = -1;
+  for (const root of roots) {
+    const fields = 'matches' in root && (root as Element).matches('input[type="file"]')
+      ? [root as HTMLInputElement] : queryDeep(root, 'input[type="file"]') as HTMLInputElement[];
+    for (const input of fields) {
+      if (input.disabled) continue;
+      const accept = input.accept.toLowerCase().trim();
+      const tokens = accept.split(',').map(token => token.trim());
+      const allowed = !accept || tokens.some(token => token === '*' || token === '*/*' ||
+        token === mimeType.toLowerCase() || (token.endsWith('/*') && mimeType.startsWith(token.slice(0, -1))) ||
+        (token.startsWith('.') && fileName.toLowerCase().endsWith(token)));
+      if (!allowed) continue;
+      const dialog = input.closest('[role="dialog"], dialog, [aria-modal="true"]');
+      const activeDialog = dialog && dialog.getBoundingClientRect().width > 0;
+      best = Math.max(best, (accept ? 1000 : 800) + (activeDialog ? 50 : 0));
+    }
+  }
+  return best;
+}
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
@@ -317,7 +354,7 @@ export async function injectFileIntoTab(
         },
         15000
       );
-      if (committed) {
+      if (committed && (committed.success || committed.attached)) {
         return {
           ...committed,
           transport: 'content-script',
@@ -336,15 +373,23 @@ export async function injectFileIntoTab(
   }
 
   try {
+    const frames = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true }, func: inPageFindUploadTarget,
+      args: [request.fileName, request.mimeType, request.refId, request.selector],
+    });
+    const chosen = frames.filter(frame => typeof frame.result === 'number' && frame.result >= 0)
+      .sort((a, b) => Number(b.result) - Number(a.result))[0];
+    if (!chosen) return { success: false, message: 'No enabled file input accepts this file in accessible page frames. Open the upload control and inspect the form before retrying.' };
+    const target = { tabId, frameIds: [chosen.frameId] };
     await chrome.scripting.executeScript({
-      target: { tabId },
+      target,
       func: inPageBeginTransfer,
       args: [transferId, meta],
     });
 
     for (let i = 0; i < chunks.length; i++) {
       await chrome.scripting.executeScript({
-        target: { tabId },
+        target,
         func: inPagePushChunk,
         args: [transferId, i, chunks[i]],
       });
@@ -353,7 +398,7 @@ export async function injectFileIntoTab(
     }
 
     const results = await chrome.scripting.executeScript({
-      target: { tabId },
+      target,
       func: inPageCommitTransfer,
       args: [transferId, request.refId, request.selector, request.dropEvents !== false],
     });
