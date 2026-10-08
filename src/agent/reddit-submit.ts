@@ -1,4 +1,5 @@
 import { writeRedditDraft } from './reddit-editor';
+import { recordRedditOutcome, redditRemovalBlocker, redditDraftReviewBlocker } from './reddit-review';
 
 // Runs in the page. Find the real submit control through custom-element shadows,
 // report site validation, and never retry an unconfirmed submission automatically.
@@ -18,7 +19,33 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
     .filter(visible).map(el => fold(el.innerText || el.getAttribute('aria-label') || '')).filter(Boolean);
   const posted = () => Boolean(expected?.values.title && /\/comments\/[^/]+/.test(location.pathname) &&
     all('h1,shreddit-post[post-title],.thing.link a.title').some(el => visible(el) && fold(el.getAttribute('post-title') || el.innerText || '') === fold(expected!.values.title!)));
-  if (posted()) return result('posted', 'Reddit opened the post permalink and the published title matches the prepared draft.');
+  const closestComposed = (element: HTMLElement, selector: string): HTMLElement | null => {
+    let cursor: HTMLElement | null = element;
+    while (cursor) {
+      if (cursor.matches(selector)) return cursor;
+      cursor = cursor.assignedSlot || cursor.parentElement || (cursor.getRootNode() as ShadowRoot).host as HTMLElement || null;
+    }
+    return null;
+  };
+  const moderation = (dispatched = false) => {
+    if (!posted()) return null;
+    const notice = all('p,div,span,[role="alert"],shreddit-post-removal-notice').filter(visible).find(el => {
+      // Never interpret a quote in the submitted body or a neighbouring post as
+      // moderation of this permalink. Match the complete notice, not substrings.
+      if (closestComposed(el, '.usertext-body,[slot="text-body"],shreddit-post-text-body,[data-testid="post-content"],blockquote')) return false;
+      const owner = closestComposed(el, 'shreddit-post,.thing.link,article');
+      if (owner) {
+        const ownerTitle = owner.getAttribute('post-title') || owner.querySelector('h1,a.title')?.textContent;
+        if (ownerTitle && fold(ownerTitle) !== fold(expected!.values.title!)) return false;
+      }
+      return /^(?:sorry,?\s+)?this post (?:was|has been|is) removed (?:by|due to) (?:reddit|the moderators|moderators)/i.test(fold(el.innerText || el.textContent || '')) &&
+        fold(el.innerText || el.textContent || '').length < 400;
+    });
+    return notice ? { ...result('removed', `Submitted, but removed: ${fold(notice.innerText || notice.textContent || '')}. Stop this batch; do not repost. The notice does not establish an account-wide restriction or the exact cause.`, dispatched), submitted: true, removalEvidence: fold(notice.innerText || notice.textContent || '') } : null;
+  };
+  const removed = moderation();
+  if (removed) return removed;
+  if (posted()) return result('posted', 'Reddit opened the matching permalink with no removal notice observed. Later moderation remains possible.');
   const messages = errors();
   if (!submit) return messages.length ? result('blocked', `Reddit reports: ${messages.join('; ')}. Fix the requirement; do not re-click Post.`)
     : result('unconfirmed', 'No published post confirmation yet. Do not click Post again or claim success. Inspect the current page for a site requirement or pending request.');
@@ -62,7 +89,9 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
   const deadline = Date.now() + 4000;
   do {
     await new Promise(resolve => setTimeout(resolve, 150));
-    if (posted()) return result('posted', 'Reddit opened the post permalink and the published title matches the prepared draft.', true);
+    const removed = moderation(true);
+    if (removed) return removed;
+    if (posted()) return result('posted', 'Reddit opened the matching permalink with no removal notice observed. Later moderation remains possible.', true);
     const failures = errors();
     if (failures.length) {
       delete document.documentElement.dataset.openbuaRedditSubmitAttempt; // Rejected, not an uncertain success.
@@ -75,12 +104,18 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
 const rememberedDrafts = new Map<number, { url: string; values: { title?: string; body?: string } }>();
 export async function redditPostAction(tabId: number, submit: boolean) {
   if (submit) {
+    const blocker = redditRemovalBlocker();
+    if (blocker) return { success: false, state: 'blocked', dispatched: false, postVerified: false, message: blocker };
     const draft = await writeRedditDraft(tabId, [], true);
     if (draft.errors.length) return { success: false, state: 'blocked', dispatched: false, postVerified: false, message: draft.errors.join('\n') };
     const capture = await chrome.scripting.executeScript({ target: { tabId }, func: () => {
       try { return JSON.parse(document.documentElement.dataset.openbuaRedditDraft || 'null'); } catch { return null; }
     } });
-    if (capture[0]?.result) rememberedDrafts.set(tabId, capture[0].result);
+    if (capture[0]?.result) {
+      const blocker = redditDraftReviewBlocker(tabId, capture[0].result);
+      if (blocker) return { success: false, state: 'blocked', dispatched: false, postVerified: false, message: blocker };
+      rememberedDrafts.set(tabId, capture[0].result);
+    }
   }
   let results;
   try { results = await chrome.scripting.executeScript({ target: { tabId }, func: inPageRedditSubmit, args: [submit, rememberedDrafts.get(tabId) || null] }); }
@@ -90,5 +125,8 @@ export async function redditPostAction(tabId: number, submit: boolean) {
     // click. Re-read the new document without clicking or assuming success.
     results = await chrome.scripting.executeScript({ target: { tabId }, func: inPageRedditSubmit, args: [false, rememberedDrafts.get(tabId) || null] });
   }
-  return results[0]?.result || { success: false, state: 'unconfirmed', dispatched: false, postVerified: false, message: 'Could not verify Reddit state. Inspect before any retry.' };
+  const outcome = results[0]?.result;
+  const draft = rememberedDrafts.get(tabId);
+  if (outcome && draft) recordRedditOutcome(draft, outcome.state, outcome.url);
+  return outcome || { success: false, state: 'unconfirmed', dispatched: false, postVerified: false, message: 'Could not verify Reddit state. Inspect before any retry.' };
 }

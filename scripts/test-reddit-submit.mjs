@@ -106,5 +106,19 @@ try {
   await page.evaluate(() => { document.querySelector('h1').textContent = 'Different unrelated title'; });
   result = await page.evaluate(async () => { const { verifyRedditPostTool } = await import('/src/agent/tools.ts'); return verifyRedditPostTool.execute('verify', {}); });
   assert.equal(result.details.postVerified, false);
+  await page.evaluate(() => {
+    document.querySelector('h1').textContent = 'Four word post title';
+    document.body.insertAdjacentHTML('beforeend', '<div class="usertext-body"><p>Sorry, this post was removed by Reddit’s filters.</p></div><article><h1>Other post</h1><p>Sorry, this post was removed by Reddit’s filters.</p></article>');
+    const body = document.createElement('shreddit-post-text-body'); document.body.append(body);
+    body.attachShadow({ mode: 'open' }).innerHTML = '<p>Sorry, this post was removed by Reddit’s filters.</p>';
+  });
+  result = await page.evaluate(async () => { const { verifyRedditPostTool } = await import('/src/agent/tools.ts'); return verifyRedditPostTool.execute('verify', {}); });
+  assert.equal(result.details.state, 'posted', 'body quotes and another post removal do not taint this permalink');
+  await page.evaluate(() => { document.body.insertAdjacentHTML('beforeend', '<div role="alert">Sorry, this post was removed by Reddit’s filters.</div>'); });
+  result = await page.evaluate(async () => { const { verifyRedditPostTool } = await import('/src/agent/tools.ts'); return verifyRedditPostTool.execute('verify', {}); });
+  assert.equal(result.details.state, 'removed'); assert.equal(result.details.submitted, true); assert.equal(result.details.postVerified, false); assert.equal(result.details.success, false);
+  await setup();
+  result = await action(); assert.equal(result.details.dispatched, false); assert.match(result.details.message, /removed/);
+  assert.equal(await page.evaluate(() => window.clicks), 0, 'an observed removal stops subsequent batch submission');
   console.log('PASS Reddit shadow Post control, disabled and corrupted draft blocking, visible flair rejection, no duplicate uncertain submission, matching permalink/title confirmation and read-only verification after navigation');
 } finally { await browser.close(); }
