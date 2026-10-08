@@ -44,6 +44,25 @@ try {
   await page.evaluate(() => { document.body.insertAdjacentHTML('beforeend', '<button>Post</button>'); });
   result = await action(); assert.equal(result.details.dispatched, false); assert.match(result.details.message, /2 independent Post controls/);
   assert.equal(await page.evaluate(() => window.clicks), 0, 'genuinely separate controls remain ambiguous');
+  // Reddit's actual submit component also owns Save Draft. It must never count
+  // as a second Post action, or be clicked while repairing the draft.
+  await setup();
+  await page.evaluate(() => {
+    const host = document.querySelector('r-post-form-submit-button');
+    host.shadowRoot.innerHTML = '<button id="inner-post-submit-button">Post</button><button id="inner-save-draft-button">Save Draft</button>';
+    window.savedDrafts = 0;
+    host.shadowRoot.querySelector('#inner-save-draft-button').onclick = () => { window.savedDrafts++; document.querySelector('[name="title"]').value = ''; document.querySelector('[name="body"]').value = ''; };
+    host.shadowRoot.querySelector('#inner-post-submit-button').onclick = () => { window.clicks++; document.body.insertAdjacentHTML('beforeend', '<div role="alert">Post flair is required</div>'); };
+  });
+  result = await action(); assert.equal(result.details.dispatched, true); assert.match(result.details.message, /flair is required/);
+  assert.deepEqual(await page.evaluate(() => ({ clicks: window.clicks, saved: window.savedDrafts, title: document.querySelector('[name="title"]').value, body: document.querySelector('[name="body"]').value })), { clicks: 1, saved: 0, title: 'Four word post title', body: 'Body text' });
+  await page.evaluate(() => {
+    document.querySelector('[role="alert"]').remove();
+    document.querySelector('r-post-form-submit-button').shadowRoot.querySelector('#inner-post-submit-button').onclick = () => {
+      window.clicks++; history.pushState({}, '', '/r/test/comments/actual-layout/post/'); document.body.innerHTML = '<h1>Four word post title</h1>';
+    };
+  });
+  result = await action(); assert.equal(result.details.postVerified, true); assert.equal(await page.evaluate(() => window.savedDrafts), 0, 'actual Post/Save Draft layout publishes via Post only');
   await setup();
   await page.evaluate(() => {
     const host = document.querySelector('r-post-form-submit-button');
