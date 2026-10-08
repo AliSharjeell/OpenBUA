@@ -777,6 +777,10 @@ ${(this.settings.autoConfirmSubmit ?? true)
         - Type the message, send it, and finish within 2 to 3 turns total.
 
 21. SOCIAL MEDIA POSTING (ANY PLATFORM — X, LINKEDIN, REDDIT, FACEBOOK, INSTAGRAM, THREADS, BLUESKY, MASTODON, YOUTUBE, PINTEREST, TUMBLR, TIKTOK):
+    - When checking Reddit community rules, open the community and call read_community_rules once. It returns rules plus visible sidebar guidance without navigating through alternate Reddit layouts.
+      An explicit empty rules array means no custom rules are listed; do not treat it as loading or keep searching for nonexistent rules. Still follow visible guidance, site policies and composer requirements.
+      An unavailable result means retrieval failed, not that there are no rules. If verified rules are required, record the destination as skipped and continue with other destinations. Do not repeatedly revisit rules pages, screenshots or waits.
+      Keep a short destination ledger in scratchpad (rules outcome, posted/skipped, reason). Reuse completed checks and never repeat a submitted post to make progress.
     - PREFER THE ONE-CALL TOOL. When the user asks to post media or a caption to a social platform, call 'post_to_social' first:
       'post_to_social({ platform: "x", media: ["consistnet.mp4"], text: "..." })'
       It detects the platform, opens the composer, attaches the stored media, types the caption, and returns the composer state.
