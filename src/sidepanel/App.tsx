@@ -761,9 +761,9 @@ export function App() {
   };
 
   const handleChatDocumentUpload = async (file: File): Promise<UserDocument> => {
+    const tabKey = currentTabKeyRef.current;
     const docId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const parsed = await processUploadedFile(file, { docId });
-    const tabKey = currentTabKeyRef.current;
     const newDoc: UserDocument = {
       id: docId,
       title: parsed.title,
@@ -786,7 +786,7 @@ export function App() {
       fileCategory: parsed.fileCategory,
     };
     await saveTabMemory(tabKey, newDoc);
-    setTabMemories((prev) => [newDoc, ...prev]);
+    if (currentTabKeyRef.current === tabKey) setTabMemories((prev) => [newDoc, ...prev]);
     return newDoc;
   };
 

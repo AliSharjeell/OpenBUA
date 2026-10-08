@@ -9,7 +9,7 @@ export function attachmentReferences(documents: UserDocument[]): AttachmentRefer
     .map(doc => {
       const kind = doc.type === 'image' ? 'img' : doc.type === 'video' ? 'vid' : 'file';
       const alias = `${kind}${counts[kind] = (counts[kind] || 0) + 1}`;
-      return { doc, alias, token: `@${JSON.stringify(doc.fileName || doc.title)}` };
+      return { doc, alias, token: `@${alias}` };
     });
 }
 

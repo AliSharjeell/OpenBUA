@@ -241,6 +241,7 @@ export const getUserDocumentsTool: AgentTool<typeof GetUserDocumentsSchema> = {
       activeDocs.forEach((doc, idx) => {
         let meta = `${doc.type}`;
         if (doc.fileCategory) meta += `, category: ${doc.fileCategory}`;
+        meta += `, upload ID: "${doc.id}"`;
         if (doc.fileName) meta += `, filename: "${doc.fileName}"`;
         if (doc.filePath) meta += `, path: "${doc.filePath}"`;
         if (doc.videoDuration) meta += `, duration: ${doc.videoDuration}s`;
@@ -875,7 +876,7 @@ const UploadFileToFormSchema = Type.Object({
   fileName: Type.Optional(
     Type.String({
       description:
-        'The filename or keyword of the stored file to attach (e.g. "resume.pdf", "resume", "profile.png", "consistnet.mp4"). If omitted or "resume", OpenBUA automatically selects the user\'s stored resume or primary document from Memory. On a social platform, stored video media is preferred when nothing is named.',
+        'Exact filename, document ID, or title from get_user_documents or referenced attachments (e.g. "resume.pdf", "mem-123", "profile.png"). Prefer the document ID to disambiguate duplicate names. Named files never fall back to another attachment. If omitted, an application page prefers the stored resume and a social composer prefers video.',
     })
   ),
   refId: Type.Optional(
