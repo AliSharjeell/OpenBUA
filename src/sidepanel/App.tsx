@@ -1,3 +1,5 @@
+import { referencedAttachments } from '../services/attachment-references';
+import { extractTextForDocument, detectDocumentCategory } from '../services/pdf-parser';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   AppSettings,
@@ -729,6 +731,35 @@ export function App() {
     setTabMemories(updated);
   };
 
+  const handlePreparePrompt = async (text: string): Promise<string> => {
+    const scope = currentTabKeyRef.current;
+    const references = referencedAttachments(text, activeDocuments);
+    if (!references.length) return text;
+    const replacements = new Map<string, UserDocument>();
+    const context: string[] = [];
+    for (const { doc, alias } of references) {
+      let updated = doc;
+      if ((doc.type === 'image' || doc.type === 'pdf') && doc.ocrStatus !== 'done') {
+        try {
+          const extracted = await extractTextForDocument(doc);
+          updated = { ...doc, content: extracted, ocrStatus: 'done',
+            fileCategory: detectDocumentCategory(doc.fileName || doc.title, extracted) };
+          if (doc.isGlobal) await saveGlobalMemory(updated);
+          else await saveTabMemory(scope, updated);
+          replacements.set(doc.id, updated);
+        } catch (error: any) {
+          context.push(`Extraction failed for ${doc.fileName || doc.title}: ${error?.message || error}. Raw file remains available for upload; do not invent its contents.`);
+        }
+      }
+      context.push(`@${alias}: filename=${JSON.stringify(updated.fileName || updated.title)}, upload fileName=${JSON.stringify(updated.id)}.\n${updated.content}`);
+    }
+    if (currentTabKeyRef.current !== scope) throw new Error('The chat changed while reading attachments. Send your message in the intended chat.');
+    setGlobalMemories(prev => prev.map(doc => replacements.get(doc.id) || doc));
+    setTabMemories(prev => prev.map(doc => replacements.get(doc.id) || doc));
+    harnessRef.current?.updateConfig(settings, activeDocuments.map(doc => replacements.get(doc.id) || doc));
+    return `${text}\n\nReferenced attachments (use these exact files):\n${context.join('\n\n')}`;
+  };
+
   const handleChatDocumentUpload = async (file: File): Promise<UserDocument> => {
     const docId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const parsed = await processUploadedFile(file, { docId });
@@ -1126,6 +1157,7 @@ export function App() {
             activeTool={activeTool}
             settings={settings}
             documents={activeDocuments}
+            onPreparePrompt={handlePreparePrompt}
             onNavigateToSettings={() => handleSelectNavTab('settings')}
             onNavigateToMemory={() => handleSelectNavTab('memory')}
             onUploadDocument={handleChatDocumentUpload}

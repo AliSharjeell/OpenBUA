@@ -1,3 +1,4 @@
+import { attachmentReferences } from '../services/attachment-references';
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, ToolCallState, AppSettings, UserDocument } from '../types';
 import { FormAgentHarness } from '../agent/form-agent';
@@ -42,6 +43,7 @@ interface ChatViewProps {
   onNavigateToSettings: () => void;
   onNavigateToMemory: () => void;
   onUploadDocument?: (file: File) => Promise<UserDocument>;
+  onPreparePrompt?: (text: string) => Promise<string>;
   inputDraft?: string;
   onInputDraftChange?: (draft: string) => void;
 }
@@ -226,10 +228,12 @@ export function ChatView({
   onNavigateToSettings,
   onNavigateToMemory,
   onUploadDocument,
+  onPreparePrompt,
   inputDraft,
   onInputDraftChange,
 }: ChatViewProps) {
   const [input, setInput] = useState(inputDraft || '');
+  const [isPreparingFiles, setIsPreparingFiles] = useState(false);
   const [expandedThoughtIds, setExpandedThoughtIds] = useState<Record<string, boolean>>({});
   const [expandedToolsIds, setExpandedToolsIds] = useState<Record<string, boolean>>({});
 
@@ -439,7 +443,7 @@ export function ChatView({
 
   const handleSend = async (textToSend?: string) => {
     const promptText = (textToSend || input).trim();
-    if (!promptText || isBusy || !harness) return;
+    if (!promptText || isBusy || isPreparingFiles || isUploadingDoc || !harness) return;
 
     if (!hasKey) {
       onNavigateToSettings();
@@ -468,9 +472,15 @@ export function ChatView({
 
     if (harness) {
       try {
-        await harness.prompt(promptText);
+        setIsPreparingFiles(true);
+        const prepared = onPreparePrompt ? await onPreparePrompt(promptText) : promptText;
+        setIsPreparingFiles(false);
+        await harness.prompt(prepared);
       } catch (e: any) {
         console.error('[ChatView] Prompt error:', e);
+        onMessagesChange([...newMessages, {id: `file-error-${Date.now()}`, role: 'assistant', content: `Could not prepare attachments: ${e?.message || e}`, timestamp: Date.now()}]);
+      } finally {
+        setIsPreparingFiles(false);
       }
     }
   };

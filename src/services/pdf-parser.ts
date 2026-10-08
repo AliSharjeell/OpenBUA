@@ -151,7 +151,7 @@ export async function extractTextWithVlm(
   const settings = await loadSettings();
   const promptText =
     customPrompt ||
-    'Extract all readable text, contact information, personal details, work experience, education, skills, and data from this document or image verbatim in structured, clean Markdown formatting. Do not hallucinate or omit any text.';
+    'Extract all readable text and data from this document or image in structured Markdown. Preserve contact information, personal details, work experience, education, and skills verbatim. For images, also describe visible objects, layout, charts, and other relevant visual details in a separate Visual description section. Distinguish visible facts from uncertainty; do not invent details.';
 
   if (settings.selectedMode === 'free') {
     const baseUrl = settings.free?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/';
@@ -647,7 +647,7 @@ export async function processUploadedFile(
   }
 
   const fileCategory = detectDocumentCategory(file.name, content);
-  const tags = [type];
+  const tags: string[] = [type];
   if (fileCategory === 'resume') {
     tags.push('resume', 'profile');
   } else if (fileCategory === 'video') {
