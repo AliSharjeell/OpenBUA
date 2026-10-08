@@ -1181,7 +1181,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
   if (refId && elementRefMap.has(refId)) {
     target = elementRefMap.get(refId)!;
   } else if (refId) {
-    target = queryUploadTargets(`[data-autoform-ref="${CSS.escape(refId)}"]`)[0];
+    target = document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
   } else if (selector) {
     try {
       target = document.querySelector(selector);
