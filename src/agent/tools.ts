@@ -5,6 +5,7 @@ import { readCommunityRules, observeRulesPage, completedRulesNavigation, describ
 import { writeRedditDraft } from './reddit-editor';
 import { inPageReadYouTubeVideos } from './youtube-page';
 import { redditPostAction } from './reddit-submit';
+import { reviewRedditDraft } from './reddit-review';
 import { protectPageTrust, type PageTrustPolicy } from './page-trust';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -590,7 +591,7 @@ export const getPageContentTool: AgentTool<typeof GetPageContentSchema> = {
 function createRedditPostTool(submit: boolean): AgentTool {
   return {
     name: submit ? 'submit_reddit_post' : 'verify_reddit_post', label: submit ? 'Submit Reddit Post' : 'Verify Reddit Post',
-    description: submit ? 'Submit the fully prepared Reddit draft through its actual Post button, including custom-element shadow controls. Reports disabled/invalid requirements or confirms matching published permalink. No coordinate guessing or automatic re-clicks. Call only when the user authorized posting.' : 'Read-only Reddit publication verification. Confirms matching post permalink/title or reports validation errors/unconfirmed state. Never clicks or posts.',
+    description: submit ? 'Submit the fully prepared Reddit draft through its actual Post button after review_reddit_post checks are resolved. Reports requirements or matching permalink, including observed removals. A task removal stops the batch. No coordinate guessing or automatic re-clicks. Call only when the user authorized posting.' : 'Read-only Reddit publication verification. Checks matching permalink/title and removal notices, distinguishing submitted-but-removed from visible or unconfirmed. Never clicks or posts.',
     parameters: Type.Object({}),
     execute: async (): Promise<AgentToolResult> => {
       const tab = await getActiveTab();
@@ -651,6 +652,20 @@ export const readCommunityRulesTool: AgentTool = {
     } catch (error: any) {
       return { content: [{ type: 'text', text: error?.message || String(error) }], details: { error: String(error) } };
     }
+  },
+};
+
+export const reviewRedditPostTool: AgentTool = {
+  name: 'review_reddit_post', label: 'Review Reddit Draft',
+  description: 'Review the exact prepared Reddit draft before publishing. Retrieves cached community rules/sidebar guidance, flags duplicate submissions and observed removals, and lists promotion, link, flair/tag and factual-claim checks. This is not a guarantee of moderation approval. Resolve the checks before submit_reddit_post.',
+  parameters: Type.Object({}),
+  execute: async (): Promise<AgentToolResult> => {
+    try {
+      const tab = await getActiveTab();
+      if (!tab?.id) throw new Error('Open the prepared Reddit draft first.');
+      const result = await reviewRedditDraft(tab.id);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
+    } catch (error: any) { return { content: [{ type: 'text', text: error?.message || String(error) }], details: { state: 'blocked' } }; }
   },
 };
 
@@ -1471,6 +1486,7 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     confirmDocsCloneTool,
     fillFormFieldsTool,
     prepareRedditPostTool,
+    reviewRedditPostTool,
     submitRedditPostTool,
     verifyRedditPostTool,
     readYouTubeVideosTool,
