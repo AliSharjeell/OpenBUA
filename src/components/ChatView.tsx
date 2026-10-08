@@ -890,7 +890,8 @@ export function ChatView({
           </div>
         )}
         {attachments.length > 0 && (
-          <div className="pointer-events-auto flex gap-2 overflow-x-auto rounded-2xl border border-zinc-800/90 bg-zinc-900/95 p-2 shadow-xl" aria-label="Attached files">
+          <div className="pointer-events-auto flex w-full min-w-0 max-w-full shrink-0 flex-nowrap gap-2 overflow-x-auto overflow-y-hidden rounded-2xl border border-zinc-800/90 bg-zinc-900/95 p-2 shadow-xl" aria-label="Attached files" tabIndex={0}
+            onWheel={event => { if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) event.currentTarget.scrollLeft += event.deltaY; }}>
             {attachments.map(({doc, alias, token}) => (
               <button key={doc.id} type="button" onClick={() => insertMention(token)} disabled={isBusy || isPreparingFiles}
                 title={`Reference ${doc.fileName || doc.title} using @${alias}`}
@@ -899,7 +900,7 @@ export function ChatView({
                   <img src={doc.thumbnailUrl || doc.dataUrl} alt="" className="h-8 w-8 rounded-lg object-cover" />
                 ) : <FileText className="h-5 w-5 shrink-0 text-zinc-400" />}
                 <span className="min-w-0"><span className="block truncate text-[11px] text-zinc-200">{doc.fileName || doc.title}</span>
-                  <span className="block text-[10px] text-blue-400">@{alias}</span></span>
+                  <span className="flex items-center gap-1.5 text-[10px]"><span className="text-blue-400">@{alias}</span><span className="text-zinc-500">{doc.isGlobal ? 'Global' : 'This tab'}</span></span></span>
               </button>
             ))}
           </div>

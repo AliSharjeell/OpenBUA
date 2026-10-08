@@ -733,30 +733,33 @@ export function App() {
 
   const handlePreparePrompt = async (text: string): Promise<string> => {
     const scope = currentTabKeyRef.current;
-    const references = referencedAttachments(text, activeDocuments);
+    const references = referencedAttachments(text, availableDocuments);
     if (!references.length) return text;
     const replacements = new Map<string, UserDocument>();
     const context: string[] = [];
     for (const { doc, alias } of references) {
-      let updated = doc;
+      let updated = doc.isActiveForContext ? doc : { ...doc, isActiveForContext: true };
       if ((doc.type === 'image' || doc.type === 'pdf' || /\.docx$/i.test(doc.fileName || '')) && doc.ocrStatus !== 'done') {
         try {
           const extracted = await extractTextForDocument(doc);
-          updated = { ...doc, content: extracted, ocrStatus: 'done',
+          updated = { ...updated, content: extracted, ocrStatus: 'done',
             fileCategory: detectDocumentCategory(doc.fileName || doc.title, extracted) };
-          if (doc.isGlobal) await saveGlobalMemory(updated);
-          else await saveTabMemory(scope, updated);
-          replacements.set(doc.id, updated);
+
         } catch (error: any) {
           context.push(`Extraction failed for ${doc.fileName || doc.title}: ${error?.message || error}. Raw file remains available for upload; do not invent its contents.`);
         }
+      }
+      if (updated !== doc) {
+        if (doc.isGlobal) await saveGlobalMemory(updated);
+        else await saveTabMemory(scope, updated);
+        replacements.set(doc.id, updated);
       }
       context.push(`@${alias}: filename=${JSON.stringify(updated.fileName || updated.title)}, upload fileName=${JSON.stringify(updated.id)}.\n${updated.content}`);
     }
     if (currentTabKeyRef.current !== scope) throw new Error('The chat changed while reading attachments. Send your message in the intended chat.');
     setGlobalMemories(prev => prev.map(doc => replacements.get(doc.id) || doc));
     setTabMemories(prev => prev.map(doc => replacements.get(doc.id) || doc));
-    harnessRef.current?.updateConfig(settings, activeDocuments.map(doc => replacements.get(doc.id) || doc));
+    harnessRef.current?.updateConfig(settings, availableDocuments.map(doc => replacements.get(doc.id) || doc).filter(doc => doc.isActiveForContext));
     return `${text}\n\nReferenced attachments (use these exact files):\n${context.join('\n\n')}`;
   };
 
@@ -820,6 +823,11 @@ export function App() {
       ? settings.anthropic.apiKey
       : settings.openai.apiKey;
   const hasKey = Boolean(currentKey && currentKey.trim().length > 3);
+
+  const availableDocuments = [
+    ...globalMemories.map(doc => ({ ...doc, isGlobal: true })),
+    ...tabMemories.map(doc => ({ ...doc, isGlobal: false })),
+  ];
 
   const activeDocuments = [
     ...globalMemories.filter((m) => m.isActiveForContext),
@@ -1156,7 +1164,7 @@ export function App() {
             isBusy={isBusy}
             activeTool={activeTool}
             settings={settings}
-            documents={activeDocuments}
+            documents={availableDocuments}
             onPreparePrompt={handlePreparePrompt}
             onNavigateToSettings={() => handleSelectNavTab('settings')}
             onNavigateToMemory={() => handleSelectNavTab('memory')}
