@@ -1,3 +1,4 @@
+import { guardApplicationReport, type ApplicationStatus } from './application-status';
 // Form Filling Agent Harness powered by @earendil-works/pi-agent-core
 import { Agent, AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
 import { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
@@ -276,6 +277,7 @@ export class FormAgentHarness {
   private settings: AppSettings;
   private documents: UserDocument[];
   private listeners: AgentUpdateListeners = {};
+  private lastApplicationStatus: ApplicationStatus | null = null;
   private activeToolCalls = new Map<string, ToolCallState>();
   private currentStreamingText = '';
   private currentThinkingText = '';
@@ -346,6 +348,7 @@ export class FormAgentHarness {
 
   public setSessionId(sessionId: string) {
     this.sessionId = sessionId;
+    this.lastApplicationStatus = null;
     setActiveSessionIdState(sessionId);
   }
 
@@ -1278,8 +1281,11 @@ ${this.settings.systemInstruction || ''}`.trim();
           anyEvt.toolName || anyEvt.toolCall?.name || existing?.toolName || '',
           anyEvt.args || anyEvt.toolCall?.args || existing?.args || {}
         );
+        const observedStatus = anyEvt.result?.details?.applicationStatus
+          || ((anyEvt.toolName || existing?.toolName) === 'verify_application_status' ? anyEvt.result?.details : null);
+        if (observedStatus?.state && observedStatus.state !== 'not-applicable') this.lastApplicationStatus = observedStatus;
         if (existing) {
-          existing.status = anyEvt.isError ? 'error' : 'success';
+          existing.status = anyEvt.isError || anyEvt.result?.details?.success === false ? 'error' : 'success';
           existing.result = anyEvt.result?.details || anyEvt.result?.content?.[0]?.text || anyEvt.result;
           if (anyEvt.isError) {
             existing.errorMessage = String(anyEvt.result?.content?.[0]?.text || anyEvt.result?.error || 'Tool failed');
@@ -1386,7 +1392,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         const thinkingForTurn =
           this.currentThinkingText ||
           (hasTools && this.currentStreamingText.trim() ? this.currentStreamingText.trim() : undefined);
-        const textForTurn = hasTools && !this.currentThinkingText ? '' : this.currentStreamingText;
+        const textForTurn = guardApplicationReport(hasTools && !this.currentThinkingText ? '' : this.currentStreamingText, this.lastApplicationStatus);
 
         this.listeners.onTurnComplete?.(
           textForTurn,
@@ -1403,6 +1409,7 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public async prompt(input: string): Promise<void> {
+    this.lastApplicationStatus = null;
     if (!/^(continue|resume|try again|keep going)[.!]*$/i.test(input.trim())) {
       this.docsEditPolicy.taskEpoch += 1;
       this.docsEditPolicy.cloneRequired = /format/i.test(input) && /like|same|match/i.test(input);
