@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { deflateRawSync, crc32 } from 'node:zlib';
 // Run with a local Vite server and Playwright installed, or set OPENBUA_PLAYWRIGHT_MODULE.
 const { chromium } = await import(process.env.OPENBUA_PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({...(process.env.OPENBUA_CHROME_PATH ? {executablePath:process.env.OPENBUA_CHROME_PATH} : {}), headless:true});
@@ -14,6 +15,16 @@ await page.addInitScript(({docs,settings})=>{
   const stored={autoform_settings:settings,autoform_chat_sessions:[{id:'session_test',title:'Job Find',createdAt:1,updatedAt:1}],openbua_last_active_session_id:'session_test',autoform_tab_mem_session_test:docs,openbua_last_active_nav_tab:'chat'};
   for(const [k,v] of Object.entries(stored))localStorage.setItem(k,JSON.stringify(v));
 },{docs,settings});
+function makeDocx(compress = true) {
+  const name = Buffer.from('word/document.xml');
+  const xml = Buffer.from('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Word resume &amp; profile</w:t></w:r></w:p><w:p><w:r><w:t>AI Engineer</w:t></w:r></w:p></w:body></w:document>');
+  const data = compress ? deflateRawSync(xml) : xml;
+  const local = Buffer.alloc(30);local.writeUInt32LE(0x04034b50);local.writeUInt16LE(20,4);local.writeUInt16LE(compress ? 8 : 0,8);local.writeUInt32LE(crc32(xml),14);local.writeUInt32LE(data.length,18);local.writeUInt32LE(xml.length,22);local.writeUInt16LE(name.length,26);
+  const central = Buffer.alloc(46);central.writeUInt32LE(0x02014b50);central.writeUInt16LE(20,4);central.writeUInt16LE(20,6);central.writeUInt16LE(compress ? 8 : 0,10);central.writeUInt32LE(crc32(xml),16);central.writeUInt32LE(data.length,20);central.writeUInt32LE(xml.length,24);central.writeUInt16LE(name.length,28);
+  const directory = Buffer.concat([central,name]);
+  const end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(1,8);end.writeUInt16LE(1,10);end.writeUInt32LE(directory.length,12);end.writeUInt32LE(local.length+name.length+data.length,16);
+  return Buffer.concat([local,name,data,directory,end]);
+}
 const requests=[];
 await page.route('**/fake/v1/chat/completions',async route=>{
   const data=route.request().postDataJSON();requests.push(data);
@@ -39,6 +50,27 @@ try{
   assert.equal(requests.filter(r=>r.messages.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==='image_url'))).length,1);
   await page.waitForFunction(() => document.body.textContent.includes('Read the referenced attachment.'));
   assert.ok(requests.some(r=>JSON.stringify(r.messages).includes('image-2')&&JSON.stringify(r.messages).includes('sample image text')));
+  const word = makeDocx();
+  await page.locator('input[type="file"]').setInputFiles({name:'new-resume.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',buffer:word});
+  await page.getByLabel('Attached files',{exact:true}).getByText('new-resume.docx',{exact:true}).waitFor();
+  await input.fill('Summarize @file2');
+  await input.press('Enter');
+  await input.press('Enter');
+  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('autoform_tab_mem_session_test')).find(d=>d.fileName==='new-resume.docx')?.ocrStatus==='done');
+  const savedWord=await page.evaluate(()=>JSON.parse(localStorage.getItem('autoform_tab_mem_session_test')).find(d=>d.fileName==='new-resume.docx'));
+  assert.equal(savedWord.content,'Word resume & profile\nAI Engineer');
+  assert.ok(savedWord.dataUrl);
+  const storedWordText=await page.evaluate(async bytes=>{
+    const {extractTextFromDocx}=await import('/src/services/docx-parser.ts');
+    return extractTextFromDocx(new Blob([new Uint8Array(bytes)]));
+  },Array.from(makeDocx(false)));
+  assert.equal(storedWordText,savedWord.content);
+  const corruptWord=await page.evaluate(async()=>{
+    const {extractTextFromDocx}=await import('/src/services/docx-parser.ts');
+    try {await extractTextFromDocx(new Blob(['invalid archive']));return false;}catch{return true;}
+  });
+  assert.ok(corruptWord);
+  console.log('PASS browser Word extraction: compressed/stored DOCX, paragraph text, invalid ZIP rejection, automatic memory persistence');
   // Exercise the built content script in real Chrome with Easy Apply-style
   // hidden controls, checking File bytes and the site's change handler.
   const uploadPage = await browser.newPage();
