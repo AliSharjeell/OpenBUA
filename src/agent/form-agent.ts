@@ -1283,7 +1283,8 @@ ${this.settings.systemInstruction || ''}`.trim();
         );
         const observedStatus = anyEvt.result?.details?.applicationStatus
           || ((anyEvt.toolName || existing?.toolName) === 'verify_application_status' ? anyEvt.result?.details : null);
-        if (observedStatus?.state && observedStatus.state !== 'not-applicable') this.lastApplicationStatus = observedStatus;
+        if (observedStatus?.state) this.lastApplicationStatus = observedStatus.state === 'not-applicable' ? null : observedStatus;
+        else if (['navigate_browser_tab', 'switch_browser_tab', 'open_new_tab'].includes(anyEvt.toolName || existing?.toolName || '')) this.lastApplicationStatus = null;
         if (existing) {
           existing.status = anyEvt.isError || anyEvt.result?.details?.success === false ? 'error' : 'success';
           existing.result = anyEvt.result?.details || anyEvt.result?.content?.[0]?.text || anyEvt.result;
