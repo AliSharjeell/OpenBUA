@@ -1,3 +1,4 @@
+import { inspectApplicationStatus, describeApplicationStatus } from './application-status';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -43,6 +44,27 @@ import {
   clearScratchpad,
   saveSuggestedMemory,
 } from '../services/storage';
+
+async function observeApplicationAction(message: string, dispatched: boolean) {
+  const tab = await getActiveTab();
+  if (!tab?.id || !/linkedin\.com\/jobs|careers|application|apply/i.test(tab.url || '')) return {message,success:dispatched};
+  const outcome = await inspectApplicationStatus(tab.id, true);
+  const note = describeApplicationStatus(outcome);
+  return {message:note ? `${message}\n\n${note}` : message,
+    success:dispatched && outcome.state !== 'rejected', dispatched, submissionVerified:outcome.state === 'submitted',
+    applicationStatus:outcome};
+}
+
+export const verifyApplicationStatusTool: AgentTool<any> = {
+  name:'verify_application_status',label:'Verify Application Outcome',
+  description:'Read the current application step and visible success/error feedback. Use after submitting or when a job may be closed. A dispatched click does not prove submission.',
+  parameters:Type.Object({}),
+  execute:async()=>{
+    const tab=await getActiveTab();
+    const outcome=tab?.id ? await inspectApplicationStatus(tab.id) : {state:'unconfirmed' as const,evidence:'No active application tab',actions:[]};
+    return {content:[{type:'text',text:describeApplicationStatus(outcome)||'No application UI detected.'}],details:{...outcome,submissionVerified:outcome.state==='submitted'}};
+  },
+};
 
 // 1. Inspect Form Elements on Current Tab
 const GetActiveTabFormSchema = Type.Object({
@@ -170,9 +192,10 @@ export const clickElementTool: AgentTool<typeof ClickElementSchema> = {
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
       const result = await clickActiveTabElement(params);
+      const observed = await observeApplicationAction(result.message, result.success);
       return {
-        content: [{ type: 'text', text: result.message }],
-        details: result,
+        content: [{ type: 'text', text: observed.message }],
+        details: { ...result, ...observed } as any,
       };
     } catch (err: any) {
       return {
@@ -646,9 +669,10 @@ export const pressKeyCombinationTool: AgentTool<typeof PressKeySchema> = {
         altKey: params.altKey,
         selector: params.selector,
       });
+      const observed = /enter/i.test(params.key) ? await observeApplicationAction(res.message, res.success) : {message:res.message,success:res.success};
       return {
-        content: [{ type: 'text', text: res.message }],
-        details: res,
+        content: [{ type: 'text', text: observed.message }],
+        details: { ...res, ...observed } as any,
       };
     } catch (err: any) {
       return {
@@ -1144,10 +1168,11 @@ export const clickAtPositionTool: AgentTool<typeof ClickAtPositionSchema> = {
         shiftKey: params.shiftKey,
         button: params.button,
       });
+      const observed = await observeApplicationAction(res.message, res.success);
       return {
-        content: [{ type: 'text', text: res.message }],
+        content: [{ type: 'text', text: observed.message }],
         details: {
-          success: res.success,
+          ...observed,
           element: res.element,
           cssX: res.cssX,
           cssY: res.cssY,
@@ -1265,6 +1290,7 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     uploadFileToFormTool,
     postToSocialTool,
     clickElementTool,
+    verifyApplicationStatusTool,
     scrollPageTool,
     clickAtPositionTool,
     typeTextTool,
