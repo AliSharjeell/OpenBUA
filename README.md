@@ -123,7 +123,7 @@ No technical knowledge or coding required. Follow these steps to install OpenBUA
 
 ### Step 1: Download the Pre-Built Extension
 1. Go to the [Releases](https://github.com/AliSharjeell/OpenBUA/releases) page.
-2. Under the latest release, click on **`OpenBUA-v1.7.0.zip`** (or **`OpenBUA-extension.zip`**) to download it.
+2. Under the latest release, click on **`OpenBUA-extension.zip`** to download it.
 3. Unzip the downloaded file to a folder on your computer. You will see a folder containing `manifest.json`, `sidepanel.html`, etc.
 
 ### Step 2: Open Chrome Extensions and Enable Developer Mode
