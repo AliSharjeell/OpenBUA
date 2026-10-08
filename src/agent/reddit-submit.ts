@@ -25,8 +25,15 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
   if (!expected?.values.title || expected.url !== location.href) return result('blocked', 'Prepare and verify the complete title/body with prepare_reddit_post first. No Post click dispatched.');
   if (document.documentElement.dataset.openbuaRedditSubmitAttempt === JSON.stringify(expected)) return result('unconfirmed', 'A submission was already dispatched for this draft. Use verify_reddit_post; do not submit it again.');
   if (messages.length) return result('blocked', `Reddit reports: ${messages.join('; ')}. No Post click dispatched.`);
+  const label = (el: HTMLElement) => fold(el.getAttribute('aria-label') || el.innerText || (el as HTMLInputElement).value ||
+    Array.from(el.querySelectorAll('slot')).map(slot => slot.assignedNodes({ flatten: true }).map(node => node.textContent || '').join('')).join(' ') || el.textContent || '');
   const buttons = all('button,[role="button"],input[type="submit"],r-post-form-submit-button').filter(visible)
-    .filter(el => el.tagName === 'R-POST-FORM-SUBMIT-BUTTON' || ((el.getRootNode() as ShadowRoot).host?.tagName === 'R-POST-FORM-SUBMIT-BUTTON') || /^post$/i.test(fold(el.innerText || el.getAttribute('aria-label') || (el as HTMLInputElement).value || '')));
+    .filter(el => {
+      // The component owns both actions. Ownership is not evidence of Post:
+      // never include Save Draft, even when it lives in the same shadow root.
+      if (/save.?draft/i.test(el.id) || /^(?:save draft|drafts?|cancel)$/i.test(label(el))) return false;
+      return el.tagName === 'R-POST-FORM-SUBMIT-BUTTON' || el.id === 'inner-post-submit-button' || /^post$/i.test(label(el));
+    });
   // A single visible Post may expose a custom host, role=button wrapper and
   // native button. Collapse ancestors across light DOM, slots and shadows.
   const parent = (el: HTMLElement): HTMLElement | null => el.assignedSlot || el.parentElement || ((el.getRootNode() as ShadowRoot).host as HTMLElement | undefined) || null;
