@@ -24,7 +24,8 @@
     "test:pdf": "node scripts/test-pdf-extraction.mjs",
     "typecheck": "tsc --noEmit",
     "test:attachments": "node scripts/test-attachment-scope.mjs && node scripts/test-attachment-references.mjs",
-    "test:attachments-ui": "node scripts/test-attachment-ui.mjs"
+    "test:attachments-ui": "node scripts/test-attachment-ui.mjs",
+    "test:upload-recovery": "node scripts/test-upload-recovery.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",

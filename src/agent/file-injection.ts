@@ -335,8 +335,9 @@ function inPageVerifyFileUpload(fileName: string): { state: 'selected' | 'presen
     for (let depth = 0; row && depth < 5; depth++, row = row.parentElement) {
       // A selection elsewhere in the modal must not verify this filename.
       if (dialogs.includes(row) || row === document.body) break;
-      if (row.matches(selectedSelector) || row.querySelector(selectedSelector)) return { state: 'selected' };
       const radios = row.querySelectorAll('input[type="radio"], [role="radio"]');
+      if (radios.length > 1) break;
+      if (row.matches(selectedSelector) || row.querySelector(selectedSelector)) return { state: 'selected' };
       if (radios.length) break;
     }
   }
