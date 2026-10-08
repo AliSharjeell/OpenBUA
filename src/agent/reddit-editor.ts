@@ -11,7 +11,7 @@ export async function inPageWriteRedditDraft(assignments: RedditAssignment[], ve
   const controls = () => all('input,textarea,[contenteditable="true"]').filter(visible);
   const marker = (el: HTMLElement) => [el.getAttribute('name'), el.id, el.getAttribute('aria-label'), el.getAttribute('placeholder')].filter(Boolean).join(' ').toLowerCase();
   const role = (el: HTMLElement): 'title' | 'body' | null => /\btitle\b/.test(marker(el)) ? 'title'
-    : /\bbody\b|markdown|post text/.test(marker(el)) || el.isContentEditable ? 'body' : null;
+    : (el.tagName === 'TEXTAREA' && el.getAttribute('name') === 'text') || /\bbody\b|markdown|post text/.test(marker(el)) || el.isContentEditable ? 'body' : null;
   const read = (el: HTMLElement) => /^(INPUT|TEXTAREA)$/.test(el.tagName) ? (el as HTMLInputElement).value : el.innerText;
   const fold = (text: string) => text.replace(/\r\n?/g, '\n').replace(/[\u200B\uFEFF]/g, '').split('\n').map(line => line.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   const result = { successCount: 0, errors: [] as string[], verifications: [] as Array<{ refId: string; selector?: string; requestedValue: string; actualValue: string; verified: boolean; elementFound: boolean }>, mode: 'unchanged' };
@@ -44,6 +44,11 @@ export async function inPageWriteRedditDraft(assignments: RedditAssignment[], ve
   }
   // Validate every target before changing any field. Duplicate assignments to
   // the body cannot masquerade as distinct title/body fields.
+  const oldFormFields = resolved.length && resolved.every(({ target, item }) => target && !item.role && !target.isContentEditable && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+  if (oldFormFields && resolved.some(({ fieldRole }) => !fieldRole)) {
+    result.mode = 'native-form';
+    return result;
+  }
   if (resolved.some(entry => !entry.target || !entry.fieldRole || (entry.item.role && entry.item.role !== entry.fieldRole)) || new Set(resolved.map(entry => entry.target)).size !== resolved.length) {
     result.errors.push('Title and body must resolve to distinct, unambiguous post fields. Inspect the composer and use prepare_reddit_post; no text was inserted.');
     return result;
@@ -80,7 +85,7 @@ export async function inPageWriteRedditDraft(assignments: RedditAssignment[], ve
       }
       if (/^(INPUT|TEXTAREA)$/.test(target.tagName)) {
         setPlain(target, item.value);
-        result.mode = fieldRole === 'body' ? 'markdown' : result.mode;
+        result.mode = fieldRole === 'body' ? (target.getAttribute('name') === 'text' ? 'plain-text' : 'markdown') : result.mode;
       } else if (target.isContentEditable && fieldRole === 'body') {
         // Select only this editor's contents. Never use document-wide selectAll.
         target.focus();

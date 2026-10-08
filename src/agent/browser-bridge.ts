@@ -1554,7 +1554,7 @@ export async function fillActiveTabFields(
   // Pre-fetch stored documents to automatically attach raw file binary if assignment targets a file or references a stored file/resume
   if (/^https:\/\/(?:www\.|old\.|new\.)?reddit\.com\/r\/[^/]+\/submit\/?(?:\?|$)/i.test(activeTab.url || '')) {
     const draft = await writeRedditDraft(activeTab.id, assignments);
-    if (!('mode' in draft) || draft.mode !== 'file-input') return draft;
+    if (!('mode' in draft) || !['file-input', 'native-form'].includes(draft.mode)) return draft;
   }
   const tabKey = getActiveSessionIdState();
   const [globalDocs, tabDocs] = await Promise.all([

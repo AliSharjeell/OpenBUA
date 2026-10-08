@@ -14,10 +14,10 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
   let expected: { url: string; values: { title?: string; body?: string } } | null = null;
   try { expected = JSON.parse(document.documentElement.dataset.openbuaRedditDraft || 'null'); } catch {}
   if (!expected && !submit) expected = remembered;
-  const errors = () => all('[role="alert"],[aria-invalid="true"],.error-message,[data-testid*="error"],[slot="error"],faceplate-form-helper-text[error]')
+  const errors = () => all('[role="alert"],[aria-invalid="true"],.error-message,.error,[data-testid*="error"],[slot="error"],faceplate-form-helper-text[error]')
     .filter(visible).map(el => fold(el.innerText || el.getAttribute('aria-label') || '')).filter(Boolean);
   const posted = () => Boolean(expected?.values.title && /\/comments\/[^/]+/.test(location.pathname) &&
-    all('h1,shreddit-post[post-title]').some(el => visible(el) && fold(el.getAttribute('post-title') || el.innerText || '') === fold(expected!.values.title!)));
+    all('h1,shreddit-post[post-title],.thing.link a.title').some(el => visible(el) && fold(el.getAttribute('post-title') || el.innerText || '') === fold(expected!.values.title!)));
   if (posted()) return result('posted', 'Reddit opened the post permalink and the published title matches the prepared draft.');
   const messages = errors();
   if (!submit) return messages.length ? result('blocked', `Reddit reports: ${messages.join('; ')}. Fix the requirement; do not re-click Post.`)
@@ -32,7 +32,8 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
       // The component owns both actions. Ownership is not evidence of Post:
       // never include Save Draft, even when it lives in the same shadow root.
       if (/save.?draft/i.test(el.id) || /^(?:save draft|drafts?|cancel)$/i.test(label(el))) return false;
-      return el.tagName === 'R-POST-FORM-SUBMIT-BUTTON' || el.id === 'inner-post-submit-button' || /^post$/i.test(label(el));
+      const oldSubmit = el.closest('form#newlink') && /^(?:post|submit)$/i.test(label(el));
+      return el.tagName === 'R-POST-FORM-SUBMIT-BUTTON' || el.id === 'inner-post-submit-button' || /^post$/i.test(label(el)) || oldSubmit;
     });
   // A single visible Post may expose a custom host, role=button wrapper and
   // native button. Collapse ancestors across light DOM, slots and shadows.
