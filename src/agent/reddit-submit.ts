@@ -27,15 +27,25 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
   if (messages.length) return result('blocked', `Reddit reports: ${messages.join('; ')}. No Post click dispatched.`);
   const buttons = all('button,[role="button"],input[type="submit"],r-post-form-submit-button').filter(visible)
     .filter(el => el.tagName === 'R-POST-FORM-SUBMIT-BUTTON' || ((el.getRootNode() as ShadowRoot).host?.tagName === 'R-POST-FORM-SUBMIT-BUTTON') || /^post$/i.test(fold(el.innerText || el.getAttribute('aria-label') || (el as HTMLInputElement).value || '')));
-  // Prefer the native button inside a custom host, rather than its inert shell.
-  const candidates = buttons.filter(el => !el.shadowRoot || !all('button,[role="button"],input[type="submit"]', el.shadowRoot).some(visible));
-  if (candidates.length !== 1) return result('blocked', `Found ${candidates.length} distinct Post controls. Inspect requirements/controls; no coordinate click dispatched.`);
+  // A single visible Post may expose a custom host, role=button wrapper and
+  // native button. Collapse ancestors across light DOM, slots and shadows.
+  const parent = (el: HTMLElement): HTMLElement | null => el.assignedSlot || el.parentElement || ((el.getRootNode() as ShadowRoot).host as HTMLElement | undefined) || null;
+  const containsControl = (outer: HTMLElement, inner: HTMLElement) => {
+    let cursor = parent(inner);
+    while (cursor) { if (cursor === outer) return true; cursor = parent(cursor); }
+    return false;
+  };
+  const candidates = buttons.filter(el => !buttons.some(other => other !== el && containsControl(el, other)));
+  if (candidates.length !== 1) {
+    const controls = candidates.map(el => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} (${fold(el.innerText || el.getAttribute('aria-label') || '') || 'slotted Post'})`).join('; ');
+    return result('blocked', `Found ${candidates.length} independent Post controls after collapsing nested wrappers: ${controls || 'none'}. No click was dispatched. Do not bypass this with coordinates or repeat clicks; inspect the composer once and report the ambiguity if unresolved.`);
+  }
   const target = candidates[0];
   const disabled = (el: HTMLElement) => el.hasAttribute('disabled') || el.hasAttribute('inert') || el.getAttribute('aria-disabled') === 'true';
   let cursor: HTMLElement | null = target;
   while (cursor) {
     if (disabled(cursor)) return result('blocked', 'Reddit Post is disabled. Check required flair/tags, community selection, title/body validation, sign-in or CAPTCHA. Do not keep clicking Post.');
-    cursor = cursor.parentElement || ((cursor.getRootNode() as ShadowRoot).host as HTMLElement | undefined) || null;
+    cursor = parent(cursor);
   }
   const invalid = all('input,textarea,select').filter(visible).find(el => !(el as HTMLInputElement).checkValidity());
   if (invalid) return result('blocked', `Required field is invalid: ${invalid.getAttribute('aria-label') || invalid.getAttribute('name') || invalid.id || 'unnamed field'}. ${(invalid as HTMLInputElement).validationMessage}`);
