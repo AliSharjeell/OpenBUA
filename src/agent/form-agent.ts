@@ -521,6 +521,8 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - A validationBlocked tool result means Next/Submit was not dispatched. Fix the named field; do not repeat Escape, outside clicks, screenshots and Next while the same error remains. After two distinct unsuccessful recovery queries, report the specific blocker.
    - Batch independent known fields in one fill_form_fields call. Use the returned selection/validation evidence to proceed; inspect again only for a changed step or unresolved field. Avoid screenshots and waits after routine verified fills.
    - To post a comment (e.g. YouTube):
+     On YouTube, navigate directly to search results, then call read_youtube_videos and open videos[0].url with navigate_browser_tab. If you landed on a channel, the same reader finds its actual videos. Do not click channel avatars/tabs or estimate thumbnail coordinates. Verify the URL is /watch?v=... before looking for comments; playback need not start.
+     Use click_element({selector:"ytd-comments #simplebox-placeholder"}) to activate the comment composer, then inspect/fill its contenteditable and click the exact Comment button. Scroll to comments only if they are not loaded. Never wait for playback, guess comment-button coordinates or repeat unchanged screenshots. Check for the new comment text and composer reset before claiming success.
      a. Locate the comment box (often contenteditable or #simplebox-placeholder).
      b. Call 'fill_form_fields' with the text.
      c. Look for the submit/comment button (e.g., text: "Comment", "Post", "Reply", or refId).
