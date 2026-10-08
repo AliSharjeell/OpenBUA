@@ -638,7 +638,8 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
 
 14. HUMAN-IN-THE-LOOP (HITL) 10-SECOND CAPTCHA INTERCEPT GATE & AUTOMATED PIVOT:
    - When encountering a bot challenge or CAPTCHA (Cloudflare Turnstile, reCAPTCHA, hCaptcha, Bing verification, Arkose Labs):
-     * OpenBUA automatically fires an audio/visual Human-in-the-Loop alert with a strict 10-second countdown for the user to solve it in their browser.
+     * Before alerting the user, OpenBUA tries up to two screenshot/VLM rounds of visible checkbox, image-tile, rotation and verify controls, within a 20-second budget. Actions stay within detected CAPTCHA bounds and stop if the active tab changes. No repeated automatic attempts on the same failed page for two minutes.
+     * If the challenge remains, is unsupported, or the vision request fails, OpenBUA fires the existing audio/visual Human-in-the-Loop alert with a strict 10-second countdown for the user to solve it in their browser.
      * If the human solves it within 10 seconds, the gate clears and page automation resumes uninterrupted.
    - AUTOMATED PIVOT WORKAROUND PROTOCOL (WHEN TIMEOUT OR BLOCKED):
      * If any tool response returns '[BLOCKED BY CAPTCHA]: CAPTCHA challenge timed out after 10s...':

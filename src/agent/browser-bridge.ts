@@ -1,6 +1,7 @@
 import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
 import { loadGlobalMemories, loadTabMemories, getActiveSessionIdState } from '../services/storage';
-import { tryLoadFileFromLocalPath } from '../services/pdf-parser';
+import { tryLoadFileFromLocalPath, extractTextWithVlm } from '../services/pdf-parser';
+import { attemptVisibleCaptcha } from './captcha-auto';
 import { injectFileIntoTab, resolveFileSource, type FileSource } from './file-injection';
 
 export interface TabInfo {
@@ -1046,6 +1047,20 @@ function inPageCheckCaptcha(): { detected: boolean; type?: string; selector?: st
   return { detected: false };
 }
 
+async function normalizeCaptchaDetection(tabId:number, check:{detected:boolean;type?:string;selector?:string}) {
+  if(!check.detected || !['recaptcha','hcaptcha','cloudflare'].includes(check.type || '')) return check;
+  try {
+    const proof=await chrome.scripting.executeScript({target:{tabId},args:[check.type || ''],func:(type:string)=>{
+      const selectors:Record<string,string>={recaptcha:'[name="g-recaptcha-response"]',hcaptcha:'[name="h-captcha-response"]',cloudflare:'[name="cf-turnstile-response"]'};
+      const hasResponse=Array.from(document.querySelectorAll(selectors[type])).some(el=>Boolean((el as HTMLInputElement).value?.trim()));
+      const puzzle=Array.from(document.querySelectorAll('iframe[src*="/bframe"], iframe[title*="challenge" i], #challenge-stage'))
+        .some(el=>el.getClientRects().length>0 && getComputedStyle(el).visibility!=='hidden');
+      return hasResponse && !puzzle;
+    }});
+    return proof[0]?.result ? {detected:false} : check;
+  } catch {return check;}
+}
+
 export async function checkActiveTabCaptcha(tabId?: number): Promise<{ detected: boolean; type?: string; selector?: string }> {
   let targetTabId = tabId;
   if (!targetTabId) {
@@ -1064,7 +1079,7 @@ export async function checkActiveTabCaptcha(tabId?: number): Promise<{ detected:
       1000
     );
     if (res && res.success && res.data) {
-      return res.data;
+      return normalizeCaptchaDetection(targetTabId, res.data);
     }
   } catch {
     // Fall back to direct executeScript
@@ -1078,7 +1093,7 @@ export async function checkActiveTabCaptcha(tabId?: number): Promise<{ detected:
         func: inPageCheckCaptcha,
       });
       if (results && results[0] && results[0].result) {
-        return results[0].result as { detected: boolean; type?: string; selector?: string };
+        return normalizeCaptchaDetection(targetTabId, results[0].result as { detected: boolean; type?: string; selector?: string });
       }
     } catch {
       // Ignore
@@ -1086,6 +1101,56 @@ export async function checkActiveTabCaptcha(tabId?: number): Promise<{ detected:
   }
 
   return { detected: false };
+}
+
+// Route visible CAPTCHA clicks into their frame instead of clicking the iframe
+// element in the parent page. No challenge scripts or response tokens are altered.
+async function clickVisibleCaptchaPoint(tabId:number,x:number,y:number):Promise<boolean> {
+  try {
+    const hit=await chrome.scripting.executeScript({target:{tabId},args:[x,y],func:(x:number,y:number)=>{
+      const d=window.devicePixelRatio||1,el=document.elementFromPoint(x/d,y/d);
+      if(!(el instanceof HTMLIFrameElement)) return null;
+      const r=el.getBoundingClientRect();
+      return {src:el.src,x:x/d-r.x,y:y/d-r.y,width:r.width,height:r.height};
+    }});
+    const frame=hit[0]?.result;
+    if(!frame) return (await clickAtPosition({tabId,x,y})).success;
+    const frames=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>({url:location.href,width:innerWidth,height:innerHeight})});
+    const matches=frames.filter(entry=>entry.frameId!==0 && entry.result?.url===frame.src);
+    if(matches.length!==1 || !frame.width || !frame.height) return false;
+    const selected=matches[0];
+    const result=await chrome.scripting.executeScript({target:{tabId,frameIds:[selected.frameId]},func:inPageClickAtPoint,
+      args:[frame.x*selected.result!.width/frame.width,frame.y*selected.result!.height/frame.height,1,0,false]});
+    return Boolean(result[0]?.result?.success);
+  } catch {return false;}
+}
+
+// Failed automatic attempts are not repeated for the same page in a tight loop.
+const captchaAutoAttempts = new Map<string, {at:number; result:Promise<boolean>}>();
+async function tryCaptchaBeforeHumanGate(tabId:number, url:string):Promise<boolean> {
+  const key = `${tabId}:${url}`;
+  const previous = captchaAutoAttempts.get(key);
+  if(previous && Date.now()-previous.at<120000) return previous.result;
+  for(const [id,entry] of captchaAutoAttempts) if(Date.now()-entry.at>=120000) captchaAutoAttempts.delete(id);
+  const result = attemptVisibleCaptcha({
+    current: async()=>{ const tab=await getActiveTab();return tab?.id===tabId && tab.url===url; },
+    detected: async()=> (await checkActiveTabCaptcha(tabId)).detected,
+    snapshot: async()=>{
+      const check=await checkActiveTabCaptcha(tabId);
+      const results=await chrome.scripting.executeScript({target:{tabId},args:[check.selector || ''],func:(selector:string)=>{
+        if(!selector) return [];
+        return Array.from(document.querySelectorAll(selector)).filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden')
+          .map(el=>{const r=el.getBoundingClientRect(),d=window.devicePixelRatio||1;return {x:r.x*d,y:r.y*d,width:r.width*d,height:r.height*d};});
+      }});
+      return {image:await captureTabScreenshot(),boxes:results[0]?.result || []};
+    },
+    vision:(image,prompt,signal)=>extractTextWithVlm(image,'image/jpeg',prompt,signal),
+    click:(x,y)=>clickVisibleCaptchaPoint(tabId,x,y),
+  });
+  captchaAutoAttempts.set(key,{at:Date.now(),result});
+  const solved=await result;
+  if(solved) captchaAutoAttempts.delete(key);
+  return solved;
 }
 
 // --- Human-in-the-Loop (HITL) 10-Second CAPTCHA Intercept Gate Manager ---
@@ -1140,11 +1205,15 @@ class CaptchaGateManager {
     this.notify();
   }
 
+  private gateSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+
   public resolveActiveGate(solved: boolean, customMessage?: string) {
     if (!this.activeState.isActive || !this.activeResolver) return;
 
     if (this.countdownTimer) clearInterval(this.countdownTimer);
     if (this.pollInterval) clearInterval(this.pollInterval);
+    if (this.gateSafetyTimer) clearTimeout(this.gateSafetyTimer);
+    this.gateSafetyTimer = null;
     this.countdownTimer = null;
     this.pollInterval = null;
 
@@ -1178,6 +1247,14 @@ class CaptchaGateManager {
       return { solved: false, message: 'CAPTCHA gate already active.' };
     }
 
+    if (await tryCaptchaBeforeHumanGate(tabId, url)) {
+      return {solved:true,message:'CAPTCHA cleared after the automatic visible challenge attempt. Resuming automation.'};
+    }
+    const currentTab = await getActiveTab();
+    if (currentTab?.id !== tabId || currentTab.url !== url) {
+      return {solved:false,message:'CAPTCHA attempt stopped because the active page changed. Inspect the current tab before continuing.'};
+    }
+    if (this.activeState.isActive) return {solved:false,message:'CAPTCHA gate already active.'};
     playCaptchaAlertSound();
 
     this.activeState = {
@@ -1198,6 +1275,7 @@ class CaptchaGateManager {
           this.resolveActiveGate(false, 'CAPTCHA challenge timed out after safety period. Resuming automation.');
         }
       }, 12000);
+      this.gateSafetyTimer = hardTimeout;
 
       // 1. Tick countdown every 1 second
       this.countdownTimer = setInterval(() => {

@@ -147,7 +147,8 @@ export function detectFileType(fileName: string, mimeType?: string): DocumentFil
 export async function extractTextWithVlm(
   dataUrl: string,
   mimeType: string,
-  customPrompt?: string
+  customPrompt?: string,
+  signal?: AbortSignal
 ): Promise<string> {
   const settings = await loadSettings();
   const promptText =
@@ -187,6 +188,7 @@ export async function extractTextWithVlm(
     };
 
     const res = await fetch(endpoint, {
+      signal,
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
@@ -219,6 +221,7 @@ export async function extractTextWithVlm(
     else if (mimeType.includes('gif')) validMediaType = 'image/gif';
 
     const res = await fetch(endpoint, {
+      signal,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -269,6 +272,7 @@ export async function extractTextWithVlm(
     const endpoint = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
     const res = await fetch(endpoint, {
+      signal,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
