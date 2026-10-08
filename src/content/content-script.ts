@@ -1,5 +1,6 @@
 // AutoForm AI - Content Script
 // Injected into web pages to inspect DOM, extract form elements, and fill form fields.
+import { createDomQuery } from '../agent/dom-query';
 
 export interface FormElementDescriptor {
   refId: string;
@@ -32,13 +33,14 @@ export interface PageFormSummary {
 
 let elementRefMap = new Map<string, HTMLElement>();
 function generateRefId(el: HTMLElement): string {
+  const dom = createDomQuery();
   const existing = el.getAttribute('data-autoform-ref');
-  if (existing && /^af_(?:btn_)?\d+$/.test(existing) && document.querySelector(`[data-autoform-ref="${existing}"]`) === el) {
+  if (existing && /^af_(?:btn_)?\d+$/.test(existing) && dom.querySelector(`[data-autoform-ref="${existing}"]`) === el) {
     elementRefMap.set(existing, el);
     return existing;
   }
   let counter = Number(document.documentElement.getAttribute('data-autoform-counter')) || 0;
-  document.querySelectorAll('[data-autoform-ref]').forEach(node => {
+  dom.querySelectorAll('[data-autoform-ref]').forEach(node => {
     counter = Math.max(counter, Number(node.getAttribute('data-autoform-ref')?.match(/(\d+)$/)?.[1]) || 0);
   });
   const refId = `af_${counter + 1}`;
@@ -129,7 +131,7 @@ function findSectionHint(el: HTMLElement): string {
   // Check closest section or form with heading
   const section = el.closest('section, form, [role="tabpanel"], [class*="step"], [class*="section"]');
   if (section) {
-    const heading = section.querySelector('h1, h2, h3, h4');
+    const heading = Array.from(section.querySelectorAll<HTMLElement>('h1, h2, h3, h4')).find(isElementVisible);
     if (heading && heading.textContent?.trim()) {
       return heading.textContent.trim();
     }
@@ -246,18 +248,19 @@ function getElementPriority(el: HTMLElement): number {
 }
 
 function inspectAllFormElements(containerSelector?: string): PageFormSummary {
+  const dom = createDomQuery();
   // Retain DOM identities when visibility, ordering, or inspection scope changes.
   elementRefMap.clear();
 
   let root: ParentNode = document;
   if (containerSelector) {
-    const customRoot = document.querySelector(containerSelector);
+    const customRoot = dom.querySelector(containerSelector);
     if (customRoot) root = customRoot;
   }
 
   // Also auto-detect active modal/dialog if one exists and no specific selector was provided
   if (!containerSelector) {
-    const activeModal = document.querySelector<HTMLElement>(
+    const activeModal = dom.querySelector<HTMLElement>(
       'div[role="dialog"]:not([aria-hidden="true"]), dialog[open], .M9, div[aria-label*="New Message" i], div[aria-label*="Compose" i]'
     );
     // If an active compose window/modal is currently open, note it
@@ -266,7 +269,8 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
     }
   }
 
-  const rawElements = Array.from(root.querySelectorAll<HTMLElement>(
+  const scopedDom = createDomQuery(root);
+  const rawElements = Array.from(scopedDom.querySelectorAll<HTMLElement>(
     'input:not([type="hidden"]), textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"], [role="combobox"], [role="checkbox"], ytd-commentbox, #contenteditable-root, #simplebox-placeholder, #placeholder-area'
   ));
 
@@ -353,7 +357,7 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
   });
 
   // Collect action buttons (Next, Submit, Send, Continue, Back, Comment, Post, etc.), tabs, and visible chat items
-  const rawButtonElements = Array.from(root.querySelectorAll<HTMLElement>(
+  const rawButtonElements = Array.from(scopedDom.querySelectorAll<HTMLElement>(
     'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, ytd-button-renderer, yt-button-shape, #pane-side [role="listitem"], #pane-side div[tabindex="-1"], div[data-testid*="chat-list-item"]'
   ));
 
@@ -912,20 +916,21 @@ function showAgentCursorClick(element: HTMLElement) {
 }
 
 function findTargetElement(refId?: string, selector?: string): HTMLElement | null {
+  const dom = createDomQuery();
   if (refId && elementRefMap.has(refId)) {
     return elementRefMap.get(refId)!;
   }
   if (refId) {
     const target =
-      document.querySelector<HTMLElement>(`[data-autoform-ref="${CSS.escape(refId)}"]`) ||
+      dom.querySelector<HTMLElement>(`[data-autoform-ref="${CSS.escape(refId)}"]`) ||
       document.getElementById(refId) ||
-      document.querySelector<HTMLElement>(`[name="${CSS.escape(refId)}"]`);
+      dom.querySelector<HTMLElement>(`[name="${CSS.escape(refId)}"]`);
     if (target) return target;
   }
 
   if (selector) {
     try {
-      const target = document.querySelector<HTMLElement>(selector);
+      const target = dom.querySelector<HTMLElement>(selector);
       if (target) return target;
     } catch {
       // Invalid selector syntax, continue to semantic fallback
@@ -951,7 +956,7 @@ function findTargetElement(refId?: string, selector?: string): HTMLElement | nul
       ];
       for (const sel of emailCandidates) {
         try {
-          const el = document.querySelector<HTMLElement>(sel);
+          const el = dom.querySelector<HTMLElement>(sel);
           if (el && isElementVisible(el)) return el;
         } catch {}
       }
@@ -968,7 +973,7 @@ function findTargetElement(refId?: string, selector?: string): HTMLElement | nul
       ];
       for (const sel of subjectCandidates) {
         try {
-          const el = document.querySelector<HTMLElement>(sel);
+          const el = dom.querySelector<HTMLElement>(sel);
           if (el && isElementVisible(el)) return el;
         } catch {}
       }
@@ -991,7 +996,7 @@ function findTargetElement(refId?: string, selector?: string): HTMLElement | nul
       ];
       for (const sel of bodyCandidates) {
         try {
-          const el = document.querySelector<HTMLElement>(sel);
+          const el = dom.querySelector<HTMLElement>(sel);
           if (el && isElementVisible(el)) return el;
         } catch {}
       }
@@ -1188,27 +1193,28 @@ async function fillFormFields(
 }
 
 function clickElement(refId?: string, selector?: string, text?: string): { success: boolean; message: string } {
+  const dom = createDomQuery();
   let target: HTMLElement | null = null;
 
   if (refId && elementRefMap.has(refId)) {
     target = elementRefMap.get(refId)!;
   } else if (refId) {
-    target = document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
+    target = dom.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
   } else if (selector) {
     try {
-      target = document.querySelector(selector);
+      target = dom.querySelector(selector);
     } catch {}
     // If selector had an absolute URL e.g. a[href="https://www.youtube.com/@MrBeast"], also try relative pathname
     if (!target && /href=["']https?:\/\/[^/]+(\/[^"']+)["']/i.test(selector)) {
       const pathMatch = selector.match(/href=["']https?:\/\/[^/]+(\/[^"']+)["']/i);
       if (pathMatch) {
         try {
-          target = document.querySelector(`a[href="${pathMatch[1]}"], a[href*="${pathMatch[1]}"]`);
+          target = dom.querySelector(`a[href="${pathMatch[1]}"], a[href*="${pathMatch[1]}"]`);
         } catch {}
       }
     }
   } else if (text) {
-    const rawCandidates = Array.from(document.querySelectorAll<HTMLElement>(
+    const rawCandidates = Array.from(dom.querySelectorAll<HTMLElement>(
       'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], [role="listitem"], [role="row"], [role="treeitem"], [role="menuitem"], [role="option"], [role="menuitemradio"], [role="combobox"], [aria-haspopup], mat-select, bard-mode-switcher, tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip], [data-testid*="cell"], [data-testid*="list-item"], [data-testid*="chat-list-item"], span[title], div[title], [aria-label], #pane-side div[tabindex="-1"], #pane-side span'
     )).filter((c) => {
       // Exclude search suggestions / autocomplete dropdowns so we never click search predictions accidentally
@@ -1241,7 +1247,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
     target = candidates.find(c => {
       const val = getElemText(c);
       const valNorm = val.replace(/\s+/g, '');
-      return val === tLower || valNorm === tNormalized || val.startsWith(tLower) || valNorm.startsWith(tNormalized);
+      return val === tLower || valNorm === tNormalized;
     }) || null;
 
     // 2. Exact word boundary match
@@ -2928,9 +2934,10 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
       }
 
       case 'GET_PAGE_TEXT': {
+        const dom = createDomQuery();
         // 0. Extract active, truly visible modal / dialog text (Gmail compose, popups, overlays)
         // Must be genuinely visible on screen and sufficiently sized to avoid hidden YouTube TV-sync dialogs or invisible analytics overlays
-        const activeModals = Array.from(document.querySelectorAll<HTMLElement>(
+        const activeModals = Array.from(dom.querySelectorAll<HTMLElement>(
           'div[role="dialog"]:not([aria-hidden="true"]), dialog[open], .M9, div[aria-label*="New Message" i], div[aria-label*="Compose" i]'
         )).filter((m) => {
           if (!isElementVisible(m)) return false;
@@ -2965,7 +2972,7 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
         // 1. Gather interactive / item links (especially video links, search results, nav links)
         const links: string[] = [];
         const seenLinks = new Set<string>();
-        document.querySelectorAll<HTMLAnchorElement>('a[href], a#video-title, [role="link"]').forEach((a) => {
+        dom.querySelectorAll<HTMLAnchorElement>('a[href], a#video-title, [role="link"]').forEach((a) => {
           const text = (a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
           const href = a.getAttribute('href') || '';
           if (!href || isAdUrl(href)) return;
@@ -2991,7 +2998,7 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
         // 1b. Gather visible tabs (YouTube channel tabs, nav tabs, etc.)
         const tabs: string[] = [];
         const seenTabs = new Set<string>();
-        document.querySelectorAll<HTMLElement>('[role="tab"], tp-yt-paper-tab, yt-tab-shape, [role="tablist"] [role="tab"]').forEach((t) => {
+        dom.querySelectorAll<HTMLElement>('[role="tab"], tp-yt-paper-tab, yt-tab-shape, [role="tablist"] [role="tab"]').forEach((t) => {
           if (!isElementVisible(t)) return;
           const text = (t.textContent || t.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
           if (text && text.length > 1 && text.length < 50 && !seenTabs.has(text.toLowerCase())) {
@@ -3005,7 +3012,7 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
         // 2. Gather key buttons & inputs
         const buttons: string[] = [];
         const seenButtons = new Set<string>();
-        document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], input[type="button"], ytd-button-renderer').forEach((b) => {
+        dom.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], input[type="button"], ytd-button-renderer').forEach((b) => {
           const text = (b.textContent || b.getAttribute('aria-label') || (b as HTMLInputElement).value || '').replace(/\s+/g, ' ').trim();
           if (text && text.length > 1 && text.length < 40 && !seenButtons.has(text.toLowerCase())) {
             seenButtons.add(text.toLowerCase());
@@ -3017,7 +3024,7 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
 
         // 2b. Extract active chat conversation messages (WhatsApp Web, Slack, Telegram, Discord)
         let chatExcerpt = '';
-        const mainPane = document.querySelector<HTMLElement>('#main');
+        const mainPane = dom.querySelector<HTMLElement>('#main');
 
         if (mainPane) {
           // WhatsApp Web active chat window detected
@@ -3039,7 +3046,7 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
               '#main .copyable-area > div',
             ];
             for (const sel of whatsappScrollSels) {
-              const el = document.querySelector<HTMLElement>(sel);
+              const el = dom.querySelector<HTMLElement>(sel);
               if (el && el.scrollHeight > el.clientHeight + 20) {
                 if (el.scrollHeight - el.scrollTop - el.clientHeight > 150) {
                   el.scrollTop = el.scrollHeight;
@@ -3172,7 +3179,7 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
           }
         } else {
           // Generic chat container (Slack, Telegram, Discord, web chat)
-          const genericChatNodes = Array.from(document.querySelectorAll<HTMLElement>(
+          const genericChatNodes = Array.from(dom.querySelectorAll<HTMLElement>(
             '[role="log"] [role="row"], [data-qa="message_content"], .message-list-item, [data-testid*="message" i]'
           ));
           if (genericChatNodes.length > 0) {
@@ -3188,7 +3195,7 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
         // 3. Clean excerpt of page content
         const PAGE_TEXT_LIMIT = 10000;
         let mainText = '';
-        const mainEl = document.querySelector('#main, main, article, #content, [role="main"]') || document.body;
+        const mainEl = dom.querySelector('#main, main, article, #content, [role="main"]') || document.body;
         if (mainEl) {
           mainText = (mainEl as HTMLElement).innerText || '';
         } else if (document.body) {
@@ -3223,6 +3230,8 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
         if (buttons.length > 0) {
           formatted += `### Interactive Buttons:\n${buttons.join('\n')}\n\n`;
         }
+        const shadowText = dom.shadowText();
+        if (shadowText) formatted += `### Visible Shadow DOM Content:\n${shadowText}\n\n`;
         formatted += `### Page Text Excerpt:\n${mainText}${truncationNotice}`;
 
         sendResponse({ success: true, text: formatted, title: document.title, url: window.location.href });

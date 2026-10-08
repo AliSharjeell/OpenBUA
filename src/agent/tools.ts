@@ -405,8 +405,8 @@ export const captureTabScreenshotTool: AgentTool<typeof CaptureTabScreenshotSche
       };
     } catch (err: any) {
       return {
-        content: [{ type: 'text', text: `Failed to capture screenshot: ${err?.message || err}` }],
-        details: { error: String(err) },
+        content: [{ type: 'text', text: `Failed to capture screenshot: ${err?.message || err}. Use get_active_tab_form or get_page_content. Do not keep requesting screenshots or waiting for a cooldown.` }],
+        details: { success: false, error: String(err), recovery: 'inspect-dom' },
       };
     }
   },

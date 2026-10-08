@@ -1,5 +1,6 @@
 // Chrome Extension Manifest V3 Background Service Worker
 // Supports Google Chrome (native side panel) and Arc Browser, Brave, Edge, Opera (floating panel window fallback)
+import { captureScheduled } from '../agent/screenshot-capture';
 
 const SIDEPANEL_PATH = 'sidepanel.html';
 const FLOATING_WINDOW_WIDTH = 420;
@@ -155,20 +156,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'CAPTURE_VISIBLE_TAB') {
-    const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'png' };
-    const callback = (dataUrl?: string) => {
-      if (chrome.runtime.lastError || !dataUrl) {
-        sendResponse({ success: false, error: chrome.runtime.lastError?.message || 'Screenshot failed' });
-      } else {
-        sendResponse({ success: true, dataUrl });
-      }
-    };
-
-    if (typeof message.windowId === 'number') {
-      chrome.tabs.captureVisibleTab(message.windowId, options, callback);
-    } else {
-      chrome.tabs.captureVisibleTab(options, callback);
-    }
+    captureScheduled(message.windowId, { format: 'jpeg', quality: 80 })
+      .then(dataUrl => sendResponse({ success: true, dataUrl }))
+      .catch(error => sendResponse({ success: false, error: error?.message || String(error) }));
     return true;
   }
 });

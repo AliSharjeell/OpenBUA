@@ -1,4 +1,5 @@
 import { inspectAutocomplete } from './autocomplete';
+import { captureScheduled } from './screenshot-capture';
 import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
 import { loadGlobalMemories, loadTabMemories, getActiveSessionIdState } from '../services/storage';
 import { tryLoadFileFromLocalPath, extractTextWithVlm } from '../services/pdf-parser';
@@ -163,12 +164,44 @@ export async function sendMessageToTab<T = any>(tabId: number, message: any, tim
 
 // In-page fallback script for direct DOM inspection without relying on message ports
 function inPageInspectForm(containerSelector?: string): PageFormSummary {
+  function createDomQuery(root: ParentNode = document) {
+    function roots(node: ParentNode): ParentNode[] {
+      const result: ParentNode[] = [node];
+      if (node instanceof Element && node.shadowRoot) result.push(...roots(node.shadowRoot));
+      for (const host of Array.from(node.querySelectorAll('*'))) {
+        if (host.shadowRoot) result.push(...roots(host.shadowRoot));
+      }
+      return result;
+    }
+    return {
+      querySelectorAll<T extends Element = Element>(selector: string): T[] {
+        return [...new Set(roots(root).flatMap(scope => Array.from(scope.querySelectorAll<T>(selector))))];
+      },
+      querySelector<T extends Element = Element>(selector: string): T | null {
+        for (const scope of roots(root)) {
+          const element = scope.querySelector<T>(selector);
+          if (element) return element;
+        }
+        return null;
+      },
+      shadowText(): string {
+        const text = roots(root).filter(scope => scope instanceof ShadowRoot).flatMap(scope =>
+          Array.from(scope.querySelectorAll<HTMLElement>('h1,h2,h3,h4,label,p,button,input,textarea,[role="dialog"],[role="button"]'))
+            .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none')
+            .map(el => el.innerText?.trim() || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
+            .filter(Boolean));
+        return [...new Set(text)].join('\n').slice(0, 8000);
+      },
+    };
+  }
+
+  const dom = createDomQuery();
   // Self-contained because this function is serialized into the page.
   function generateRefId(el: HTMLElement): string {
     const existing = el.getAttribute('data-autoform-ref');
-    if (existing && /^af_(?:btn_)?\d+$/.test(existing) && document.querySelector(`[data-autoform-ref="${existing}"]`) === el) return existing;
+    if (existing && /^af_(?:btn_)?\d+$/.test(existing) && dom.querySelector(`[data-autoform-ref="${existing}"]`) === el) return existing;
     let counter = Number(document.documentElement.getAttribute('data-autoform-counter')) || 0;
-    document.querySelectorAll('[data-autoform-ref]').forEach(node => {
+    dom.querySelectorAll('[data-autoform-ref]').forEach(node => {
       counter = Math.max(counter, Number(node.getAttribute('data-autoform-ref')?.match(/(\d+)$/)?.[1]) || 0);
     });
     const refId = `af_${counter + 1}`;
@@ -179,11 +212,12 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
 
   let root: ParentNode = document;
   if (containerSelector) {
-    const customRoot = document.querySelector(containerSelector);
+    const customRoot = dom.querySelector(containerSelector);
     if (customRoot) root = customRoot;
   }
 
-  const rawElements = Array.from(root.querySelectorAll<HTMLElement>(
+  const scopedDom = createDomQuery(root);
+  const rawElements = Array.from(scopedDom.querySelectorAll<HTMLElement>(
     'input:not([type="hidden"]), textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"], [role="combobox"], [role="checkbox"]'
   ));
 
@@ -200,7 +234,7 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
 
   elements.forEach((elem) => {
     const tagName = elem.tagName.toLowerCase();
-    const type = (elem.getAttribute('type') || (tagName === 'textarea' ? 'textarea' : tagName === 'select' ? 'select' : 'text')).toLowerCase();
+    const type = (elem.getAttribute('type') || (tagName === 'textarea' ? 'textarea' : tagName === 'select' ? 'select' : elem.isContentEditable ? 'contenteditable' : 'text')).toLowerCase();
     if (['submit', 'reset', 'button', 'image'].includes(type)) return;
 
     const refId = generateRefId(elem);
@@ -224,7 +258,7 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
     }
     if (!label && elem.id) {
       try {
-        const l = document.querySelector(`label[for="${CSS.escape(elem.id)}"]`);
+        const l = dom.querySelector(`label[for="${CSS.escape(elem.id)}"]`);
         if (l) label = l.textContent?.trim() || '';
       } catch {
         // ignore invalid selector syntax
@@ -263,6 +297,8 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
         label: o.text.trim(),
         selected: o.selected,
       }));
+    } else if (elem.isContentEditable) {
+      value = elem.innerText || elem.textContent || '';
     }
 
     let visible = false;
@@ -295,7 +331,7 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
   });
 
   const buttons: Array<{ refId: string; text: string; type: string; isSubmit: boolean; isNext: boolean; isPrevious: boolean }> = [];
-  const rawButtons = Array.from(document.querySelectorAll<HTMLElement>(
+  const rawButtons = Array.from(dom.querySelectorAll<HTMLElement>(
     'button, input[type="submit"], input[type="button"], a[role="button"], [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, ytd-button-renderer, yt-button-shape'
   )).filter((el) => {
     if (el.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list')) return false;
@@ -330,7 +366,7 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
   });
 
   const stepIndicators: string[] = [];
-  document.querySelectorAll('[class*="step"], [class*="progress"]').forEach((el) => {
+  dom.querySelectorAll('[class*="step"], [class*="progress"]').forEach((el) => {
     const t = el.textContent?.replace(/\s+/g, ' ').trim();
     if (t && t.length > 3 && t.length < 80 && !stepIndicators.includes(t)) {
       stepIndicators.push(t);
@@ -362,6 +398,38 @@ function inPageFillForm(
     elementFound: boolean;
   }>;
 } {
+  function createDomQuery(root: ParentNode = document) {
+    function roots(node: ParentNode): ParentNode[] {
+      const result: ParentNode[] = [node];
+      if (node instanceof Element && node.shadowRoot) result.push(...roots(node.shadowRoot));
+      for (const host of Array.from(node.querySelectorAll('*'))) {
+        if (host.shadowRoot) result.push(...roots(host.shadowRoot));
+      }
+      return result;
+    }
+    return {
+      querySelectorAll<T extends Element = Element>(selector: string): T[] {
+        return [...new Set(roots(root).flatMap(scope => Array.from(scope.querySelectorAll<T>(selector))))];
+      },
+      querySelector<T extends Element = Element>(selector: string): T | null {
+        for (const scope of roots(root)) {
+          const element = scope.querySelector<T>(selector);
+          if (element) return element;
+        }
+        return null;
+      },
+      shadowText(): string {
+        const text = roots(root).filter(scope => scope instanceof ShadowRoot).flatMap(scope =>
+          Array.from(scope.querySelectorAll<HTMLElement>('h1,h2,h3,h4,label,p,button,input,textarea,[role="dialog"],[role="button"]'))
+            .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none')
+            .map(el => el.innerText?.trim() || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
+            .filter(Boolean));
+        return [...new Set(text)].join('\n').slice(0, 8000);
+      },
+    };
+  }
+
+  const dom = createDomQuery();
   let successCount = 0;
   const errors: string[] = [];
   const verifications: Array<{
@@ -376,16 +444,16 @@ function inPageFillForm(
   for (const item of assignments) {
     let target: HTMLElement | null = null;
     if (item.refId) {
-      target = document.querySelector(`[data-autoform-ref="${CSS.escape(item.refId)}"]`);
+      target = dom.querySelector(`[data-autoform-ref="${CSS.escape(item.refId)}"]`);
       if (!target) {
         target = document.getElementById(item.refId);
       }
       if (!target) {
-        target = document.querySelector(`[name="${CSS.escape(item.refId)}"]`);
+        target = dom.querySelector(`[name="${CSS.escape(item.refId)}"]`);
       }
     }
     if (!target && item.selector) {
-      target = document.querySelector(item.selector);
+      target = dom.querySelector(item.selector);
     }
 
     if (!target) {
@@ -454,7 +522,7 @@ function inPageFillForm(
               input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
               const dropzone =
                 input.closest('.dropzone, [data-testid="dropzone"], [class*="upload"], [class*="drop"], [role="button"]') ||
-                document.querySelector('[data-testid="dropzone"], div[data-dropzone="true"]') ||
+                dom.querySelector('[data-testid="dropzone"], div[data-dropzone="true"]') ||
                 input.parentElement;
               if (dropzone && dropzone !== input) {
                 try {
@@ -656,7 +724,7 @@ function inPageFillForm(
               }
 
               // 2. Only look for genuine Send buttons (NEVER match data-tab="11" or voice buttons)
-              const sendBtn = document.querySelector<HTMLElement>(
+              const sendBtn = dom.querySelector<HTMLElement>(
                 'button[aria-label*="Send" i], span[data-icon="send"], [data-icon="send"], button[data-testid*="send" i]'
               );
               if (!sendBtn) return;
@@ -695,32 +763,64 @@ function inPageFillForm(
 
 // In-page fallback script for clicking buttons
 function inPageClickElement(refId?: string, selector?: string, text?: string): { success: boolean; message: string } {
+  function createDomQuery(root: ParentNode = document) {
+    function roots(node: ParentNode): ParentNode[] {
+      const result: ParentNode[] = [node];
+      if (node instanceof Element && node.shadowRoot) result.push(...roots(node.shadowRoot));
+      for (const host of Array.from(node.querySelectorAll('*'))) {
+        if (host.shadowRoot) result.push(...roots(host.shadowRoot));
+      }
+      return result;
+    }
+    return {
+      querySelectorAll<T extends Element = Element>(selector: string): T[] {
+        return [...new Set(roots(root).flatMap(scope => Array.from(scope.querySelectorAll<T>(selector))))];
+      },
+      querySelector<T extends Element = Element>(selector: string): T | null {
+        for (const scope of roots(root)) {
+          const element = scope.querySelector<T>(selector);
+          if (element) return element;
+        }
+        return null;
+      },
+      shadowText(): string {
+        const text = roots(root).filter(scope => scope instanceof ShadowRoot).flatMap(scope =>
+          Array.from(scope.querySelectorAll<HTMLElement>('h1,h2,h3,h4,label,p,button,input,textarea,[role="dialog"],[role="button"]'))
+            .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none')
+            .map(el => el.innerText?.trim() || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
+            .filter(Boolean));
+        return [...new Set(text)].join('\n').slice(0, 8000);
+      },
+    };
+  }
+
+  const dom = createDomQuery();
   let target: HTMLElement | null = null;
   if (refId) {
-    target = document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
+    target = dom.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
   }
   if (!target && selector) {
     try {
-      target = document.querySelector(selector);
+      target = dom.querySelector(selector);
     } catch {}
     // If selector had an absolute URL e.g. a[href="https://www.youtube.com/@MrBeast"], also try relative pathname
     if (!target && /href=["']https?:\/\/[^/]+(\/[^"']+)["']/i.test(selector)) {
       const pathMatch = selector.match(/href=["']https?:\/\/[^/]+(\/[^"']+)["']/i);
       if (pathMatch) {
         try {
-          target = document.querySelector(`a[href="${pathMatch[1]}"], a[href*="${pathMatch[1]}"]`);
+          target = dom.querySelector(`a[href="${pathMatch[1]}"], a[href*="${pathMatch[1]}"]`);
         } catch {}
       }
     }
   }
   if (!target && text) {
-    const rawCandidates = Array.from(document.querySelectorAll<HTMLElement>(
+    const rawCandidates = Array.from(dom.querySelectorAll<HTMLElement>(
       'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], [role="listitem"], [role="row"], [role="treeitem"], [role="menuitem"], [role="option"], [role="menuitemradio"], [role="combobox"], [aria-haspopup], mat-select, bard-mode-switcher, tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip], [data-testid*="cell"], [data-testid*="list-item"], [data-testid*="chat-list-item"], span[title], div[title], [aria-label], #pane-side div[tabindex="-1"], #pane-side span'
     ));
     // Filter out search prediction dropdowns / hidden autocomplete popups so we never accidentally click search suggestions
     const candidates = rawCandidates.filter((c) => {
       const inSearchDropdown = c.closest('.sbdd_a, .sbsb_a, #complete-list');
-      return !inSearchDropdown;
+      return !inSearchDropdown && c.getClientRects().length > 0 && getComputedStyle(c).visibility !== 'hidden';
     });
 
     const tLower = text.toLowerCase().trim();
@@ -742,7 +842,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     target = candidates.find((c) => {
       const val = getElemText(c);
       const valNorm = val.replace(/\s+/g, '');
-      return val === tLower || valNorm === tNormalized || val.startsWith(tLower) || valNorm.startsWith(tNormalized);
+      return val === tLower || valNorm === tNormalized;
     }) || null;
 
     // 2. Exact word boundary match
@@ -2547,6 +2647,38 @@ export async function scrollActiveTab(
 
 // In-page fallback script for extracting complete page and chat content directly without content script messaging
 function inPageExtractPageContent(): { title: string; url: string; text: string } {
+  function createDomQuery(root: ParentNode = document) {
+    function roots(node: ParentNode): ParentNode[] {
+      const result: ParentNode[] = [node];
+      if (node instanceof Element && node.shadowRoot) result.push(...roots(node.shadowRoot));
+      for (const host of Array.from(node.querySelectorAll('*'))) {
+        if (host.shadowRoot) result.push(...roots(host.shadowRoot));
+      }
+      return result;
+    }
+    return {
+      querySelectorAll<T extends Element = Element>(selector: string): T[] {
+        return [...new Set(roots(root).flatMap(scope => Array.from(scope.querySelectorAll<T>(selector))))];
+      },
+      querySelector<T extends Element = Element>(selector: string): T | null {
+        for (const scope of roots(root)) {
+          const element = scope.querySelector<T>(selector);
+          if (element) return element;
+        }
+        return null;
+      },
+      shadowText(): string {
+        const text = roots(root).filter(scope => scope instanceof ShadowRoot).flatMap(scope =>
+          Array.from(scope.querySelectorAll<HTMLElement>('h1,h2,h3,h4,label,p,button,input,textarea,[role="dialog"],[role="button"]'))
+            .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none')
+            .map(el => el.innerText?.trim() || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
+            .filter(Boolean));
+        return [...new Set(text)].join('\n').slice(0, 8000);
+      },
+    };
+  }
+
+  const dom = createDomQuery();
   try {
     const title = document.title || '';
     const url = window.location.href;
@@ -2562,7 +2694,7 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
     // 1. Active dialogs / popups / compose modals
     let modalExcerpt = '';
     const activeModals = Array.from(
-      document.querySelectorAll<HTMLElement>(
+      dom.querySelectorAll<HTMLElement>(
         '[role="dialog"], [role="alertdialog"], .modal.show, .modal-open, .M9, [aria-modal="true"]'
       )
     ).filter(isVisible);
@@ -2576,7 +2708,7 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
     // 2. Interactive links / videos
     const links: string[] = [];
     const seenLinks = new Set<string>();
-    document.querySelectorAll<HTMLAnchorElement>('a[href], a#video-title, [role="link"]').forEach((a) => {
+    dom.querySelectorAll<HTMLAnchorElement>('a[href], a#video-title, [role="link"]').forEach((a) => {
       const text = (a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
       const href = a.getAttribute('href') || '';
       if (!href) return;
@@ -2592,7 +2724,7 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
     // 2b. Visible tabs
     const tabs: string[] = [];
     const seenTabs = new Set<string>();
-    document.querySelectorAll<HTMLElement>('[role="tab"], tp-yt-paper-tab, yt-tab-shape, [role="tablist"] [role="tab"]').forEach((t) => {
+    dom.querySelectorAll<HTMLElement>('[role="tab"], tp-yt-paper-tab, yt-tab-shape, [role="tablist"] [role="tab"]').forEach((t) => {
       if (!isVisible(t)) return;
       const text = (t.textContent || t.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
       if (text && text.length > 1 && text.length < 50 && !seenTabs.has(text.toLowerCase())) {
@@ -2606,7 +2738,7 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
     // 2c. Interactive Buttons
     const buttons: string[] = [];
     const seenButtons = new Set<string>();
-    document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], input[type="button"], ytd-button-renderer').forEach((b) => {
+    dom.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], input[type="button"], ytd-button-renderer').forEach((b) => {
       const text = (b.textContent || b.getAttribute('aria-label') || (b as HTMLInputElement).value || '').replace(/\s+/g, ' ').trim();
       if (text && text.length > 1 && text.length < 40 && !seenButtons.has(text.toLowerCase())) {
         seenButtons.add(text.toLowerCase());
@@ -2618,7 +2750,7 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
 
     // 2d. Extract active chat conversation messages (WhatsApp Web, Slack, Telegram, Discord)
     let chatExcerpt = '';
-    const mainPane = document.querySelector<HTMLElement>('#main');
+    const mainPane = dom.querySelector<HTMLElement>('#main');
 
     if (mainPane) {
       // WhatsApp Web active chat window detected
@@ -2638,7 +2770,7 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
           '#main .copyable-area > div',
         ];
         for (const sel of whatsappScrollSels) {
-          const el = document.querySelector<HTMLElement>(sel);
+          const el = dom.querySelector<HTMLElement>(sel);
           if (el && el.scrollHeight > el.clientHeight + 20) {
             if (el.scrollHeight - el.scrollTop - el.clientHeight > 150) {
               el.scrollTop = el.scrollHeight;
@@ -2767,7 +2899,7 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
           `- Status: ${isWaitingForUs ? 'WAITING FOR YOUR REPLY (Friend has replied! Formulate your response now)' : 'WAITING FOR CONTACT TO REPLY (You sent the last message. Use wait_seconds before checking again)'}`;
       }
     } else {
-      const genericChatNodes = Array.from(document.querySelectorAll<HTMLElement>(
+      const genericChatNodes = Array.from(dom.querySelectorAll<HTMLElement>(
         '[role="log"] [role="row"], [data-qa="message_content"], .message-list-item, [data-testid*="message" i]'
       ));
       if (genericChatNodes.length > 0) {
@@ -2783,7 +2915,7 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
     // 3. Clean excerpt of page content
     const PAGE_TEXT_LIMIT = 10000;
     let mainText = '';
-    const mainEl = document.querySelector('#main, main, article, #content, [role="main"]') || document.body;
+    const mainEl = dom.querySelector('#main, main, article, #content, [role="main"]') || document.body;
     if (mainEl) {
       mainText = (mainEl as HTMLElement).innerText || '';
     } else if (document.body) {
@@ -2820,6 +2952,8 @@ function inPageExtractPageContent(): { title: string; url: string; text: string 
     if (buttons.length > 0) {
       formatted += `### Interactive Buttons:\n${buttons.join('\n')}\n\n`;
     }
+    const shadowText = dom.shadowText();
+    if (shadowText) formatted += `### Visible Shadow DOM Content:\n${shadowText}\n\n`;
     formatted += `### Page Text Excerpt:\n${mainText}${truncationNotice}`;
 
     return { title, url, text: formatted };
@@ -3138,46 +3272,22 @@ export async function captureTabScreenshot(): Promise<string> {
   const activeTab = await getActiveTab();
   const windowId = activeTab?.windowId;
 
-  const tryCapture = (): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      // Use JPEG format with quality 80 for lightweight, fast screenshots (~150KB instead of 4MB PNG)
-      const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'jpeg', quality: 80 };
-      
-      // When called from a side panel, passing the active tab's windowId ensures capturing the browser window rather than side panel
-      const captureCallback = (dataUrl?: string) => {
-        if (chrome.runtime.lastError || !dataUrl) {
-          // Fallback without windowId if window-specific call failed
-          chrome.tabs.captureVisibleTab(options, (fallbackDataUrl) => {
-            if (chrome.runtime.lastError || !fallbackDataUrl) {
-              reject(new Error(chrome.runtime.lastError?.message || 'Failed to capture tab screenshot'));
-            } else {
-              resolve(fallbackDataUrl);
-            }
-          });
-        } else {
-          resolve(dataUrl);
-        }
-      };
-
-      if (typeof windowId === 'number') {
-        chrome.tabs.captureVisibleTab(windowId, options, captureCallback);
-      } else {
-        chrome.tabs.captureVisibleTab(options, captureCallback);
-      }
+  // Background serialization covers tools, Docs vision and CAPTCHA consumers.
+  // Only a missing worker handler permits local fallback; an actual capture
+  // failure must never trigger another unthrottled API call.
+  if (chrome.runtime?.sendMessage) {
+    const response = await new Promise<any>(resolve => {
+      const timer = setTimeout(() => resolve({ success: false, error: 'Screenshot worker did not respond within six seconds. Use form/page inspection.' }), 6000);
+      chrome.runtime.sendMessage({ type: 'CAPTURE_VISIBLE_TAB', windowId }, result => {
+        clearTimeout(timer);
+        const missingHandler = chrome.runtime.lastError;
+        resolve(missingHandler ? null : result);
+      });
     });
-  };
-
-  try {
-    return await tryCapture();
-  } catch (err: any) {
-    // If image readback failed (e.g. active tab mid-scroll, rendering frame, or GPU memory swapping), retry once after a short delay
-    const msg = err?.message || String(err);
-    if (msg.toLowerCase().includes('readback') || msg.toLowerCase().includes('internal error')) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      return await tryCapture();
-    }
-    throw err;
+    if (response?.success && response.dataUrl) return response.dataUrl;
+    if (response?.success === false) throw new Error(response.error || 'Screenshot capture failed');
   }
+  return captureScheduled(windowId);
 }
 
 // Development mock data
