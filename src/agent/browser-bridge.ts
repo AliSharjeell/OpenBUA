@@ -163,9 +163,19 @@ export async function sendMessageToTab<T = any>(tabId: number, message: any, tim
 
 // In-page fallback script for direct DOM inspection without relying on message ports
 function inPageInspectForm(containerSelector?: string): PageFormSummary {
-  document.querySelectorAll('[data-autoform-ref]').forEach((el) => {
-    el.removeAttribute('data-autoform-ref');
-  });
+  // Self-contained because this function is serialized into the page.
+  function generateRefId(el: HTMLElement): string {
+    const existing = el.getAttribute('data-autoform-ref');
+    if (existing && /^af_(?:btn_)?\d+$/.test(existing) && document.querySelector(`[data-autoform-ref="${existing}"]`) === el) return existing;
+    let counter = Number(document.documentElement.getAttribute('data-autoform-counter')) || 0;
+    document.querySelectorAll('[data-autoform-ref]').forEach(node => {
+      counter = Math.max(counter, Number(node.getAttribute('data-autoform-ref')?.match(/(\d+)$/)?.[1]) || 0);
+    });
+    const refId = `af_${counter + 1}`;
+    document.documentElement.setAttribute('data-autoform-counter', String(counter + 1));
+    el.setAttribute('data-autoform-ref', refId);
+    return refId;
+  }
 
   let root: ParentNode = document;
   if (containerSelector) {
@@ -187,21 +197,25 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
   });
 
   const fields: FormElementDescriptor[] = [];
-  let counter = 0;
 
   elements.forEach((elem) => {
     const tagName = elem.tagName.toLowerCase();
     const type = (elem.getAttribute('type') || (tagName === 'textarea' ? 'textarea' : tagName === 'select' ? 'select' : 'text')).toLowerCase();
     if (['submit', 'reset', 'button', 'image'].includes(type)) return;
 
-    counter++;
-    const refId = `af_${counter}`;
-    elem.setAttribute('data-autoform-ref', refId);
+    const refId = generateRefId(elem);
 
     // Label lookup
     let label = '';
+    for (let parent = elem.parentElement, depth = 0; parent && depth < 5; parent = parent.parentElement, depth++) {
+      if (parent.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"]').length !== 1) break;
+      const question = Array.from(parent.querySelectorAll('label, h2, h3, h4, h5, p, [class*="label"], [class*="title"]'))
+        .find(node => node !== elem && !node.contains(elem) && Boolean(node.compareDocumentPosition(elem) & Node.DOCUMENT_POSITION_FOLLOWING) && Boolean(node.textContent?.trim()));
+      const text = question?.textContent?.trim();
+      if (text && text.length <= 300) { label = text; break; }
+    }
     const labelledBy = elem.getAttribute('aria-labelledby');
-    if (labelledBy) {
+    if (!label && labelledBy) {
       const l = document.getElementById(labelledBy);
       if (l) label = l.textContent?.trim() || '';
     }
@@ -296,9 +310,7 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
     const text = (btn.textContent || (btn as HTMLInputElement).value || btn.getAttribute('aria-label') || '').trim();
     if (!text || text.length > 50) return;
     const lower = `${text} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
-    counter++;
-    const refId = `af_btn_${counter}`;
-    btn.setAttribute('data-autoform-ref', refId);
+    const refId = generateRefId(btn);
 
     const isTab = btn.getAttribute('role') === 'tab' ||
       btn.tagName.toLowerCase() === 'tp-yt-paper-tab' ||

@@ -31,17 +31,33 @@ export interface PageFormSummary {
 }
 
 let elementRefMap = new Map<string, HTMLElement>();
-let refCounter = 0;
-
 function generateRefId(el: HTMLElement): string {
-  refCounter++;
-  const refId = `af_${refCounter}`;
+  const existing = el.getAttribute('data-autoform-ref');
+  if (existing && /^af_(?:btn_)?\d+$/.test(existing) && document.querySelector(`[data-autoform-ref="${existing}"]`) === el) {
+    elementRefMap.set(existing, el);
+    return existing;
+  }
+  let counter = Number(document.documentElement.getAttribute('data-autoform-counter')) || 0;
+  document.querySelectorAll('[data-autoform-ref]').forEach(node => {
+    counter = Math.max(counter, Number(node.getAttribute('data-autoform-ref')?.match(/(\d+)$/)?.[1]) || 0);
+  });
+  const refId = `af_${counter + 1}`;
+  document.documentElement.setAttribute('data-autoform-counter', String(counter + 1));
   el.setAttribute('data-autoform-ref', refId);
   elementRefMap.set(refId, el);
   return refId;
 }
 
 function findLabelText(el: HTMLElement): string {
+  // Read the question within this field's own wrapper. Some screening forms
+  // copy aria-label="First name" onto every number input.
+  for (let parent = el.parentElement, depth = 0; parent && depth < 5; parent = parent.parentElement, depth++) {
+    if (parent.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"]').length !== 1) break;
+    const question = Array.from(parent.querySelectorAll('label, h2, h3, h4, h5, p, [class*="label"], [class*="title"]'))
+      .find(node => node !== el && !node.contains(el) && Boolean(node.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) && Boolean(node.textContent?.trim()));
+    const text = question?.textContent?.trim();
+    if (text && text.length <= 300) return text;
+  }
   // 1. Check aria-labelledby
   const labelledBy = el.getAttribute('aria-labelledby');
   if (labelledBy) {
@@ -230,12 +246,8 @@ function getElementPriority(el: HTMLElement): number {
 }
 
 function inspectAllFormElements(containerSelector?: string): PageFormSummary {
-  // Clear all previous autoform attributes across the document to prevent stale ID collisions
-  document.querySelectorAll('[data-autoform-ref]').forEach((el) => {
-    el.removeAttribute('data-autoform-ref');
-  });
+  // Retain DOM identities when visibility, ordering, or inspection scope changes.
   elementRefMap.clear();
-  refCounter = 0;
 
   let root: ParentNode = document;
   if (containerSelector) {

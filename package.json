@@ -28,7 +28,8 @@
     "test:upload-recovery": "node scripts/test-upload-recovery.mjs",
     "test:application-status": "node scripts/test-application-status.mjs",
     "test:captcha-auto": "node scripts/test-captcha-auto.mjs",
-    "test:autocomplete": "node scripts/test-autocomplete-ui.mjs"
+    "test:autocomplete": "node scripts/test-autocomplete-ui.mjs",
+    "test:form-identity": "node scripts/test-form-identity.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",
