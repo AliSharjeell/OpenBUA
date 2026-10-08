@@ -375,7 +375,7 @@ export async function injectFileIntoTab(
   try {
     const frames = await chrome.scripting.executeScript({
       target: { tabId, allFrames: true }, func: inPageFindUploadTarget,
-      args: [request.fileName, request.mimeType, request.refId, request.selector],
+      args: [request.fileName, request.mimeType, request.refId || '', request.selector || ''],
     });
     const chosen = frames.filter(frame => typeof frame.result === 'number' && frame.result >= 0)
       .sort((a, b) => Number(b.result) - Number(a.result))[0];
@@ -400,7 +400,7 @@ export async function injectFileIntoTab(
     const results = await chrome.scripting.executeScript({
       target,
       func: inPageCommitTransfer,
-      args: [transferId, request.refId, request.selector, request.dropEvents !== false],
+      args: [transferId, request.refId || '', request.selector || '', request.dropEvents !== false],
     });
     const result = results?.[0]?.result as
       | { success: boolean; message: string; bytes: number; attached?: boolean }
