@@ -127,6 +127,7 @@ export interface FormElementDescriptor {
   options?: Array<{ value: string; label: string; selected: boolean }>;
   sectionHint?: string;
   ariaLabel?: string;
+  accept?: string;
 }
 
 export interface PageFormSummary {

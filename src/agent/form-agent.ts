@@ -378,6 +378,7 @@ export class FormAgentHarness {
       activeDocs.forEach((doc, idx) => {
         let meta = `${doc.type}`;
         if (doc.fileCategory) meta += `, category: ${doc.fileCategory}`;
+        meta += `, upload ID: "${doc.id}"`;
         if (doc.fileName) meta += `, filename: "${doc.fileName}"`;
         if (doc.dataUrl || doc.blobKey) meta += `, raw file attachment available for form upload`;
         docsSummary += `\n--- Document [${idx + 1}]: ${doc.title} (${meta}) ---\n${doc.content}\n`;
@@ -389,6 +390,8 @@ export class FormAgentHarness {
     return `You are OpenBUA (Open Browser Use Agent), an autonomous browser extension agent that uses the user's active browser to navigate, research, extract data, interact with elements, fill forms, and automate web tasks directly.
 
 CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
+- Referenced attachments identify the exact stored file by upload ID. Use that ID with upload_file_to_form, particularly when filenames repeat. Never replace a newly attached resume with a website's previously saved resume.
+- After attaching a file, verify the site's filename, preview, or upload confirmation before proceeding. A populated file input confirms local assignment, not server acceptance. If the input resets, inspect the page before retrying to avoid duplicate uploads.
 0. MANDATORY REASONING PROTOCOL (THOUGHT TAGS):
    - At the beginning of EVERY turn and before calling ANY tool or replying, you MUST output your reasoning inside <thought>...</thought> tags in your message content first.
    - FORMAT:

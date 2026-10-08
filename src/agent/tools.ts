@@ -60,7 +60,7 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
       const summary = await inspectActiveTabForm(params.selector);
       const totalFields = summary.fields.length;
       const visibleFields = summary.fields.filter(f => f.isVisible);
-      const fieldsToShow = visibleFields.slice(0, 100);
+      const fieldsToShow = summary.fields.filter(f => f.isVisible || f.type === 'file').slice(0, 100);
       const buttons = summary.buttons.slice(0, 30);
       
       let textOutput = `Found ${totalFields} fields (${visibleFields.length} visible, showing ${fieldsToShow.length}) on page "${summary.title}":\n\n` +
@@ -69,6 +69,8 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
         `Fields:\n` +
         fieldsToShow.map(f => {
           let desc = `- [refId: ${f.refId}] Label: "${f.label || f.name || f.placeholder || 'Unnamed'}" | Type: ${f.type}`;
+          if (f.type === 'file') desc += ` | Accepts: ${f.accept || '*/*'}${f.isVisible ? '' : ' | Hidden upload control (usable by upload_file_to_form)'}`;
+          if (f.disabled) desc += ' | Disabled';
           if (f.placeholder) desc += ` | Placeholder: "${f.placeholder}"`;
           if (f.value) desc += ` | Current Value: "${f.value}"`;
           if (f.sectionHint) desc += ` | Section: "${f.sectionHint}"`;

@@ -19,6 +19,7 @@ export interface FormElementDescriptor {
   options?: Array<{ value: string; label: string; selected: boolean }>;
   sectionHint?: string;
   ariaLabel?: string;
+  accept?: string;
 }
 
 export interface PageFormSummary {
@@ -331,6 +332,7 @@ function inspectAllFormElements(containerSelector?: string): PageFormSummary {
       disabled,
       readonly,
       isVisible: visible,
+      accept: type === 'file' ? elem.getAttribute('accept') || '*/*' : undefined,
       selector: `[data-autoform-ref="${refId}"]`,
       options,
       sectionHint,

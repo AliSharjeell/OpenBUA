@@ -272,6 +272,7 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
       disabled: (elem as HTMLInputElement).disabled || false,
       readonly: (elem as HTMLInputElement).readOnly || false,
       isVisible: visible,
+      accept: type === 'file' ? elem.getAttribute('accept') || '*/*' : undefined,
       selector: `[data-autoform-ref="${refId}"]`,
       options,
     });
