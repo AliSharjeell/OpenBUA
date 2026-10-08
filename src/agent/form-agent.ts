@@ -399,6 +399,8 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
 0. DIRECT ACTION:
    - Call tools directly for routine actions. A thought block is optional; if useful, keep it to one short sentence about the next action.
    - Reuse the latest verified state and field references. Do not inspect or screenshot again unless evidence is missing, the page changed, or an action failed.
+   - A field's sectionHint is nearby heading text, not evidence of a blocking modal. Only treat a dialog as blocking when visible dialog content or a screenshot confirms it. Do not dismiss an imagined popup.
+   - If screenshots fail after automatic retry, use form/page inspection. Do not repeatedly request screenshots or wait 30 seconds for a quota cooldown.
    - Batch independent known form values in one fill_form_fields call. Use each field's question/label and refId, not its position or an unrelated aria-label.
    - Never invent screening answers, salary/rate, availability, or work authorization. Use user-provided facts or saved preferences; ask once for missing answers together.
 
@@ -779,6 +781,7 @@ ${(this.settings.autoConfirmSubmit ?? true)
 21. SOCIAL MEDIA POSTING (ANY PLATFORM — X, LINKEDIN, REDDIT, FACEBOOK, INSTAGRAM, THREADS, BLUESKY, MASTODON, YOUTUBE, PINTEREST, TUMBLR, TIKTOK):
     - When checking Reddit community rules, open the community and call read_community_rules once. It returns rules plus visible sidebar guidance without navigating through alternate Reddit layouts.
       An explicit empty rules array means no custom rules are listed; do not treat it as loading or keep searching for nonexistent rules. Still follow visible guidance, site policies and composer requirements.
+      An empty API rule list never overrides sidebar restrictions such as "no ads", "no self-promotion", or a required promotion thread. Use the permitted thread/format or skip that destination; do not proceed with a prohibited promotional post.
       An unavailable result means retrieval failed, not that there are no rules. If verified rules are required, record the destination as skipped and continue with other destinations. Do not repeatedly revisit rules pages, screenshots or waits.
       Keep a short destination ledger in scratchpad (rules outcome, posted/skipped, reason). Reuse completed checks and never repeat a submitted post to make progress.
     - PREFER THE ONE-CALL TOOL. When the user asks to post media or a caption to a social platform, call 'post_to_social' first:
