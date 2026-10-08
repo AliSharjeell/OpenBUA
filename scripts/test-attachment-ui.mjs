@@ -10,11 +10,12 @@ const docs = [
   {id:'resume-test',title:'resume',fileName:'resume.pdf',type:'pdf',dataUrl:'data:application/pdf;base64,cGRm',content:'Ali resume text',ocrStatus:'done',createdAt:3,sizeBytes:3,isActiveForContext:true,isGlobal:false,tabUrlPattern:'session_test'},
   ...[1,2].map(n=>({id:`image-${n}`,title:`image ${n}`,fileName:`photo ${n}.png`,type:'image',dataUrl:png,content:'Image pending extraction',ocrStatus:'pending',createdAt:n,sizeBytes:10,isActiveForContext:true,isGlobal:false,tabUrlPattern:'session_test',mimeType:'image/png'})),
 ];
+const globalDocs = Array.from({length:5},(_,index)=>({id:`global-${index}`,title:`global image ${index}`,fileName:`global-image-${index}.png`,type:'image',dataUrl:png,content:'Image pending extraction',ocrStatus:'pending',createdAt:10+index,sizeBytes:10,isActiveForContext:false,isGlobal:true,mimeType:'image/png'}));
 const settings = {selectedMode:'free',activeProvider:'openai',free:{baseUrl:'http://127.0.0.1:5173/fake/v1',apiKey:'test-key',model:'test-model'},openai:{baseUrl:'',apiKey:'',model:''},anthropic:{baseUrl:'',apiKey:'',model:''},autoConfirmSubmit:false};
-await page.addInitScript(({docs,settings})=>{
-  const stored={autoform_settings:settings,autoform_chat_sessions:[{id:'session_test',title:'Job Find',createdAt:1,updatedAt:1}],openbua_last_active_session_id:'session_test',autoform_tab_mem_session_test:docs,openbua_last_active_nav_tab:'chat'};
+await page.addInitScript(({docs,settings,globalDocs})=>{
+  const stored={autoform_global_memory:globalDocs,autoform_settings:settings,autoform_chat_sessions:[{id:'session_test',title:'Job Find',createdAt:1,updatedAt:1}],openbua_last_active_session_id:'session_test',autoform_tab_mem_session_test:docs,openbua_last_active_nav_tab:'chat'};
   for(const [k,v] of Object.entries(stored))localStorage.setItem(k,JSON.stringify(v));
-},{docs,settings});
+},{docs,settings,globalDocs});
 function makeDocx(compress = true) {
   const name = Buffer.from('word/document.xml');
   const xml = Buffer.from('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Word resume &amp; profile</w:t></w:r></w:p><w:p><w:r><w:t>AI Engineer</w:t></w:r></w:p></w:body></w:document>');
@@ -35,7 +36,13 @@ await page.route('**/fake/v1/chat/completions',async route=>{
 try{
   await page.goto('http://127.0.0.1:5173/sidepanel.html');
   await page.getByLabel('Attached files',{exact:true}).waitFor();
-  assert.equal(await page.getByLabel('Attached files',{exact:true}).getByRole('button').count(),3);
+  assert.equal(await page.getByLabel('Attached files',{exact:true}).getByRole('button').count(),8);
+  const shelf=page.getByLabel('Attached files',{exact:true});
+  assert.equal(await shelf.getByText('Global',{exact:true}).count(),5);
+  const dimensions=await shelf.evaluate(element=>({width:element.clientWidth,scroll:element.scrollWidth,viewport:innerWidth}));
+  assert.ok(dimensions.scroll>dimensions.width);assert.ok(dimensions.width<=dimensions.viewport);
+  await shelf.hover();await page.mouse.wheel(0,250);
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Attached files"]').scrollLeft>0);
   const input=page.locator('textarea');
   await input.fill('Describe @img2');
   await page.getByRole('listbox').waitFor();
@@ -71,6 +78,14 @@ try{
   });
   assert.ok(corruptWord);
   console.log('PASS browser Word extraction: compressed/stored DOCX, paragraph text, invalid ZIP rejection, automatic memory persistence');
+  await page.waitForFunction(()=>!document.querySelector('textarea').disabled);
+  await shelf.getByText('global-image-4.png',{exact:true}).click();
+  assert.equal((await input.inputValue()).trim(),'@img7');
+  await input.press('Enter');
+  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('autoform_global_memory')).find(d=>d.id==='global-4').ocrStatus==='done');
+  const savedGlobal=await page.evaluate(()=>JSON.parse(localStorage.getItem('autoform_global_memory')).find(d=>d.id==='global-4'));
+  assert.equal(savedGlobal.isActiveForContext,true);assert.equal(savedGlobal.isGlobal,true);assert.match(savedGlobal.content,/Visual description/);
+  console.log('PASS all global files visible, horizontal scrolling, scoped labels and referenced global memory activation');
   // Exercise the built content script in real Chrome with Easy Apply-style
   // hidden controls, checking File bytes and the site's change handler.
   const uploadPage = await browser.newPage();

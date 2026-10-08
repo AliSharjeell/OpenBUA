@@ -65,8 +65,9 @@ export function describeApplicationStatus(status: ApplicationStatus): string {
 /** Keep the final user-facing report consistent with the observed website. */
 export function guardApplicationReport(text: string, status: ApplicationStatus | null): string {
   if (!status || status.state === 'submitted' || status.state === 'not-applicable') return text;
+  if (!text.trim() && status.state !== 'rejected') return text;
   const claimsCompletion = /(?:successfully\s+)?(?:submitted|applied)|submitting now|application\s+(?:is\s+)?(?:sent|complete)/i.test(text);
-  const acknowledgesFailure = /not submitted|wasn['?]t submitted|could(?:n['?]t| not) submit|unable to submit|job.*closed|submission.*(?:failed|unconfirmed)/i.test(text);
+  const acknowledgesFailure = /not submitted|wasn['\u2019]t submitted|could(?:n['\u2019]t| not) submit|unable to submit|job.*closed|submission.*(?:failed|unconfirmed)/i.test(text);
   if (text.trim() && (!claimsCompletion || acknowledgesFailure)) return text;
   if (status.state === 'rejected') return `The application was not submitted. The website reported: "${status.evidence}".`;
   if (status.state === 'in-progress') return `The application has not been submitted. It is still at ${status.evidence}. Visible actions: ${status.actions.join(', ') || 'none'}.`;
