@@ -1,6 +1,7 @@
 import { inspectApplicationStatus, describeApplicationStatus } from './application-status';
 import { prepareApplicationAction, finishApplicationAction, type ApplicationActionContext } from './application-action';
 import { inspectAutocomplete } from './autocomplete';
+import { readCommunityRules, observeRulesPage, completedRulesNavigation, describeCommunityRules } from './community-rules';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -488,6 +489,9 @@ export const navigateBrowserTabTool: AgentTool<typeof NavigateBrowserTabSchema> 
   parameters: NavigateBrowserTabSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
+      const completed = completedRulesNavigation(params.url);
+      if (completed) return { content: [{ type: 'text', text: describeCommunityRules(completed) }],
+        details: { dispatched: false, navigationSkipped: true, lookupComplete: true, communityRules: completed } };
       const res = await navigateActiveTab(params.url);
       if (!res.success && res.blockedByCaptcha) {
         return {
@@ -531,15 +535,31 @@ export const getPageContentTool: AgentTool<typeof GetPageContentSchema> = {
         )
       );
       const res = await Promise.race([resPromise, timeoutPromise]);
+      const rules = observeRulesPage(res);
       return {
-        content: [{ type: 'text', text: `Page Title: ${res.title}\nURL: ${res.url}\n\nContent:\n${res.text}` }],
-        details: res,
+        content: [{ type: 'text', text: `Page Title: ${res.title}\nURL: ${res.url}\n\nContent:\n${res.text}${rules ? '\n\n' + describeCommunityRules(rules) : ''}` }],
+        details: { ...res, ...(rules ? { communityRules: rules } : {}) },
       };
     } catch (err: any) {
       return {
         content: [{ type: 'text', text: `Failed to get page text: ${err?.message || err}` }],
         details: { error: String(err) },
       };
+    }
+  },
+};
+
+export const readCommunityRulesTool: AgentTool = {
+  name: 'read_community_rules',
+  label: 'Read Community Rules',
+  description: 'Read the active Reddit community rules and visible sidebar/composer guidance in one bounded lookup. Returns found, explicit empty, or unavailable. Reuses the result for five minutes; do not cycle alternate rules pages afterwards.',
+  parameters: Type.Object({}),
+  execute: async (): Promise<AgentToolResult> => {
+    try {
+      const result = await readCommunityRules();
+      return { content: [{ type: 'text', text: `${describeCommunityRules(result)}\n\n${JSON.stringify(result)}` }], details: result };
+    } catch (error: any) {
+      return { content: [{ type: 'text', text: error?.message || String(error) }], details: { error: String(error) } };
     }
   },
 };
@@ -822,6 +842,9 @@ export const openNewTabTool: AgentTool<typeof OpenNewTabSchema> = {
   parameters: OpenNewTabSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
+      const completed = completedRulesNavigation(params.url);
+      if (completed) return { content: [{ type: 'text', text: describeCommunityRules(completed) }],
+        details: { dispatched: false, navigationSkipped: true, lookupComplete: true, communityRules: completed } };
       const tabId = await createNewTab(params.url);
       if (tabId) {
         return {
@@ -1371,6 +1394,7 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     switchBrowserTabTool,
     navigateBrowserTabTool,
     getPageContentTool,
+    readCommunityRulesTool,
     createAppendToPreviewTool(sessionId),
     createScratchpadTool(sessionId),
     createSuggestMemoryTool(sessionId),
