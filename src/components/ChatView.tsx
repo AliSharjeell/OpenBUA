@@ -234,6 +234,14 @@ export function ChatView({
 }: ChatViewProps) {
   const [input, setInput] = useState(inputDraft || '');
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
+  const [mentionCursor, setMentionCursor] = useState(0);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionsDismissed, setMentionsDismissed] = useState(false);
+  const attachments = attachmentReferences(documents);
+  const mention = input.slice(0, mentionCursor).match(/@([^\s@]*)$/);
+  const mentionOptions = mention && !mentionsDismissed ? attachments.filter(({doc, alias}) =>
+    `${alias} ${doc.fileName || doc.title}`.toLowerCase().includes(mention[1].toLowerCase())).slice(0, 8) : [];
+
   const [expandedThoughtIds, setExpandedThoughtIds] = useState<Record<string, boolean>>({});
   const [expandedToolsIds, setExpandedToolsIds] = useState<Record<string, boolean>>({});
 
@@ -414,27 +422,22 @@ export function ChatView({
   }, [activeSessionId]);
 
   const handleChatFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !onUploadDocument) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !onUploadDocument) return;
+    const confirmations: ChatMessage[] = [];
     setIsUploadingDoc(true);
     try {
-      await onUploadDocument(file);
-      const confirmMsg: ChatMessage = {
-        id: `doc-${Date.now()}`,
-        role: 'assistant',
-        content: `📄 Added document **${file.name}** to your active memory for this tab. You can now ask me to use these details to fill forms.`,
-        timestamp: Date.now(),
-      };
-      onMessagesChange([...messages, confirmMsg]);
-    } catch (err: any) {
-      console.error('Failed to upload file from chat:', err);
-      const errMsg: ChatMessage = {
-        id: `doc-err-${Date.now()}`,
-        role: 'assistant',
-        content: `⚠️ Failed to upload file: ${err?.message || err}`,
-        timestamp: Date.now(),
-      };
-      onMessagesChange([...messages, errMsg]);
+      for (const file of files) {
+        try {
+          await onUploadDocument(file);
+          confirmations.push({id: `doc-${Date.now()}-${confirmations.length}`, role: 'assistant',
+            content: `Added **${file.name}** to this tab's Memory. Reference it with @ or click its file card.`, timestamp: Date.now()});
+        } catch (error: any) {
+          confirmations.push({id: `doc-error-${Date.now()}-${confirmations.length}`, role: 'assistant',
+            content: `Could not attach **${file.name}**: ${error?.message || error}`, timestamp: Date.now()});
+        }
+      }
+      onMessagesChange([...messages, ...confirmations]);
     } finally {
       setIsUploadingDoc(false);
       e.target.value = '';
@@ -485,7 +488,35 @@ export function ChatView({
     }
   };
 
+  const insertMention = (token: string, replaceQuery = false) => {
+    const caret = textareaRef.current?.selectionStart ?? input.length;
+    const start = replaceQuery && mention ? caret - mention[0].length : caret;
+    const value = `${input.slice(0, start)}${token} ${input.slice(caret)}`;
+    handleInputChange(value);
+    setMentionsDismissed(true);
+    const nextCaret = start + token.length + 1;
+    setMentionCursor(nextCaret);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextCaret, nextCaret);
+    });
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionOptions.length) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionIndex(index => (index + (e.key === 'ArrowDown' ? 1 : -1) + mentionOptions.length) % mentionOptions.length);
+        return;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setMentionsDismissed(true); return; }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault();
+        insertMention(mentionOptions[mentionIndex % mentionOptions.length].token, true);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -837,22 +868,54 @@ export function ChatView({
           )}
         </div>
 
+        {isPreparingFiles && (
+          <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-2 text-xs text-zinc-300" role="status">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading attachments into Memory?
+          </div>
+        )}
+        {mentionOptions.length > 0 && (
+          <div className="pointer-events-auto max-h-52 overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 p-1 shadow-xl" role="listbox" aria-label="Reference an attachment" id="attachment-mentions">
+            {mentionOptions.map(({doc, alias, token}, index) => (
+              <button key={doc.id} type="button" role="option" aria-selected={index === mentionIndex % mentionOptions.length}
+                onMouseDown={event => event.preventDefault()} onClick={() => insertMention(token, true)}
+                className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs ${index === mentionIndex % mentionOptions.length ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-800'}`}>
+                <span className="text-blue-400">@{alias}</span><span className="truncate">{doc.fileName || doc.title}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {attachments.length > 0 && (
+          <div className="pointer-events-auto flex gap-2 overflow-x-auto rounded-2xl border border-zinc-800/90 bg-zinc-900/95 p-2 shadow-xl" aria-label="Attached files">
+            {attachments.map(({doc, alias, token}) => (
+              <button key={doc.id} type="button" onClick={() => insertMention(token)} disabled={isBusy || isPreparingFiles}
+                title={`Reference ${doc.fileName || doc.title} using @${alias}`}
+                className="flex shrink-0 items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-800/60 p-2 text-left hover:bg-zinc-700 disabled:opacity-50 max-w-52">
+                {(doc.thumbnailUrl || (doc.type === 'image' && doc.dataUrl)) ? (
+                  <img src={doc.thumbnailUrl || doc.dataUrl} alt="" className="h-8 w-8 rounded-lg object-cover" />
+                ) : <FileText className="h-5 w-5 shrink-0 text-zinc-400" />}
+                <span className="min-w-0"><span className="block truncate text-[11px] text-zinc-200">{doc.fileName || doc.title}</span>
+                  <span className="block text-[10px] text-blue-400">@{alias}</span></span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
         <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
           {/* Start of Bar: Plus Button for Memory Document Upload */}
           <input
             ref={chatFileInputRef}
             type="file"
-            accept=".pdf,.md,.markdown,.txt,.json"
+            multiple
             className="hidden"
             onChange={handleChatFileUpload}
-            disabled={isBusy || isUploadingDoc}
+            disabled={isBusy || isUploadingDoc || isPreparingFiles}
           />
           <button
             type="button"
             onClick={() => chatFileInputRef.current?.click()}
-            title="Upload MD or PDF to memory"
-            disabled={isBusy || isUploadingDoc}
+            title="Attach files, images or videos"
+            disabled={isBusy || isUploadingDoc || isPreparingFiles}
             className="w-7 h-7 self-center flex items-center justify-center text-white hover:text-white/80 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0 cursor-pointer"
           >
             {isUploadingDoc ? (
@@ -865,19 +928,25 @@ export function ChatView({
           <Textarea
             ref={textareaRef}
             rows={1}
-            placeholder={harness ? 'Ask OpenBUA' : 'Loading saved data…'}
+            placeholder={harness ? 'Ask OpenBUA ? @ to reference files' : 'Loading saved data…'}
             value={input}
             onChange={(e) => {
               handleInputChange(e.target.value);
+              setMentionCursor(e.target.selectionStart);
+              setMentionIndex(0);
+              setMentionsDismissed(false);
               // Auto-expand textarea height as text lines increase (up to 6 lines, 136px)
               if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';
                 textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 32), 136)}px`;
               }
             }}
+            onSelect={event => setMentionCursor(event.currentTarget.selectionStart)}
+            aria-controls={mentionOptions.length ? 'attachment-mentions' : undefined}
+            aria-expanded={mentionOptions.length > 0}
             onKeyDown={handleKeyDown}
             className="border-0 bg-transparent min-h-[32px] max-h-[136px] resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans flex-1"
-            disabled={isBusy || !hasKey || !harness}
+            disabled={isBusy || isPreparingFiles || !hasKey || !harness}
           />
 
           {/* End of Bar: Send / Stop Button */}
@@ -897,7 +966,7 @@ export function ChatView({
                 size="icon"
                 className="h-7 w-7 rounded-full bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF] shadow-sm transition-colors cursor-pointer flex items-center justify-center"
                 onClick={() => handleSend()}
-                disabled={!input.trim() || !hasKey || !harness}
+                disabled={!input.trim() || isPreparingFiles || isUploadingDoc || !hasKey || !harness}
                 title={harness ? 'Send (Enter)' : 'Loading saved data…'}
               >
                 <Send className="w-3.5 h-3.5 text-white" />
