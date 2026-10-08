@@ -2,6 +2,7 @@ import { inspectApplicationStatus, describeApplicationStatus } from './applicati
 import { prepareApplicationAction, finishApplicationAction, type ApplicationActionContext } from './application-action';
 import { inspectAutocomplete } from './autocomplete';
 import { readCommunityRules, observeRulesPage, completedRulesNavigation, describeCommunityRules } from './community-rules';
+import { writeRedditDraft } from './reddit-editor';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -57,6 +58,32 @@ async function beginApplicationAction() {
 async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?:string;x?:number;y?:number}) {
   const tab=await getActiveTab();
   if(!tab?.id || typeof chrome==='undefined' || !chrome.scripting) return null;
+  if (/reddit\.com\/r\/[^/]+\/submit/i.test(tab.url || '')) {
+    let posting = /^(?:post|submit|publish)$/i.test(params.text || '');
+    if (!params.text) {
+      const targets = await chrome.scripting.executeScript({ target: { tabId: tab.id }, args: [params.refId || '', params.selector || '', params.x ?? null, params.y ?? null], func: (ref: string, selector: string, x: number | null, y: number | null) => {
+        const find = (root: ParentNode): Element | null => {
+          let direct: Element | null = null;
+          try { direct = root.querySelector(ref ? `[data-autoform-ref="${CSS.escape(ref)}"]` : selector || ':not(*)'); } catch {}
+          if (direct) return direct;
+          for (const host of Array.from(root.querySelectorAll('*'))) if (host.shadowRoot) { const match = find(host.shadowRoot); if (match) return match; }
+          return null;
+        };
+        let target = ref || selector ? find(document) : x !== null && y !== null ? document.elementFromPoint(x / (devicePixelRatio || 1), y / (devicePixelRatio || 1)) : null;
+        while (target?.shadowRoot && x !== null && y !== null) {
+          const inner = target.shadowRoot.elementFromPoint(x / (devicePixelRatio || 1), y / (devicePixelRatio || 1));
+          if (!inner || inner === target) break; target = inner;
+        }
+        const button = target?.closest('button,[role="button"],input[type="submit"]');
+        return /^(?:post|submit|publish)$/i.test((button?.textContent || button?.getAttribute('aria-label') || '').trim());
+      } });
+      posting = Boolean(targets[0]?.result);
+    }
+    if (posting) {
+      const check = await writeRedditDraft(tab.id, [], true);
+      if (check.errors.length) return { success: false, dispatched: false, validationBlocked: true, message: check.errors.join('\n'), verifications: check.verifications };
+    }
+  }
   const hit=await chrome.scripting.executeScript({target:{tabId:tab.id},args:[params.refId||'',params.selector||'',params.text||'',params.x??null,params.y??null],func:(refId:string,selector:string,text:string,x:number|null,y:number|null)=>{
     let target:Element|null=null;
     if(refId) target=document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
@@ -546,6 +573,25 @@ export const getPageContentTool: AgentTool<typeof GetPageContentSchema> = {
         details: { error: String(err) },
       };
     }
+  },
+};
+
+const PrepareRedditPostSchema = Type.Object({
+  title: Type.String({ description: 'Single-line post title, separate from body' }),
+  body: Type.String({ description: 'Complete post body, with blank lines between paragraphs and standalone URLs separated from following text' }),
+});
+export const prepareRedditPostTool: AgentTool<typeof PrepareRedditPostSchema> = {
+  name: 'prepare_reddit_post', label: 'Prepare Reddit Post',
+  description: 'Replace and fully verify a Reddit draft using distinct title/body fields. Preserves paragraphs using Markdown mode when available, otherwise editor paste. Does not submit. Use this for repairs instead of typing at an uncertain caret.',
+  parameters: PrepareRedditPostSchema,
+  execute: async (_id, params): Promise<AgentToolResult> => {
+    const tab = await getActiveTab();
+    if (!tab?.id || !/^https:\/\/(?:www\.|old\.|new\.)?reddit\.com\/r\/[^/]+\/submit\/?(?:\?|$)/i.test(tab.url || '')) return { content: [{ type: 'text', text: 'Open the target Reddit submit page first.' }], details: { success: false } };
+    try {
+      const result = await writeRedditDraft(tab.id, [{ role: 'title', value: params.title }, { role: 'body', value: params.body }]);
+      const success = result.successCount === 2 && result.errors.length === 0;
+      return { content: [{ type: 'text', text: success ? 'Distinct title and complete body verified, including paragraph breaks. Draft prepared; not submitted.' : `Draft needs repair; do not append or submit. ${result.errors.join('\n')}` }], details: { ...result, success } };
+    } catch (error: any) { return { content: [{ type: 'text', text: `Draft write could not be confirmed. Inspect before retrying: ${error?.message || error}` }], details: { success: false } }; }
   },
 };
 
@@ -1380,6 +1426,7 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     docsClipboardTool,
     confirmDocsCloneTool,
     fillFormFieldsTool,
+    prepareRedditPostTool,
     uploadFileToFormTool,
     postToSocialTool,
     clickElementTool,

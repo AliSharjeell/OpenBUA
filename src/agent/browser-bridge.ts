@@ -1,5 +1,6 @@
 import { inspectAutocomplete } from './autocomplete';
 import { captureScheduled } from './screenshot-capture';
+import { writeRedditDraft } from './reddit-editor';
 import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
 import { loadGlobalMemories, loadTabMemories, getActiveSessionIdState } from '../services/storage';
 import { tryLoadFileFromLocalPath, extractTextWithVlm } from '../services/pdf-parser';
@@ -1551,6 +1552,10 @@ export async function fillActiveTabFields(
   }
 
   // Pre-fetch stored documents to automatically attach raw file binary if assignment targets a file or references a stored file/resume
+  if (/^https:\/\/(?:www\.|old\.|new\.)?reddit\.com\/r\/[^/]+\/submit\/?(?:\?|$)/i.test(activeTab.url || '')) {
+    const draft = await writeRedditDraft(activeTab.id, assignments);
+    if (!('mode' in draft) || draft.mode !== 'file-input') return draft;
+  }
   const tabKey = getActiveSessionIdState();
   const [globalDocs, tabDocs] = await Promise.all([
     loadGlobalMemories().catch(() => []),
@@ -1963,7 +1968,8 @@ function inPageClickAtPoint(
 
 function inPageTypeText(
   text: string,
-  pressEnterForNewlines: boolean
+  pressEnterForNewlines: boolean,
+  clearFirst = false
 ): { success: boolean; message: string; lines: number; chars: number } {
   // Resolve the surface that actually receives keystrokes. Canvas editors route
   // input through a hidden same-origin iframe, so events sent at the top-level
@@ -1987,11 +1993,14 @@ function inPageTypeText(
     }
   }
   if (!found) {
+    let focused = document.activeElement as HTMLElement | null;
+    while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement as HTMLElement;
     const editable = Array.from(
       document.querySelectorAll<HTMLElement>('[contenteditable="true"]')
     ).find((el) => el.offsetParent !== null || el === document.activeElement);
     const active = document.activeElement as HTMLElement | null;
-    if (editable) target = editable;
+    if (focused && (/^(INPUT|TEXTAREA)$/.test(focused.tagName) || focused.isContentEditable)) target = focused;
+    else if (editable) target = editable;
     else if (active && /^(INPUT|TEXTAREA)$/.test(active.tagName)) target = active;
   }
 
@@ -2005,6 +2014,15 @@ function inPageTypeText(
   const isCanvas = Boolean(
     document.querySelector('.kix-appview, .kix-canvas-tile-content, .docs-texteventtarget-iframe')
   );
+  if (/reddit\.com$/i.test(location.hostname) && target.isContentEditable) return { success: false, message: 'Use prepare_reddit_post to replace the distinct title and body. No text appended.', lines: 0, chars: 0 };
+  if (clearFirst && target.isContentEditable && !isCanvas) {
+    const root = target.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null };
+    const selection = root.getSelection?.() || doc.getSelection();
+    if (!selection) return { success: false, message: 'Could not establish editor-only selection. No text inserted.', lines: 0, chars: 0 };
+    const range = doc.createRange(); range.selectNodeContents(target);
+    selection.removeAllRanges(); selection.addRange(range); doc.execCommand('delete');
+    if ((target.innerText || '').trim()) return { success: false, message: 'Editor did not clear. No replacement appended.', lines: 0, chars: 0 };
+  }
 
   // A coordinate click does not give the editor keyboard focus. Prime it, or the
   // insert below is silently discarded by Google Docs.
@@ -2085,8 +2103,13 @@ function inPageTypeText(
 
   if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') {
     const el = target as HTMLTextAreaElement;
-    el.value = text;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    const start = clearFirst ? 0 : el.selectionStart ?? el.value.length;
+    const end = clearFirst ? el.value.length : el.selectionEnd ?? start;
+    const expected = el.value.slice(0, start) + text + el.value.slice(end);
+    const prototype = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(el, expected);
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: text }));
+    try { el.setSelectionRange(start + text.length, start + text.length); } catch {}
     return {
       success: true,
       message: `Typed ${text.length} character(s) into <${target.tagName.toLowerCase()}>.`,
@@ -2386,7 +2409,7 @@ export async function typeActiveTabText(
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPageTypeText,
-        args: [options.text, options.pressEnterForNewlines !== false],
+        args: [options.text, options.pressEnterForNewlines !== false, Boolean(options.clearFirst)],
       });
       if (results?.[0]?.result) return results[0].result as any;
     } catch (err: any) {

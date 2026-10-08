@@ -1803,6 +1803,12 @@ function resolveTypingTarget(): { target: HTMLElement; frame: HTMLIFrameElement 
     }
   }
 
+  // A focused title/textarea wins over unrelated body editors. Shadow hosts
+  // expose their inner active control through shadowRoot.activeElement.
+  let focused = document.activeElement as HTMLElement | null;
+  while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement as HTMLElement;
+  if (focused && (/^(INPUT|TEXTAREA)$/.test(focused.tagName) || focused.isContentEditable)) return { target: focused, frame: null };
+
   // 2. A visible contenteditable in the top document (Docs web app shell, Canva).
   const editable = Array.from(
     document.querySelectorAll<HTMLElement>('[contenteditable="true"]')
@@ -2033,6 +2039,16 @@ function typeTextIntoPage(
     // handler, so a synthetic keydown is the correct signal there. A plain
     // contenteditable ignores untrusted keydowns, so it needs execCommand.
     const jsDriven = editor.isCanvas || target.closest('.kix-appview') !== null;
+    if (/reddit\.com$/i.test(location.hostname) && target.isContentEditable) return { success: false, message: 'Use prepare_reddit_post to replace and verify the distinct title/body. Do not append at an uncertain body caret.', target: 'reddit-body', lines: 0, chars: 0, verified: false };
+    if (/^(INPUT|TEXTAREA)$/.test(target.tagName) && !jsDriven) {
+      const input = target as HTMLInputElement | HTMLTextAreaElement;
+      const start = opts.clearFirst ? 0 : input.selectionStart ?? input.value.length;
+      const end = opts.clearFirst ? input.value.length : input.selectionEnd ?? start;
+      const expected = input.value.slice(0, start) + rawText + input.value.slice(end);
+      setNativeValue(target, expected);
+      try { input.setSelectionRange(start + rawText.length, start + rawText.length); } catch {}
+      return { success: input.value === expected, message: 'Focused text field updated and fully verified.', target: target.tagName.toLowerCase(), lines: rawText.split('\n').length, chars: rawText.length, verified: input.value === expected };
+    }
 
     // A coordinate click does not give the editor keyboard focus. Prime it, or
     // the insert below is silently discarded.
