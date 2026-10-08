@@ -1200,7 +1200,7 @@ function clickElement(refId?: string, selector?: string, text?: string): { succe
       'button, a, input[type="submit"], input[type="button"], [role="button"], [role="link"], [role="tab"], [role="listitem"], [role="row"], [role="treeitem"], [role="menuitem"], [role="option"], [role="menuitemradio"], [role="combobox"], [aria-haspopup], mat-select, bard-mode-switcher, tp-yt-paper-tab, yt-tab-shape, [contenteditable="true"], [role="textbox"], yt-formatted-string, #video-title, #placeholder-area, #simplebox-placeholder, ytd-channel-name, [data-tooltip], [data-testid*="cell"], [data-testid*="list-item"], [data-testid*="chat-list-item"], span[title], div[title], [aria-label], #pane-side div[tabindex="-1"], #pane-side span'
     )).filter((c) => {
       // Exclude search suggestions / autocomplete dropdowns so we never click search predictions accidentally
-      return !c.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list');
+      return !c.closest('.sbdd_a, .sbsb_a, #complete-list');
     });
 
     // Prioritize candidates inside an active modal / dialog first

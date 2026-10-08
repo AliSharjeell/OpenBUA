@@ -1,3 +1,4 @@
+import { inspectAutocomplete } from './autocomplete';
 import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
 import { loadGlobalMemories, loadTabMemories, getActiveSessionIdState } from '../services/storage';
 import { tryLoadFileFromLocalPath, extractTextWithVlm } from '../services/pdf-parser';
@@ -706,7 +707,7 @@ function inPageClickElement(refId?: string, selector?: string, text?: string): {
     ));
     // Filter out search prediction dropdowns / hidden autocomplete popups so we never accidentally click search suggestions
     const candidates = rawCandidates.filter((c) => {
-      const inSearchDropdown = c.closest('.sbdd_a, .sbsb_a, [role="listbox"], #complete-list');
+      const inSearchDropdown = c.closest('.sbdd_a, .sbsb_a, #complete-list');
       return !inSearchDropdown;
     });
 
@@ -1379,6 +1380,23 @@ export async function inspectActiveTabForm(selector?: string): Promise<PageFormS
   throw new Error('Failed to inspect form fields on the active tab.');
 }
 
+async function verifyAutocompleteFill(tabId:number, assignments:Array<{refId?:string;selector?:string;value:string}>, result:FormFillResult):Promise<FormFillResult> {
+  const observations=await inspectAutocomplete(tabId,assignments,true);
+  for(const observed of observations) {
+    if(!observed.autocomplete && !observed.invalid) continue;
+    const verification=result.verifications.find(v=>observed.refId ? v.refId===observed.refId : v.selector===observed.selector);
+    if(!verification) continue;
+    const verified=observed.autocomplete ? Boolean(observed.selected) : !observed.invalid;
+    if(verification.verified && !verified) result.successCount--;
+    if(!verification.verified && verified) result.successCount++;
+    verification.verified=verified;
+    verification.actualValue=observed.value;
+    verification.status=verified ? 'selected-option' : 'selection-required';
+    if(!verified) result.errors.push(`${observed.label || observed.refId}: ${observed.message || 'Autocomplete text is not a selected option'}. Select a matching dropdown option before Next; do not dismiss the popup and repeat Next.`);
+  }
+  return result;
+}
+
 // Fill fields on active tab
 export async function fillActiveTabFields(
   assignments: Array<{
@@ -1481,7 +1499,7 @@ export async function fillActiveTabFields(
       pressEnter: Boolean(pressEnterAll),
     }, fillTimeoutMs);
     if (response && response.success && response.data) {
-      return response.data as FormFillResult;
+      return await verifyAutocompleteFill(activeTab.id, cleanAssignments, response.data as FormFillResult);
     }
   } catch (err: any) {
     console.warn('[OpenBUA] sendMessageToTab failed, falling back to direct executeScript:', err?.message || err);
@@ -1496,7 +1514,7 @@ export async function fillActiveTabFields(
         args: [cleanAssignments, Boolean(pressEnterAll)],
       });
       if (results && results[0] && results[0].result) {
-        return results[0].result as FormFillResult;
+        return await verifyAutocompleteFill(activeTab.id, cleanAssignments, results[0].result as FormFillResult);
       }
     } catch (scriptErr: any) {
       const msg = scriptErr?.message || String(scriptErr);
