@@ -132,7 +132,7 @@ function inPagePushChunk(transferId: string, index: number, data: string): { ok:
  * page, so every helper it needs is declared inside its own body. Do not
  * extract these.
  */
-function inPageCommitTransfer(transferId: string): {
+function inPageCommitTransfer(transferId: string, refId?: string, selector?: string, dropEvents = true): {
   success: boolean;
   message: string;
   bytes: number;
@@ -170,10 +170,16 @@ function inPageCommitTransfer(transferId: string): {
   // order is usually the media-only one, which renders a preview and then
   // rejects the file as "not supported".
   const bestInput = (file: File): HTMLInputElement | null => {
-    const inputs = Array.from(document.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
+    const target = refId
+      ? document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`) || document.getElementById(refId)
+      : null;
+    const roots = target ? [target] : selector ? Array.from(document.querySelectorAll(selector)) : [document];
+    const inputs = roots.flatMap(root => 'matches' in root && root.matches('input[type="file"]')
+      ? [root as HTMLInputElement] : Array.from(root.querySelectorAll<HTMLInputElement>('input[type="file"]')));
     let best: HTMLInputElement | null = null;
     let bestScore = -1;
     for (const el of inputs) {
+      if (el.disabled) continue;
       const dialog = el.closest('[role="dialog"], dialog, [aria-modal="true"]');
       const inDialog = Boolean(dialog) && isVisible(dialog as HTMLElement);
       const raw = (el.getAttribute('accept') || '').trim().toLowerCase();
@@ -222,7 +228,9 @@ function inPageCommitTransfer(transferId: string): {
 
     const transfer = new DataTransfer();
     transfer.items.add(file);
-    input.files = transfer.files;
+    const setter = input.ownerDocument?.defaultView ? Object.getOwnPropertyDescriptor(input.ownerDocument.defaultView.HTMLInputElement.prototype, 'files')?.set : undefined;
+    if (setter) setter.call(input, transfer.files);
+    else input.files = transfer.files;
     input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
@@ -231,7 +239,7 @@ function inPageCommitTransfer(transferId: string): {
     const dropzone =
       input.closest('[data-dropzone], [data-testid="dropzone"], .dropzone, [class*="dropzone"]') ||
       input.parentElement;
-    if (dropzone && dropzone !== input) {
+    if (dropEvents && dropzone && dropzone !== input) {
       for (const type of ['dragenter', 'dragover', 'drop']) {
         try {
           dropzone.dispatchEvent(
@@ -250,7 +258,7 @@ function inPageCommitTransfer(transferId: string): {
       : ` WARNING: the chosen input (accept="${acceptAttr}") does not allow ${file.type}. This site may reject it as "not supported" despite a preview. Open the attach menu and choose the correct option.`;
 
     return {
-      success: true,
+      success: attached,
       attached,
       message: attached
         ? `Attached "${file.name}" (${total} bytes) to the file input.${warning}`
@@ -347,7 +355,7 @@ export async function injectFileIntoTab(
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: inPageCommitTransfer,
-      args: [transferId],
+      args: [transferId, request.refId, request.selector, request.dropEvents !== false],
     });
     const result = results?.[0]?.result as
       | { success: boolean; message: string; bytes: number; attached?: boolean }

@@ -2523,6 +2523,7 @@ function bestFileInputFor(file: File): { input: HTMLInputElement | null; score: 
   for (const el of candidates) {
     const dialog = el.closest('[role="dialog"], dialog, [aria-modal="true"]');
     const inDialog = Boolean(dialog) && isFileVisible(dialog as HTMLElement);
+    if (el.disabled) continue;
     const score = scoreFileInput(el, file, inDialog);
     if (score > bestScore) {
       best = el;
@@ -2623,30 +2624,25 @@ async function attachFileToComposer(
 ): Promise<{ success: boolean; message: string; attached: boolean }> {
   let input: HTMLInputElement | null = null;
   let explicit = false;
-
-  if (refId) {
-    input =
-      document.querySelector<HTMLInputElement>(`[data-autoform-ref="${CSS.escape(refId)}"]`) ||
-      (document.getElementById(refId) as HTMLInputElement | null);
-    if (input && input.type !== 'file') {
-      const inner = input.querySelector<HTMLInputElement>('input[type="file"]');
-      input = inner || input;
-    }
-    explicit = Boolean(input);
+  const target = refId
+    ? document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`) || document.getElementById(refId)
+    : null;
+  let candidates: Element[] = target ? [target] : [];
+  if (!target && selector) {
+    try { candidates = Array.from(document.querySelectorAll(selector)); }
+    catch { return { success: false, attached: false, message: 'Invalid file input selector.' }; }
   }
-  if (!input && selector) {
-    try {
-      input = document.querySelector<HTMLInputElement>(selector);
-      explicit = Boolean(input);
-    } catch {
-      input = null;
-    }
+  for (const candidate of candidates) {
+    const fields = candidate.matches('input[type="file"]')
+      ? [candidate as HTMLInputElement]
+      : Array.from(candidate.querySelectorAll<HTMLInputElement>('input[type="file"]'));
+    input = fields.find(field => !field.disabled && acceptAllowsFile(field.accept, file)) || null;
+    if (input) { explicit = true; break; }
   }
-
-  if (!input) {
-    const best = bestFileInputFor(file);
-    input = best.input;
+  if (candidates.length && !input) {
+    return { success: false, attached: false, message: `The requested upload target has no enabled file input accepting "${file.name}". Inspect the form and choose the correct upload control.` };
   }
+  if (!input) input = bestFileInputFor(file).input;
 
   // Nothing on the page accepts this file yet: open the attachment menu so the
   // right entry (Document vs Photos & Videos) reveals its own input.
@@ -2760,7 +2756,7 @@ async function attachFileToComposer(
       : '';
 
     return {
-      success: true,
+      success: attached,
       attached,
       message: attached
         ? `Attached "${file.name}" (${file.size} bytes, ${file.type}) to the file input (${scope}).${acceptWarning}`
