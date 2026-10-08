@@ -6,6 +6,7 @@ import { writeRedditDraft } from './reddit-editor';
 import { inPageReadYouTubeVideos } from './youtube-page';
 import { redditPostAction } from './reddit-submit';
 import { reviewRedditDraft } from './reddit-review';
+import { xCommunityAction, interceptXCommunityClick } from './x-community';
 import { protectPageTrust, type PageTrustPolicy } from './page-trust';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -62,6 +63,8 @@ async function beginApplicationAction() {
 async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?:string;x?:number;y?:number}) {
   const tab=await getActiveTab();
   if(!tab?.id || typeof chrome==='undefined' || !chrome.scripting) return null;
+  const membership = await interceptXCommunityClick({ id: tab.id, url: tab.url }, params);
+  if (membership) return membership;
   if (/reddit\.com\/r\/[^/]+\/submit/i.test(tab.url || '')) {
     let posting = /^(?:post|submit|publish)$/i.test(params.text || '');
     if (!params.text) {
@@ -666,6 +669,24 @@ export const reviewRedditPostTool: AgentTool = {
       const result = await reviewRedditDraft(tab.id);
       return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
     } catch (error: any) { return { content: [{ type: 'text', text: error?.message || String(error) }], details: { state: 'blocked' } }; }
+  },
+};
+
+const JoinXCommunitySchema = Type.Object({
+  confirmRules: Type.Optional(Type.Boolean({ description: 'Confirm a visible Agree and join dialog only after reading its community rules. Default false.' })),
+  verifyOnly: Type.Optional(Type.Boolean({ description: 'Read membership state without clicking. Use once after an unconfirmed attempt.' })),
+});
+export const joinXCommunityTool: AgentTool<typeof JoinXCommunitySchema> = {
+  name: 'join_x_community', label: 'Join X Community',
+  description: 'Join the active X community through one native click per stage. Returns joined, requested, rules_required, blocked or unconfirmed. Already-joined/pending membership is never toggled. Read returned rules, then confirmRules:true once if appropriate. After unconfirmed use verifyOnly:true once; do not retry with coordinates or generic clicks.',
+  parameters: JoinXCommunitySchema,
+  execute: async (_id, params): Promise<AgentToolResult> => {
+    try {
+      const tab = await getActiveTab();
+      if (!tab?.id || !/^https:\/\/(?:www\.)?(?:x|twitter)\.com\/i\/communities\/\d+(?:\/|\?|$)/i.test(tab.url || '')) throw new Error('Open the actual X /i/communities/<id> page first.');
+      const result = await xCommunityAction(tab.id, params.verifyOnly ? 'verify' : params.confirmRules ? 'confirm' : 'join');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
+    } catch (error: any) { return { content: [{ type: 'text', text: `Membership is unconfirmed: ${error?.message || error}. Do not re-click; inspect the current state.` }], details: { success: false, state: 'unconfirmed' } }; }
   },
 };
 
@@ -1487,6 +1508,7 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     fillFormFieldsTool,
     prepareRedditPostTool,
     reviewRedditPostTool,
+    joinXCommunityTool,
     submitRedditPostTool,
     verifyRedditPostTool,
     readYouTubeVideosTool,
