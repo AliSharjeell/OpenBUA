@@ -3,6 +3,7 @@ import { prepareApplicationAction, finishApplicationAction, type ApplicationActi
 import { inspectAutocomplete } from './autocomplete';
 import { readCommunityRules, observeRulesPage, completedRulesNavigation, describeCommunityRules } from './community-rules';
 import { writeRedditDraft } from './reddit-editor';
+import { inPageReadYouTubeVideos } from './youtube-page';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -573,6 +574,21 @@ export const getPageContentTool: AgentTool<typeof GetPageContentSchema> = {
         details: { error: String(err) },
       };
     }
+  },
+};
+
+export const readYouTubeVideosTool: AgentTool = {
+  name: 'read_youtube_videos', label: 'Read YouTube Videos',
+  description: 'Read actual video titles and watch URLs in displayed order on YouTube search or channel pages. Excludes channel avatars, tabs and playlist links. Waits briefly for real results instead of fixed sleeps. Use videos[0].url with navigate_browser_tab for the first video.',
+  parameters: Type.Object({}),
+  execute: async (): Promise<AgentToolResult> => {
+    const tab = await getActiveTab();
+    if (!tab?.id || !/^https:\/\/(?:www\.)?youtube\.com\//i.test(tab.url || '')) return { content: [{ type: 'text', text: 'Open the YouTube search or channel page first.' }], details: { success: false } };
+    try {
+      const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: inPageReadYouTubeVideos });
+      const result = results[0]?.result;
+      return { content: [{ type: 'text', text: JSON.stringify(result || { message: 'Could not inspect YouTube. Use get_page_content.' }) }], details: { ...result, success: Boolean(result?.videos.length) } };
+    } catch (error: any) { return { content: [{ type: 'text', text: `Could not read YouTube videos: ${error?.message || error}. Use get_page_content instead of random clicks.` }], details: { success: false } }; }
   },
 };
 
@@ -1427,6 +1443,7 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     confirmDocsCloneTool,
     fillFormFieldsTool,
     prepareRedditPostTool,
+    readYouTubeVideosTool,
     uploadFileToFormTool,
     postToSocialTool,
     clickElementTool,
