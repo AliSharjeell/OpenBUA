@@ -1,5 +1,5 @@
 import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
-import { loadGlobalMemories, loadTabMemories, getTabKey, getActiveSessionIdState } from '../services/storage';
+import { loadGlobalMemories, loadTabMemories, getActiveSessionIdState } from '../services/storage';
 import { tryLoadFileFromLocalPath } from '../services/pdf-parser';
 import { injectFileIntoTab, resolveFileSource, type FileSource } from './file-injection';
 
@@ -1333,12 +1333,12 @@ export async function fillActiveTabFields(
   }
 
   // Pre-fetch stored documents to automatically attach raw file binary if assignment targets a file or references a stored file/resume
-  const tabKey = getTabKey(activeTab);
+  const tabKey = getActiveSessionIdState();
   const [globalDocs, tabDocs] = await Promise.all([
     loadGlobalMemories().catch(() => []),
     loadTabMemories(tabKey).catch(() => []),
   ]);
-  const allStoredDocs = [...globalDocs, ...tabDocs];
+  const allStoredDocs = [...tabDocs, ...globalDocs].filter(doc => doc.isActiveForContext);
 
   const cleanAssignments = (assignments || []).map((a) => {
     let fileData = a.fileData;
@@ -1364,15 +1364,11 @@ export async function fillActiveTabFields(
         valLower === 'cv';
 
       if (isFileField || isFileVal) {
-        const match = allStoredDocs.find(
-          (d) =>
-            d.dataUrl &&
-            ((d.fileName && valLower.includes(d.fileName.toLowerCase())) ||
-              (d.title && valLower.includes(d.title.toLowerCase())) ||
-              d.fileCategory === 'resume' ||
-              d.tags?.includes('resume') ||
-              d.type === 'pdf')
-        );
+        const genericResume = !valLower || ['resume', 'my resume', 'cv'].includes(valLower);
+        const match = allStoredDocs.find(d => d.dataUrl &&
+          (d.fileName?.toLowerCase() === valLower || d.id.toLowerCase() === valLower || d.title.toLowerCase() === valLower))
+          || (genericResume ? allStoredDocs.find(d => d.dataUrl &&
+            (d.fileCategory === 'resume' || d.tags?.includes('resume') || /resume|cv/i.test(d.fileName || d.title))) : undefined);
         if (match && match.dataUrl) {
           fileData = {
             fileName: match.fileName || `${match.title}.${match.type === 'pdf' ? 'pdf' : 'png'}`,
