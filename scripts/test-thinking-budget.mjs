@@ -29,6 +29,10 @@ const compiled = await build({
   // The agent core is only needed to run a real turn, which this test does not
   // do; it drives the harness event handler directly.
   external: ['@earendil-works/*', 'pdfjs-dist'],
+  plugins: [{ name: 'worker-url', setup(builder) {
+    builder.onResolve({ filter: /pdf\.worker\.min\.mjs\?url$/ }, () => ({ path: 'worker', namespace: 'worker-url' }));
+    builder.onLoad({ filter: /.*/, namespace: 'worker-url' }, () => ({ contents: 'export default "";' }));
+  } }],
 });
 writeFileSync(outPath, compiled.outputFiles[0].text, 'utf8');
 
