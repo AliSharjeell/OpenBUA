@@ -4,6 +4,7 @@ import { inspectAutocomplete } from './autocomplete';
 import { readCommunityRules, observeRulesPage, completedRulesNavigation, describeCommunityRules } from './community-rules';
 import { writeRedditDraft } from './reddit-editor';
 import { inPageReadYouTubeVideos } from './youtube-page';
+import { redditPostAction } from './reddit-submit';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -75,14 +76,15 @@ async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?
           const inner = target.shadowRoot.elementFromPoint(x / (devicePixelRatio || 1), y / (devicePixelRatio || 1));
           if (!inner || inner === target) break; target = inner;
         }
-        const button = target?.closest('button,[role="button"],input[type="submit"]');
+        const button = target?.closest('button,[role="button"],input[type="submit"],r-post-form-submit-button');
+        if (button?.tagName === 'R-POST-FORM-SUBMIT-BUTTON') return true;
+        if ((button?.getRootNode() as ShadowRoot | undefined)?.host?.tagName === 'R-POST-FORM-SUBMIT-BUTTON') return true;
         return /^(?:post|submit|publish)$/i.test((button?.textContent || button?.getAttribute('aria-label') || '').trim());
       } });
       posting = Boolean(targets[0]?.result);
     }
     if (posting) {
-      const check = await writeRedditDraft(tab.id, [], true);
-      if (check.errors.length) return { success: false, dispatched: false, validationBlocked: true, message: check.errors.join('\n'), verifications: check.verifications };
+      return redditPostAction(tab.id, true);
     }
   }
   const hit=await chrome.scripting.executeScript({target:{tabId:tab.id},args:[params.refId||'',params.selector||'',params.text||'',params.x??null,params.y??null],func:(refId:string,selector:string,text:string,x:number|null,y:number|null)=>{
@@ -139,6 +141,10 @@ export const verifyApplicationStatusTool: AgentTool<any> = {
   parameters:Type.Object({}),
   execute:async()=>{
     const tab=await getActiveTab();
+    if (tab?.id && /^https:\/\/(?:www\.|old\.|new\.)?reddit\.com\//i.test(tab.url || '')) {
+      const result = await redditPostAction(tab.id, false);
+      return { content: [{ type: 'text', text: result.message }], details: result as any };
+    }
     const outcome=tab?.id ? await inspectApplicationStatus(tab.id) : {state:'unconfirmed' as const,evidence:'No active application tab',actions:[]};
     return {content:[{type:'text',text:describeApplicationStatus(outcome)||'No application UI detected.'}],details:{...outcome,submissionVerified:outcome.state==='submitted'}};
   },
@@ -577,6 +583,24 @@ export const getPageContentTool: AgentTool<typeof GetPageContentSchema> = {
   },
 };
 
+function createRedditPostTool(submit: boolean): AgentTool {
+  return {
+    name: submit ? 'submit_reddit_post' : 'verify_reddit_post', label: submit ? 'Submit Reddit Post' : 'Verify Reddit Post',
+    description: submit ? 'Submit the fully prepared Reddit draft through its actual Post button, including custom-element shadow controls. Reports disabled/invalid requirements or confirms matching published permalink. No coordinate guessing or automatic re-clicks. Call only when the user authorized posting.' : 'Read-only Reddit publication verification. Confirms matching post permalink/title or reports validation errors/unconfirmed state. Never clicks or posts.',
+    parameters: Type.Object({}),
+    execute: async (): Promise<AgentToolResult> => {
+      const tab = await getActiveTab();
+      if (!tab?.id || !/^https:\/\/(?:www\.|old\.|new\.)?reddit\.com\//i.test(tab.url || '')) return { content: [{ type: 'text', text: 'Open the target Reddit page first.' }], details: { success: false } };
+      try {
+        const result = await redditPostAction(tab.id, submit);
+        return { content: [{ type: 'text', text: result.message }], details: result as any };
+      } catch (error: any) { return { content: [{ type: 'text', text: `Reddit outcome is unconfirmed: ${error?.message || error}. Do not repeat Post; inspect the page.` }], details: { success: false, state: 'unconfirmed' } }; }
+    },
+  };
+}
+export const submitRedditPostTool = createRedditPostTool(true);
+export const verifyRedditPostTool = createRedditPostTool(false);
+
 export const readYouTubeVideosTool: AgentTool = {
   name: 'read_youtube_videos', label: 'Read YouTube Videos',
   description: 'Read actual video titles and watch URLs in displayed order on YouTube search or channel pages. Excludes channel avatars, tabs and playlist links. Waits briefly for real results instead of fixed sleeps. Use videos[0].url with navigate_browser_tab for the first video.',
@@ -606,7 +630,7 @@ export const prepareRedditPostTool: AgentTool<typeof PrepareRedditPostSchema> = 
     try {
       const result = await writeRedditDraft(tab.id, [{ role: 'title', value: params.title }, { role: 'body', value: params.body }]);
       const success = result.successCount === 2 && result.errors.length === 0;
-      return { content: [{ type: 'text', text: success ? 'Distinct title and complete body verified, including paragraph breaks. Draft prepared; not submitted.' : `Draft needs repair; do not append or submit. ${result.errors.join('\n')}` }], details: { ...result, success } };
+      return { content: [{ type: 'text', text: success ? 'Distinct title and complete body verified, including paragraph breaks. Draft prepared; not submitted. If the user authorized posting, use submit_reddit_post next, not coordinate clicks or verify_application_status.' : `Draft needs repair; do not append or submit. ${result.errors.join('\n')}` }], details: { ...result, success } };
     } catch (error: any) { return { content: [{ type: 'text', text: `Draft write could not be confirmed. Inspect before retrying: ${error?.message || error}` }], details: { success: false } }; }
   },
 };
@@ -1443,6 +1467,8 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     confirmDocsCloneTool,
     fillFormFieldsTool,
     prepareRedditPostTool,
+    submitRedditPostTool,
+    verifyRedditPostTool,
     readYouTubeVideosTool,
     uploadFileToFormTool,
     postToSocialTool,
