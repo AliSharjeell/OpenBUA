@@ -1,4 +1,5 @@
 import { referencedAttachments } from '../services/attachment-references';
+import { suggestSessionTitle } from '../services/session-title';
 import { extractTextForDocument, detectDocumentCategory } from '../services/pdf-parser';
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -21,7 +22,6 @@ import {
   loadChatHistoryForTab,
   saveChatHistoryForTab,
   loadChatSessions,
-  saveChatSessions,
   createNewChatSession,
   deleteChatSession,
   renameChatSession,
@@ -35,7 +35,6 @@ import {
   clearSuggestedMemories,
   DEFAULT_SETTINGS,
   isGenericSessionTitle,
-  generateSessionTitle,
 } from '../services/storage';
 import { readFileContent, processUploadedFile } from '../services/pdf-parser';
 import { FormAgentHarness } from '../agent/form-agent';
@@ -207,13 +206,7 @@ export function App() {
       if (activeSession && isGenericSessionTitle(activeSession.title)) {
         const firstUser = loadedChat.find((m) => m.role === 'user' && m.content?.trim());
         if (firstUser) {
-          const title = generateSessionTitle(firstUser.content);
-          if (title && title !== activeSession.title) {
-            activeSession.title = title;
-            void saveChatSessions(loadedSessions).catch((error) =>
-              console.warn('[OpenBUA] Could not save session title:', error)
-            );
-          }
+          void suggestSessionTitle(targetSessionId, firstUser.content, loadedSettings, updated => { if (!cancelled) setSessions(updated); });
         }
       }
 
@@ -564,11 +557,7 @@ export function App() {
     if (selectedSess && isGenericSessionTitle(selectedSess.title)) {
       const firstUser = msgs.find((m) => m.role === 'user' && m.content && m.content.trim().length > 0);
       if (firstUser) {
-        const autoTitle = generateSessionTitle(firstUser.content);
-        if (autoTitle && autoTitle !== selectedSess.title) {
-          const updatedSessions = await renameChatSession(sessionId, autoTitle);
-          setSessions(updatedSessions);
-        }
+        void suggestSessionTitle(sessionId, firstUser.content, settings, setSessions);
       }
     }
   };
@@ -807,11 +796,7 @@ export function App() {
         (m) => m.role === 'user' && m.content && m.content.trim().length > 0
       );
       if (firstUserMsg) {
-        const suggestedTitle = generateSessionTitle(firstUserMsg.content);
-        if (suggestedTitle && suggestedTitle !== currentSession.title) {
-          const updatedSessions = await renameChatSession(currentSession.id, suggestedTitle);
-          setSessions(updatedSessions);
-        }
+        void suggestSessionTitle(currentSession.id, firstUserMsg.content, settings, setSessions);
       }
     }
   };
