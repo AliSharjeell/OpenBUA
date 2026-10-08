@@ -1,4 +1,5 @@
 import { inspectApplicationStatus, describeApplicationStatus } from './application-status';
+import { prepareApplicationAction, finishApplicationAction, type ApplicationActionContext } from './application-action';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -45,13 +46,28 @@ import {
   saveSuggestedMemory,
 } from '../services/storage';
 
-async function observeApplicationAction(message: string, dispatched: boolean) {
+async function beginApplicationAction() {
   const tab = await getActiveTab();
-  if (!tab?.id || !/linkedin\.com\/jobs|careers|application|apply/i.test(tab.url || '')) return {message,success:dispatched};
-  const outcome = await inspectApplicationStatus(tab.id, true);
-  const note = describeApplicationStatus(outcome);
+  return tab?.id && /linkedin\.com\/jobs|careers|application|apply/i.test(tab.url || '')
+    ? prepareApplicationAction(tab.id) : undefined;
+}
+
+async function observeApplicationAction(message: string, dispatched: boolean, context?: ApplicationActionContext) {
+  if (!context) return {message,success:dispatched};
+  const action = await finishApplicationAction(context);
+  if (dispatched && action.blockedUrl) {
+    const tabs = await listAllTabs();
+    const existing = tabs.find(tab => tab.url === action.blockedUrl);
+    const tabId = existing ? (await switchTab(existing.id), existing.id) : await createNewTab(action.blockedUrl);
+    if (tabId) return {message:`${message}\nOpened the website's external application destination in tab ${tabId}: ${action.blockedUrl}. Inspect that tab to continue.`,
+      success:true,dispatched,externalTabId:tabId,applicationStatus:{state:'unconfirmed' as const,evidence:'External application opened; not submitted',actions:[],url:action.blockedUrl}};
+  }
+  const outcome = await inspectApplicationStatus(context.tabId, dispatched && action.submission, context.before.feedback || []);
+  // Navigation and intermediate steps remain successful dispatches. Only an
+  // actual submission attempt can fail due to application outcome feedback.
+  const note = action.submission ? describeApplicationStatus(outcome) : '';
   return {message:note ? `${message}\n\n${note}` : message,
-    success:dispatched && outcome.state !== 'rejected', dispatched, submissionVerified:outcome.state === 'submitted',
+    success:dispatched && !(action.submission && outcome.state === 'rejected'), dispatched, submissionVerified:outcome.state === 'submitted',
     applicationStatus:outcome};
 }
 
@@ -191,8 +207,9 @@ export const clickElementTool: AgentTool<typeof ClickElementSchema> = {
   parameters: ClickElementSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
+      const context = await beginApplicationAction();
       const result = await clickActiveTabElement(params);
-      const observed = await observeApplicationAction(result.message, result.success);
+      const observed = await observeApplicationAction(result.message, result.success, context);
       return {
         content: [{ type: 'text', text: observed.message }],
         details: { ...result, ...observed } as any,
@@ -662,6 +679,7 @@ export const pressKeyCombinationTool: AgentTool<typeof PressKeySchema> = {
   parameters: PressKeySchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
+      const context = /enter/i.test(params.key) ? await beginApplicationAction() : undefined;
       const res = await pressKeyCombination({
         key: params.key,
         ctrlKey: params.ctrlKey,
@@ -669,7 +687,7 @@ export const pressKeyCombinationTool: AgentTool<typeof PressKeySchema> = {
         altKey: params.altKey,
         selector: params.selector,
       });
-      const observed = /enter/i.test(params.key) ? await observeApplicationAction(res.message, res.success) : {message:res.message,success:res.success};
+      const observed = /enter/i.test(params.key) ? await observeApplicationAction(res.message, res.success, context) : {message:res.message,success:res.success};
       return {
         content: [{ type: 'text', text: observed.message }],
         details: { ...res, ...observed } as any,
@@ -1161,6 +1179,7 @@ export const clickAtPositionTool: AgentTool<typeof ClickAtPositionSchema> = {
           details: { success: false },
         };
       }
+      const context = await beginApplicationAction();
       const res = await clickAtPosition({
         x: params.x,
         y: params.y,
@@ -1168,7 +1187,7 @@ export const clickAtPositionTool: AgentTool<typeof ClickAtPositionSchema> = {
         shiftKey: params.shiftKey,
         button: params.button,
       });
-      const observed = await observeApplicationAction(res.message, res.success);
+      const observed = await observeApplicationAction(res.message, res.success, context);
       return {
         content: [{ type: 'text', text: observed.message }],
         details: {

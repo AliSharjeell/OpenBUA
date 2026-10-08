@@ -29,14 +29,14 @@ function inPageApplicationStatus(ignoredFeedback: string[] | null = null): Appli
   const actions = dialog ? Array.from(dialog.querySelectorAll('button, input[type="submit"], [role="button"]'))
     .filter(visible).map(element => ((element as HTMLElement).innerText || element.getAttribute('value') || element.getAttribute('aria-label') || '').trim())
     .filter(Boolean) : [];
-  const closed = /(?:this|the)\s+(?:job|position)\s+(?:is\s+)?(?:now\s+)?closed|(?:job|position)\s+is\s+no longer available|no longer accepting applications|applications?\s+(?:are|is)\s+closed/i;
+  const closed = /(?:this|the)\s+(?:job|position)\s+(?:is\s+)?(?:now\s+)?closed|(?:job|position)\s+is\s+no longer available|no longer accepting applications|applications?\s+(?:are|is)\s+closed/i;
+  const submitted = /(?:your\s+)?application\s+(?:(?:has been|was|is)\s+)?(?:successfully\s+)?(?:submitted|sent)|successfully applied/i;
   const rejection = /(?:application|submission)\s+(?:(?:has|was|is)\s+)?(?:failed|rejected)|unable to submit|could(?:n['’]t| not) submit|failed to submit|something went wrong|please try again|please (?:fill|complete|enter|select)|required field|invalid (?:email|phone)/i;
-  const rejected = (dialog || ignoredFeedback !== null ? feedbackText.match(closed) : null) || scopeText.match(closed) || pageText.match(closed)
+  const rejected = (dialog || ignoredFeedback !== null || submitted.test(feedbackText) ? feedbackText.match(closed) : null) || scopeText.match(closed) || pageText.match(closed)
     || feedbackText.match(rejection) || scopeText.match(rejection);
   if (rejected) return { state: 'rejected', evidence: rejected[0], actions, ...context };
   // Success must come from a visible confirmation, not an Applied badge in
   // a background job list or a successful click dispatch.
-  const submitted = /(?:your\s+)?application\s+(?:(?:has been|was|is)\s+)?(?:successfully\s+)?(?:submitted|sent)|successfully applied/i;
   const confirmation = feedbackText.match(submitted) || scopeText.match(submitted);
   if (confirmation) return { state: 'submitted', evidence: confirmation[0], actions, ...context };
   if (dialog) {
