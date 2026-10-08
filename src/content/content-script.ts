@@ -2728,13 +2728,15 @@ async function attachFileToComposer(
       input.files = transfer.files;
     }
 
+    const delivered = Boolean(input.files?.length && input.files[0].name === file.name && input.files[0].size === file.size);
+    if (!delivered) return { success: false, attached: false, message: 'The upload control did not accept the file assignment.' };
+
     input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
     if (dropEvents) {
       const dropzone =
-        input.closest('[data-dropzone], [data-testid="dropzone"], .dropzone, [class*="dropzone"]') ||
-        input.parentElement;
+        input.closest('[data-dropzone], [data-testid="dropzone"], .dropzone, [class*="dropzone"]');
       if (dropzone && dropzone !== input) {
         for (const type of ['dragenter', 'dragover', 'drop']) {
           try {
@@ -2767,11 +2769,11 @@ async function attachFileToComposer(
       : '';
 
     return {
-      success: attached,
+      success: delivered && acceptsThisFile,
       attached,
       message: attached
         ? `Attached "${file.name}" (${file.size} bytes, ${file.type}) to the file input (${scope}).${acceptWarning}`
-        : `Set "${file.name}" on the file input but the page reported no file.${acceptWarning}`,
+        : `Delivered "${file.name}" (${file.size} bytes) to the upload control. The site cleared its input after the change event; this is not proof of failure. Verify the visible filename, selection, or upload confirmation before proceeding. Do not upload again just because the input is empty.${acceptWarning}`,
     };
   } catch (err: any) {
     return { success: false, attached: false, message: `Failed to attach file: ${err?.message || err}` };

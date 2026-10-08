@@ -238,14 +238,16 @@ function inPageCommitTransfer(transferId: string, refId?: string, selector?: str
     const setter = input.ownerDocument?.defaultView ? Object.getOwnPropertyDescriptor(input.ownerDocument.defaultView.HTMLInputElement.prototype, 'files')?.set : undefined;
     if (setter) setter.call(input, transfer.files);
     else input.files = transfer.files;
+    const delivered = Boolean(input.files?.length);
+    if (!delivered) return { success: false, message: 'The upload control did not accept the file assignment.', bytes: total };
+
     input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
     // Some pickers (Reddit, LinkedIn) only register a drop, so replay the drag
     // sequence on the surrounding dropzone as well.
     const dropzone =
-      input.closest('[data-dropzone], [data-testid="dropzone"], .dropzone, [class*="dropzone"]') ||
-      input.parentElement;
+      input.closest('[data-dropzone], [data-testid="dropzone"], .dropzone, [class*="dropzone"]');
     if (dropEvents && dropzone && dropzone !== input) {
       for (const type of ['dragenter', 'dragover', 'drop']) {
         try {
@@ -265,11 +267,11 @@ function inPageCommitTransfer(transferId: string, refId?: string, selector?: str
       : ` WARNING: the chosen input (accept="${acceptAttr}") does not allow ${file.type}. This site may reject it as "not supported" despite a preview. Open the attach menu and choose the correct option.`;
 
     return {
-      success: attached,
+      success: delivered,
       attached,
       message: attached
         ? `Attached "${file.name}" (${total} bytes) to the file input.${warning}`
-        : `Set "${file.name}" on the file input but the page reported no file.${warning}`,
+        : `Delivered "${file.name}" (${total} bytes) to the upload control. The site cleared its input after the change event; inspect its filename, selection, or upload confirmation before proceeding. Do not re-upload solely because the input is empty.${warning}`,
       bytes: total,
     };
   } catch (err: any) {
