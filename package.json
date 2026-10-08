@@ -26,7 +26,8 @@
     "test:attachments": "node scripts/test-attachment-scope.mjs && node scripts/test-attachment-references.mjs",
     "test:attachments-ui": "node scripts/test-attachment-ui.mjs",
     "test:upload-recovery": "node scripts/test-upload-recovery.mjs",
-    "test:application-status": "node scripts/test-application-status.mjs"
+    "test:application-status": "node scripts/test-application-status.mjs",
+    "test:captcha-auto": "node scripts/test-captcha-auto.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",

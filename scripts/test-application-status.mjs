@@ -91,5 +91,77 @@ try {
   assert.equal((await inspect()).state,'unconfirmed','hidden confirmation and a background Applied badge are not proof');
   await page.setContent('<div role="dialog"><h1>Apply to Example</h1><div role="alert">Please enter a valid phone number</div><button>Next</button></div>');
   assert.equal((await inspect()).state,'rejected');
+  await page.setContent('<div id="captcha" style="position:absolute;left:20px;top:20px;width:160px;height:80px"><button id="captcha-check">Verify</button></div>');
+  const captchaSuccess=await page.evaluate(async()=>{
+    const {captchaManager}=await import('/src/agent/browser-bridge.ts');
+    window.captchaDetected=true;let visionCalls=0,alerts=0;
+    const unsubscribe=captchaManager.subscribe(state=>{if(state.isActive) alerts++;});
+    const originalFetch=window.fetch;
+    window.fetch=async(url,options)=>String(url).includes('/chat/completions')
+      ? (visionCalls++,new Response(JSON.stringify({choices:[{message:{content:'{"clicks":[{"x":35,"y":30}]}'}}]}),{status:200}))
+      : originalFetch(url,options);
+    const originalSend=window.chrome.tabs.sendMessage;
+    window.chrome.tabs.sendMessage=(id,message,callback)=>message.action==='CHECK_CAPTCHA'
+      ? callback({success:true,data:{detected:window.captchaDetected,type:'generic',selector:'#captcha'}})
+      : originalSend(id,message,callback);
+    window.chrome.tabs.captureVisibleTab=(options,callback)=>callback('data:image/jpeg;base64,AA==');
+    document.getElementById('captcha-check').onclick=()=>{window.captchaDetected=false;};
+    const outcome=await captchaManager.runGate(7,'generic','https://www.linkedin.com/jobs/search/');
+    unsubscribe();window.fetch=originalFetch;
+    return {outcome,visionCalls,alerts};
+  });
+  assert.equal(captchaSuccess.outcome.solved,true);assert.equal(captchaSuccess.visionCalls,1);assert.equal(captchaSuccess.alerts,0,'automatic success must not ping the user');
+  const captchaFallback=await page.evaluate(async()=>{
+    const {captchaManager}=await import('/src/agent/browser-bridge.ts');
+    window.captchaDetected=true;let visionCalls=0,alerts=0;
+    document.getElementById('captcha-check').onclick=()=>{};
+    const originalFetch=window.fetch;
+    window.fetch=async(url,options)=>String(url).includes('/chat/completions')
+      ? (visionCalls++,new Response(JSON.stringify({choices:[{message:{content:'{"clicks":[{"x":35,"y":30}]}'}}]}),{status:200}))
+      : originalFetch(url,options);
+    const unsubscribe=captchaManager.subscribe(state=>{if(state.isActive){alerts++;setTimeout(()=>captchaManager.resolveActiveGate(false,'Human handoff verified'),0);}});
+    const first=await captchaManager.runGate(7,'generic','https://www.linkedin.com/jobs/search/');
+    const second=await captchaManager.runGate(7,'generic','https://www.linkedin.com/jobs/search/');
+    unsubscribe();window.fetch=originalFetch;
+    return {first,second,visionCalls,alerts};
+  });
+  assert.equal(captchaFallback.first.solved,false);assert.equal(captchaFallback.visionCalls,2,'cached failure must not repeat VLM rounds');
+  assert.equal(captchaFallback.alerts,2);assert.match(captchaFallback.second.message,/Human handoff verified/);
+  await page.route('**/captcha-frame',route=>route.fulfill({contentType:'text/html',body:'<button style="position:absolute;left:0;top:0">Verify</button>'}));
+  await page.setContent('<iframe id="captcha-frame" src="http://127.0.0.1:5173/captcha-frame" style="position:absolute;left:20px;top:20px;width:160px;height:80px;border:0"></iframe>');
+  await page.frameLocator('#captcha-frame').getByRole('button').waitFor();
+  const framedCaptcha=await page.evaluate(async()=>{
+    const {captchaManager}=await import('/src/agent/browser-bridge.ts');
+    const frame=document.querySelector('iframe');window.captchaDetected=true;
+    window.chrome.tabs.query=(_query,callback)=>callback([{id:7,url:'https://www.linkedin.com/jobs/search/?currentJobId=333'}]);
+    window.chrome.tabs.sendMessage=(_id,message,callback)=>message.action==='CHECK_CAPTCHA'
+      ? callback({success:true,data:{detected:window.captchaDetected,type:'generic',selector:'#captcha-frame'}})
+      : window.testApplicationListener(message,{},callback);
+    window.chrome.scripting.executeScript=async injection=>{
+      const execute=target=>(new target.Function(`return (${injection.func.toString()})`))()(...(injection.args||[]));
+      if(injection.target.allFrames)return [{frameId:0,result:execute(window)},{frameId:5,result:execute(frame.contentWindow)}];
+      return [{frameId:injection.target.frameIds?.[0]||0,result:await execute(injection.target.frameIds?.[0]===5?frame.contentWindow:window)}];
+    };
+    frame.contentDocument.querySelector('button').onclick=()=>{window.captchaDetected=false;};
+    const originalFetch=window.fetch;
+    window.fetch=async(url,options)=>String(url).includes('/chat/completions')
+      ? new Response(JSON.stringify({choices:[{message:{content:'{"clicks":[{"x":35,"y":30}]}'}}]}),{status:200})
+      : originalFetch(url,options);
+    const outcome=await captchaManager.runGate(7,'generic','https://www.linkedin.com/jobs/search/?currentJobId=333');
+    window.fetch=originalFetch;return outcome;
+  });
+  assert.equal(framedCaptcha.solved,true,'CAPTCHA click must reach the inner frame button');
+  const completionProof=await page.evaluate(async()=>{
+    const {checkActiveTabCaptcha}=await import('/src/agent/browser-bridge.ts');
+    window.chrome.tabs.sendMessage=(_id,_message,callback)=>callback({success:true,data:{detected:true,type:'recaptcha',selector:'iframe'}});
+    document.body.insertAdjacentHTML('beforeend','<textarea name="g-recaptcha-response">fixture-completion</textarea>');
+    const cleared=await checkActiveTabCaptcha(7);
+    document.body.insertAdjacentHTML('beforeend','<iframe title="challenge" src="about:blank"></iframe>');
+    const stillBlocked=await checkActiveTabCaptcha(7);
+    return {cleared,stillBlocked};
+  });
+  assert.equal(completionProof.cleared.detected,false,'a completed checkbox can remain visible without blocking automation');
+  assert.equal(completionProof.stillBlocked.detected,true,'an active puzzle overrides stale completion evidence');
   console.log('PASS application outcomes: stale job toast, messaging dialog exclusion, fast navigation, profile sharing, blocked popup recovery with one click, delayed genuine rejection, final report guard and visible confirmation');
+  console.log('PASS CAPTCHA gate integration: automatic VLM success without user alert, two-round failure before human handoff, cached attempt suppression and iframe click routing');
 } finally {await browser.close();}
