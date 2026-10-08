@@ -1570,7 +1570,7 @@ export async function uploadFileToActiveTab(options: {
       },
       sendMessageToTab
     );
-    return { success: result.success, message: result.message, fileName: options.fileData.fileName };
+    return { ...result, fileName: options.fileData.fileName };
   }
 
   const requestedName = (options.fileName || '').toLowerCase().trim();
@@ -1597,6 +1597,7 @@ export async function uploadFileToActiveTab(options: {
   );
 
   return {
+    ...result,
     success: result.success,
     message: result.success
       ? `${result.message} Source: stored memory "${resolved.doc.title}".`

@@ -42,6 +42,9 @@ export interface InjectionResult {
   fileName?: string;
   attached?: boolean;
   previewDetected?: boolean;
+  verified?: boolean;
+  selected?: boolean;
+  needsVerification?: boolean;
   target?: string;
 }
 
@@ -308,7 +311,60 @@ function inPageFindUploadTarget(fileName: string, mimeType: string, refId?: stri
   }
   return best;
 }
+/** Read the website's attachment UI; an empty input is not an upload verdict. */
+function inPageVerifyFileUpload(fileName: string): { state: 'selected' | 'present' | 'not-found' } {
+  const visible = (el: Element): boolean => {
+    const style = getComputedStyle(el);
+    return el.getClientRects().length > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+      && !el.closest('[aria-hidden="true"]');
+  };
+  const all: Element[] = [];
+  const visit = (root: ParentNode) => {
+    for (const element of Array.from(root.querySelectorAll('*'))) {
+      all.push(element);
+      if (element.shadowRoot) visit(element.shadowRoot);
+    }
+  };
+  visit(document);
+  const dialogs = all.filter(el => el.matches('[role="dialog"], dialog[open], [aria-modal="true"]') && visible(el));
+  const candidates = all.filter(el => visible(el) && (el.textContent || '').trim() === fileName
+    && (!dialogs.length || dialogs.some(dialog => dialog.contains(el))));
+  const selectedSelector = 'input[type="radio"]:checked, input[type="checkbox"]:checked, [aria-checked="true"], [aria-selected="true"]';
+  for (const candidate of candidates) {
+    let row: Element | null = candidate;
+    for (let depth = 0; row && depth < 5; depth++, row = row.parentElement) {
+      // A selection elsewhere in the modal must not verify this filename.
+      if (dialogs.includes(row) || row === document.body) break;
+      if (row.matches(selectedSelector) || row.querySelector(selectedSelector)) return { state: 'selected' };
+      const radios = row.querySelectorAll('input[type="radio"], [role="radio"]');
+      if (radios.length) break;
+    }
+  }
+  return { state: candidates.length ? 'present' : 'not-found' };
+}
 /* eslint-enable @typescript-eslint/no-explicit-any */
+
+export async function verifyFileUploadInTab(tabId: number, fileName: string): Promise<InjectionResult | null> {
+  if (typeof chrome === 'undefined' || !chrome.scripting) return null;
+  for (const delay of [0, 150, 400]) {
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+    try {
+      const frames = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true }, func: inPageVerifyFileUpload, args: [fileName],
+      });
+      const selected = frames.some(frame => frame.result?.state === 'selected');
+      const present = selected || frames.some(frame => frame.result?.state === 'present');
+      if (present) return {
+        success: true, attached: true, previewDetected: true, verified: true,
+        selected, needsVerification: !selected, fileName,
+        message: selected
+          ? `Verified on the website: "${fileName}" is visible and selected. Do not upload it again. Continue to the next application step when appropriate.`
+          : `The website displays "${fileName}" in its attachment UI. Do not re-upload it. Verify that this file is selected and that any upload progress has finished before continuing.`,
+      };
+    } catch { return null; }
+  }
+  return null;
+}
 
 /**
  * Inject a file into a tab, chunk by chunk.
@@ -330,6 +386,7 @@ export async function injectFileIntoTab(
     totalChunks: chunks.length,
   };
 
+  let contentCommitAttempted = false;
   // Transport A: content script. Preferred - it keeps transfer state in the page
   // and can post back real attachment verification.
   try {
@@ -345,6 +402,7 @@ export async function injectFileIntoTab(
         // Yield so a multi-hundred-chunk transfer never blocks the UI thread.
         if (i % 8 === 7) await new Promise((r) => setTimeout(r, 0));
       }
+      contentCommitAttempted = true;
       const committed = await send<InjectionResult>(
         tabId,
         {
@@ -356,6 +414,8 @@ export async function injectFileIntoTab(
         },
         15000
       );
+      const verified = await verifyFileUploadInTab(tabId, request.fileName);
+      if (verified) return { ...verified, transport: 'content-script', bytes };
       if (committed && (committed.success || committed.attached)) {
         return {
           ...committed,
@@ -366,6 +426,12 @@ export async function injectFileIntoTab(
       }
     }
   } catch (err: any) {
+    if (contentCommitAttempted) {
+      const verified = await verifyFileUploadInTab(tabId, request.fileName);
+      if (verified) return { ...verified, transport: 'content-script', bytes };
+      return { success: false, needsVerification: true, fileName: request.fileName,
+        message: `The upload was dispatched but its response failed: ${err?.message || err}. Capture a screenshot or inspect the site's attachment list before doing anything else. Do not blindly re-upload or switch to fill_form_fields; the site may already have accepted the file.` };
+    }
     console.warn('[OpenBUA] Content-script file transfer unavailable, using script injection:', err?.message || err);
   }
 
@@ -404,6 +470,8 @@ export async function injectFileIntoTab(
       func: inPageCommitTransfer,
       args: [transferId, request.refId || '', request.selector || '', request.dropEvents !== false],
     });
+    const verified = await verifyFileUploadInTab(tabId, request.fileName);
+    if (verified) return { ...verified, transport: 'execute-script', bytes };
     const result = results?.[0]?.result as
       | { success: boolean; message: string; bytes: number; attached?: boolean }
       | undefined;
@@ -420,9 +488,11 @@ export async function injectFileIntoTab(
       fileName: request.fileName,
     };
   } catch (err: any) {
+    const verified = await verifyFileUploadInTab(tabId, request.fileName);
+    if (verified) return { ...verified, transport: 'execute-script', bytes };
     return {
       success: false,
-      message: `File injection failed: ${err?.message || err}`,
+      message: `Inspect the site's attachment UI before retrying; an upload may have completed even if its response failed. File injection failed: ${err?.message || err}`,
       transport: 'execute-script',
       bytes,
     };
