@@ -35,7 +35,8 @@
     "test:shadow-composer": "node scripts/test-shadow-composer.mjs",
     "test:reddit-editor": "node scripts/test-reddit-editor.mjs",
     "test:youtube-videos": "node scripts/test-youtube-videos.mjs",
-    "test:session-title": "node scripts/test-session-title.mjs"
+    "test:session-title": "node scripts/test-session-title.mjs",
+    "test:reddit-submit": "node scripts/test-reddit-submit.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",

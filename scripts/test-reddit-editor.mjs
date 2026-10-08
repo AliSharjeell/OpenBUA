@@ -18,6 +18,7 @@ try {
     await page.setContent('<reddit-composer></reddit-composer>');
     await page.evaluate(markdown => {
       delete document.documentElement.dataset.openbuaRedditDraft;
+      delete document.documentElement.dataset.openbuaRedditSubmitAttempt;
       const root = document.querySelector('reddit-composer').attachShadow({ mode: 'open' });
       root.innerHTML = '<textarea name="title" aria-label="Post title"></textarea><div contenteditable="true" name="body" aria-label="Post body text field"><p>Garbled old draft. Garbled old draft.</p></div><button type="button">Post</button>';
       window.postClicks = 0; root.querySelector('button').onclick = () => window.postClicks++;
@@ -69,7 +70,7 @@ try {
   assert.equal(blocked.details.dispatched, false); assert.equal((await read()).posts, 0, 'full draft verification blocks damaged-tail submission');
   await prepare();
   const posted = await page.evaluate(async () => { const { clickElementTool } = await import('/src/agent/tools.ts'); return clickElementTool.execute('post-good', { text: 'Post' }); });
-  assert.equal(posted.details.success, true); assert.equal((await read()).posts, 1);
+  assert.equal(posted.details.dispatched, true); assert.equal(posted.details.postVerified, false); assert.equal((await read()).posts, 1, 'dispatch without permalink is not publication confirmation');
   await setup(false);
   const rich = await prepare(); assert.equal(rich.details.success, true); assert.equal(rich.details.mode, 'rich-text');
   assert.equal((await read()).body, body); assert.equal((await read()).title, title);
