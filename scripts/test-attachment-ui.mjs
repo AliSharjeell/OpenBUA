@@ -74,6 +74,7 @@ try{
   // Exercise the built content script in real Chrome with Easy Apply-style
   // hidden controls, checking File bytes and the site's change handler.
   const uploadPage = await browser.newPage();
+  await uploadPage.goto('http://127.0.0.1:5173/test-form.html');
   await uploadPage.setContent('<input type="file" accept="image/*" id="media"><div role="dialog"><label for="resume">Upload resume</label><input type="file" accept=".pdf,.doc,.docx" id="resume" style="display:none"><span id="uploaded-name"></span></div>');
   await uploadPage.evaluate(() => {
     window.chrome ||= {};
@@ -95,6 +96,41 @@ try{
   assert.equal(await uploadPage.locator('#uploaded-name').textContent(),'new-resume.pdf');
   assert.equal(await uploadPage.evaluate(()=>document.getElementById('resume').files[0].text()),raw);
   assert.equal(await uploadPage.evaluate(()=>document.getElementById('media').files.length),0);
+  // LinkedIn consumes the File and clears its input while displaying a
+  // selected resume card. That must not turn a successful delivery into failure.
+  await uploadPage.evaluate(() => {
+    document.querySelector('[role="dialog"]').insertAdjacentHTML('beforeend', '<label id="resume-card"><span id="resume-filename"></span><input type="radio" name="resume-choice" checked></label>');
+    document.getElementById('resume').addEventListener('change', event => {
+      window.receivedResume = event.target.files[0].text();
+      document.getElementById('resume-filename').textContent = event.target.files[0].name;
+      event.target.value = '';
+    });
+  });
+  await call({action:'PREPARE_FILE_UPLOAD',transferId:'reset-upload',fileName:'resume.pdf',mimeType:'application/pdf',totalChunks:1});
+  await call({action:'FILE_UPLOAD_CHUNK',transferId:'reset-upload',index:0,data:Buffer.from(raw).toString('base64')});
+  const resetResult=await call({action:'COMMIT_FILE_UPLOAD',transferId:'reset-upload',selector:'#resume',dropEvents:false});
+  assert.equal(resetResult.success,true,resetResult.message);assert.equal(resetResult.attached,false);
+  assert.match(resetResult.message,/Do not upload again/);
+  assert.equal(await uploadPage.evaluate(()=>window.receivedResume),raw);
+  assert.equal(await uploadPage.evaluate(()=>document.getElementById('resume').files.length),0);
+  const verify = () => uploadPage.evaluate(async()=>{
+    const {verifyFileUploadInTab} = await import('/src/agent/file-injection.ts');
+    window.chrome.scripting = {executeScript:async injection=>{
+      if(injection.args.some(value=>value===undefined))throw new Error('Value is unserializable');
+      const args=JSON.parse(JSON.stringify(injection.args));
+      return [{frameId:0,result:(new Function(`return (${injection.func.toString()})`))()(...args)}];
+    }};
+    return verifyFileUploadInTab(1,'resume.pdf');
+  });
+  const verified=await verify();assert.equal(verified.selected,true);assert.equal(verified.success,true);
+  await uploadPage.evaluate(()=>{
+    document.querySelector('#resume-card input').checked=false;
+    document.querySelector('[role="dialog"]').insertAdjacentHTML('beforeend','<label>old-resume.pdf<input type="radio" name="resume-choice" checked></label>');
+  });
+  const unselected=await verify();assert.equal(unselected.selected,false);assert.equal(unselected.needsVerification,true);
+  await uploadPage.evaluate(()=>{document.getElementById('resume-card').style.display='none';document.getElementById('uploaded-name').style.display='none';});
+  assert.equal(await verify(),null,'hidden filename must not confirm an upload');
+  console.log('PASS Chrome reset-input recovery, selected resume verification, sibling-selection isolation and hidden filename rejection');
   console.log('PASS Chrome hidden resume upload: exact bytes, compatible selector and site change event');
   console.log('PASS browser: floating shelf, @ autocomplete, keyboard insertion, VLM-before-chat, persisted memory and preserved raw bytes');
 }finally{await browser.close();}

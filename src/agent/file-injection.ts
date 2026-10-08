@@ -327,7 +327,7 @@ function inPageVerifyFileUpload(fileName: string): { state: 'selected' | 'presen
   };
   visit(document);
   const dialogs = all.filter(el => el.matches('[role="dialog"], dialog[open], [aria-modal="true"]') && visible(el));
-  const candidates = all.filter(el => visible(el) && (el.textContent || '').trim() === fileName
+  const candidates = all.filter(el => visible(el) && ((el as HTMLElement).innerText ?? el.textContent ?? '').trim() === fileName
     && (!dialogs.length || dialogs.some(dialog => dialog.contains(el))));
   const selectedSelector = 'input[type="radio"]:checked, input[type="checkbox"]:checked, [aria-checked="true"], [aria-selected="true"]';
   for (const candidate of candidates) {
