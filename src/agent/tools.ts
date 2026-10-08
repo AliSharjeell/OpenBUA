@@ -79,7 +79,7 @@ async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?
   const fields=hit[0]?.result;
   if(!fields?.length) return null;
   const observations=await inspectAutocomplete(tab.id,fields,true);
-  const blocked=observations.filter(field=>field.invalid || (field.autocomplete && !field.selected));
+  const blocked=observations.filter(field=>field.invalid || (field.autocomplete && Boolean(field.value.trim()) && !field.selected));
   if(!blocked.length)return null;
   return {success:false,dispatched:false,validationBlocked:true,fields:blocked,
     message:`Cannot advance: ${blocked.map(field=>`${field.label||field.refId}: ${field.message||'a dropdown option has not been selected'}; query "${field.value}"; options: ${field.options.join(', ')||'none'}`).join('; ')}. Fix the named field or use a shorter search and select an option. Dismissing the popup and repeating Next will not fix validation. No Next/Submit click was dispatched.`};
