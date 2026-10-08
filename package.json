@@ -36,7 +36,8 @@
     "test:reddit-editor": "node scripts/test-reddit-editor.mjs",
     "test:youtube-videos": "node scripts/test-youtube-videos.mjs",
     "test:session-title": "node scripts/test-session-title.mjs",
-    "test:reddit-submit": "node scripts/test-reddit-submit.mjs"
+    "test:reddit-submit": "node scripts/test-reddit-submit.mjs",
+    "test:old-reddit-trust": "node scripts/test-old-reddit-trust.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",
