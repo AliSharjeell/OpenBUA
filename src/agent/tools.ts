@@ -77,9 +77,12 @@ async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?
           if (!inner || inner === target) break; target = inner;
         }
         const button = target?.closest('button,[role="button"],input[type="submit"],r-post-form-submit-button');
-        if (button?.tagName === 'R-POST-FORM-SUBMIT-BUTTON') return true;
-        if ((button?.getRootNode() as ShadowRoot | undefined)?.host?.tagName === 'R-POST-FORM-SUBMIT-BUTTON') return true;
-        return /^(?:post|submit|publish)$/i.test((button?.textContent || button?.getAttribute('aria-label') || '').trim());
+        const label = (button?.getAttribute('aria-label') || button?.textContent || '').trim();
+        if (/save.?draft/i.test(button?.id || '') || /^(?:save draft|drafts?|cancel)$/i.test(label)) return false;
+        if (button?.id === 'inner-post-submit-button' || button?.tagName === 'R-POST-FORM-SUBMIT-BUTTON') return true;
+        if (/^(?:post|submit|publish)$/i.test(label)) return true;
+        const host = (button?.getRootNode() as ShadowRoot | undefined)?.host;
+        return !label && host?.tagName === 'R-POST-FORM-SUBMIT-BUTTON' && /^post$/i.test((host.textContent || '').trim());
       } });
       posting = Boolean(targets[0]?.result);
     }
