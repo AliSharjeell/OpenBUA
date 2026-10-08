@@ -801,7 +801,7 @@ export function MemoryView({
                         >
                           <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">
                             {/* Keep PDF extraction available for saved documents. */}
-                            {(doc.type === 'image' || doc.type === 'pdf') &&
+                            {(doc.type === 'image' || doc.type === 'pdf' || /\.docx$/i.test(doc.fileName || '')) &&
                               hasRawFile &&
                               (doc.type === 'pdf' || doc.ocrStatus !== 'done') && (
                               <div className="flex items-center gap-1.5">

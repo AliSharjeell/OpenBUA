@@ -1,3 +1,4 @@
+import { extractTextFromDocx } from './docx-parser';
 // Client-side PDF, image, video, and text document parser for extracting resume/profile text and raw file data
 import { DocumentFileType, UserDocument } from '../types';
 import { getMediaBlob, mediaBlobKeyFor, putMediaBlob } from './blob-store';
@@ -641,6 +642,9 @@ export async function processUploadedFile(
   } else if (type === 'markdown' || type === 'json' || type === 'text') {
     content = await file.text();
     ocrStatus = 'done';
+  } else if (/\.docx$/i.test(file.name)) {
+    content = `[Word Document: ${file.name}] Raw file stored. Reference it in chat to extract its text.`;
+    ocrStatus = 'pending';
   } else {
     content = `[File: ${file.name}] Raw binary file stored. Available for form uploads.`;
     ocrStatus = 'done';
@@ -681,8 +685,9 @@ export async function processUploadedFile(
 export async function extractTextForDocument(doc: UserDocument): Promise<string> {
   const mimeType = doc.mimeType || (doc.type === 'pdf' ? 'application/pdf' : 'image/png');
 
+  const isWord = /\.docx$/i.test(doc.fileName || '');
   const isExtractable =
-    doc.type === 'image' ||
+    isWord || doc.type === 'image' ||
     doc.type === 'pdf' ||
     mimeType.startsWith('image/') ||
     mimeType === 'application/pdf';
@@ -702,6 +707,8 @@ export async function extractTextForDocument(doc: UserDocument): Promise<string>
       'Document does not have stored raw file data. Please re-upload the file in the Memory tab.'
     );
   }
+
+  if (isWord) return extractTextFromDocx(dataUrlToFile(dataUrl, doc.fileName!, doc.mimeType));
 
   if (doc.type === 'image' || mimeType.startsWith('image/')) {
     return await extractTextWithVlm(dataUrl, mimeType);

@@ -739,7 +739,7 @@ export function App() {
     const context: string[] = [];
     for (const { doc, alias } of references) {
       let updated = doc;
-      if ((doc.type === 'image' || doc.type === 'pdf') && doc.ocrStatus !== 'done') {
+      if ((doc.type === 'image' || doc.type === 'pdf' || /\.docx$/i.test(doc.fileName || '')) && doc.ocrStatus !== 'done') {
         try {
           const extracted = await extractTextForDocument(doc);
           updated = { ...doc, content: extracted, ocrStatus: 'done',
