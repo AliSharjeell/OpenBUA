@@ -35,7 +35,8 @@ import {
   SUPPORTED_PLATFORM_IDS,
 } from './social-platforms';
 import {
-  loadDocuments,
+  getActiveContextMemories,
+  getActiveSessionIdState,
   getScratchpad,
   saveScratchpad,
   appendToScratchpad,
@@ -226,7 +227,7 @@ export const getUserDocumentsTool: AgentTool<typeof GetUserDocumentsSchema> = {
   parameters: GetUserDocumentsSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
-      const docs = await loadDocuments();
+      const docs = await getActiveContextMemories(getActiveSessionIdState());
       const activeDocs = docs.filter(d => d.isActiveForContext);
 
       if (activeDocs.length === 0) {
@@ -243,7 +244,7 @@ export const getUserDocumentsTool: AgentTool<typeof GetUserDocumentsSchema> = {
         if (doc.fileName) meta += `, filename: "${doc.fileName}"`;
         if (doc.filePath) meta += `, path: "${doc.filePath}"`;
         if (doc.videoDuration) meta += `, duration: ${doc.videoDuration}s`;
-        if (doc.dataUrl) meta += `, raw file attachment available for form upload`;
+        if (doc.dataUrl || doc.blobKey) meta += `, raw file attachment available for form upload`;
         formatted += `### Document ${idx + 1}: ${doc.title} (${meta})\n${doc.content}\n\n`;
       });
 
@@ -258,7 +259,7 @@ export const getUserDocumentsTool: AgentTool<typeof GetUserDocumentsSchema> = {
             fileCategory: d.fileCategory,
             filePath: d.filePath,
             videoDuration: d.videoDuration,
-            hasRawFile: Boolean(d.dataUrl),
+            hasRawFile: Boolean(d.dataUrl || d.blobKey),
           })),
         },
       };

@@ -1,5 +1,5 @@
 import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
-import { loadGlobalMemories, loadTabMemories, getTabKey } from '../services/storage';
+import { loadGlobalMemories, loadTabMemories, getTabKey, getActiveSessionIdState } from '../services/storage';
 import { tryLoadFileFromLocalPath } from '../services/pdf-parser';
 import { injectFileIntoTab, resolveFileSource, type FileSource } from './file-injection';
 
@@ -1459,12 +1459,13 @@ export async function resolveStoredFile(options: {
   /** Current tab URL, used to bias toward media when nothing was named. */
   tabUrl?: string;
 }): Promise<ResolvedStoredFile | null> {
-  const tabKey = getTabKey(await getActiveTab());
+  const tabKey = getActiveSessionIdState();
   const [globalMems, tabMems] = await Promise.all([
     loadGlobalMemories().catch(() => []),
     loadTabMemories(tabKey).catch(() => []),
   ]);
-  const allMems = [...globalMems, ...tabMems];
+  const allMems = [...tabMems, ...globalMems].filter(m => m.isActiveForContext)
+    .sort((a, b) => Number(Boolean(b.tabUrlPattern === tabKey)) - Number(Boolean(a.tabUrlPattern === tabKey)) || b.createdAt - a.createdAt);
   const requestedName = (options.fileName || '').toLowerCase().trim();
 
   const isVideoDoc = (m: UserDocument) =>
@@ -1472,48 +1473,20 @@ export async function resolveStoredFile(options: {
 
   let match: UserDocument | undefined;
   if (requestedName) {
-    match = allMems.find(
-      (m) =>
-        hasRawBytes(m) &&
-        ((m.fileName && m.fileName.toLowerCase().includes(requestedName)) ||
-          m.title.toLowerCase().includes(requestedName) ||
-          (m.filePath && m.filePath.toLowerCase().includes(requestedName)))
-    );
-
-    if (
-      !match &&
-      (requestedName.includes('video') ||
-        requestedName.includes('mp4') ||
-        requestedName.includes('promo') ||
-        requestedName.includes('demo') ||
-        requestedName.includes('trailer') ||
-        requestedName.includes('media'))
-    ) {
+    // A named attachment must never fall back to a different resume or video.
+    match = allMems.find(m => hasRawBytes(m) &&
+      (m.id.toLowerCase() === requestedName || m.fileName?.toLowerCase() === requestedName))
+      || allMems.find(m => hasRawBytes(m) &&
+        (m.title.toLowerCase() === requestedName || m.filePath?.toLowerCase() === requestedName));
+    if (!match) return null;
+  } else {
+    const isApplication = /linkedin\.com\/jobs|apply|application|careers/i.test(options.tabUrl || '');
+    if (!isApplication && SOCIAL_MEDIA_HOST_HINTS.some(hint => (options.tabUrl || '').includes(hint))) {
       match = allMems.find(isVideoDoc);
     }
-  }
-
-  if (!match) {
-    // On a social platform with nothing named, prefer stored video media.
-    const tabUrl = (options.tabUrl || '').toLowerCase();
-    if (SOCIAL_MEDIA_HOST_HINTS.some((hint) => tabUrl.includes(hint))) {
-      match = allMems.find(isVideoDoc);
-    }
-  }
-
-  if (!match) {
-    match = allMems.find(
-      (m) =>
-        hasRawBytes(m) &&
-        (m.fileCategory === 'resume' ||
-          m.tags?.includes('resume') ||
-          (m.fileName && /resume|cv/i.test(m.fileName)) ||
-          /resume|cv/i.test(m.title))
-    );
-  }
-
-  if (!match) {
-    match = allMems.find(hasRawBytes);
+    match ||= allMems.find(m => hasRawBytes(m) &&
+      (m.fileCategory === 'resume' || m.tags?.includes('resume') || /resume|cv/i.test(m.fileName || m.title)));
+    match ||= allMems.find(hasRawBytes);
   }
 
   if (!match) return null;

@@ -379,7 +379,7 @@ export class FormAgentHarness {
         let meta = `${doc.type}`;
         if (doc.fileCategory) meta += `, category: ${doc.fileCategory}`;
         if (doc.fileName) meta += `, filename: "${doc.fileName}"`;
-        if (doc.dataUrl) meta += `, raw file attachment available for form upload`;
+        if (doc.dataUrl || doc.blobKey) meta += `, raw file attachment available for form upload`;
         docsSummary += `\n--- Document [${idx + 1}]: ${doc.title} (${meta}) ---\n${doc.content}\n`;
       });
     } else {
