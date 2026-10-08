@@ -65,7 +65,7 @@ async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?
     const label=(target?.textContent||target?.getAttribute('value')||'').trim();
     if(!/^(?:next|continue|save\s*(?:&|and)\s*continue|submit(?: application)?|apply now)$/i.test(label)) return null;
     const scope=target?.closest('form')||document;
-    return Array.from(scope.querySelectorAll('input[role="combobox"],input[aria-autocomplete],.MuiAutocomplete-root input,[data-autocomplete] input'))
+    return Array.from(scope.querySelectorAll('input, textarea'))
       .filter(el=>el.getClientRects().length).map(el=>{
         const input=el as HTMLInputElement;
         let value=input.value;
@@ -173,7 +173,7 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
       return {
         content: [{ type: 'text', text: textOutput }],
         details: {...summary, fields:fieldsToShow.map(field=>({...field,options:field.options?.length
-          ? [...field.options.filter(option=>option.selected),...field.options.filter(option=>!option.selected)].slice(0,12) : field.options})),buttons},
+          ? [...field.options.filter(option=>option.selected),...field.options.filter(option=>!option.selected)].slice(0,12) : field.options})),buttons} as any,
       };
     } catch (err: any) {
       return {
