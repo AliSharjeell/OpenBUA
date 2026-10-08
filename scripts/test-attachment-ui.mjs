@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 // Run with a local Vite server and Playwright installed, or set OPENBUA_PLAYWRIGHT_MODULE.
 const { chromium } = await import(process.env.OPENBUA_PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({...(process.env.OPENBUA_CHROME_PATH ? {executablePath:process.env.OPENBUA_CHROME_PATH} : {}), headless:true});
@@ -38,6 +39,31 @@ try{
   assert.equal(requests.filter(r=>r.messages.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==='image_url'))).length,1);
   await page.waitForFunction(() => document.body.textContent.includes('Read the referenced attachment.'));
   assert.ok(requests.some(r=>JSON.stringify(r.messages).includes('image-2')&&JSON.stringify(r.messages).includes('sample image text')));
+  // Exercise the built content script in real Chrome with Easy Apply-style
+  // hidden controls, checking File bytes and the site's change handler.
+  const uploadPage = await browser.newPage();
+  await uploadPage.setContent('<input type="file" accept="image/*" id="media"><div role="dialog"><label for="resume">Upload resume</label><input type="file" accept=".pdf,.doc,.docx" id="resume" style="display:none"><span id="uploaded-name"></span></div>');
+  await uploadPage.evaluate(() => {
+    window.chrome ||= {};
+    window.chrome.runtime = {onMessage:{addListener(listener){window.testUploadListener = listener;}}};
+    document.getElementById('resume').addEventListener('change', event => {
+      document.getElementById('uploaded-name').textContent = event.target.files[0]?.name;
+    });
+  });
+  await uploadPage.addScriptTag({path:fileURLToPath(new URL('../dist/content.js', import.meta.url))});
+  const call = request => uploadPage.evaluate(request => new Promise(resolve => window.testUploadListener(request, {}, resolve)), request);
+  const inspection = await call({action:'INSPECT_PAGE_FORM'});
+  const hiddenResume = inspection.data.fields.find(field=>field.id==='resume');
+  assert.equal(hiddenResume.type,'file');assert.equal(hiddenResume.isVisible,false);assert.equal(hiddenResume.accept,'.pdf,.doc,.docx');
+  const raw = '%PDF-1.4 exact resume bytes';
+  await call({action:'PREPARE_FILE_UPLOAD',transferId:'browser-upload',fileName:'new-resume.pdf',mimeType:'application/pdf',totalChunks:1});
+  await call({action:'FILE_UPLOAD_CHUNK',transferId:'browser-upload',index:0,data:Buffer.from(raw).toString('base64')});
+  const upload = await call({action:'COMMIT_FILE_UPLOAD',transferId:'browser-upload',selector:'input[type="file"]',dropEvents:false});
+  assert.ok(upload.success,upload.message);
+  assert.equal(await uploadPage.locator('#uploaded-name').textContent(),'new-resume.pdf');
+  assert.equal(await uploadPage.evaluate(()=>document.getElementById('resume').files[0].text()),raw);
+  assert.equal(await uploadPage.evaluate(()=>document.getElementById('media').files.length),0);
+  console.log('PASS Chrome hidden resume upload: exact bytes, compatible selector and site change event');
   console.log('PASS browser: floating shelf, @ autocomplete, keyboard insertion, VLM-before-chat, persisted memory and preserved raw bytes');
 }finally{await browser.close();}
 
