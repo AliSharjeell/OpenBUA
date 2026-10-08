@@ -33,7 +33,9 @@
     "test:community-rules": "node scripts/test-community-rules.mjs",
     "test:screenshots": "node scripts/test-screenshot-scheduling.mjs",
     "test:shadow-composer": "node scripts/test-shadow-composer.mjs",
-    "test:reddit-editor": "node scripts/test-reddit-editor.mjs"
+    "test:reddit-editor": "node scripts/test-reddit-editor.mjs",
+    "test:youtube-videos": "node scripts/test-youtube-videos.mjs",
+    "test:session-title": "node scripts/test-session-title.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",
