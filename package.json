@@ -22,7 +22,9 @@
     "test:budget": "node scripts/test-thinking-budget.mjs",
     "test:resume": "node scripts/test-auto-resume.mjs",
     "test:pdf": "node scripts/test-pdf-extraction.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:attachments": "node scripts/test-attachment-scope.mjs && node scripts/test-attachment-references.mjs",
+    "test:attachments-ui": "node scripts/test-attachment-ui.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",
