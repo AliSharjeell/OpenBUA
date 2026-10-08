@@ -1,5 +1,6 @@
 import { inspectApplicationStatus, describeApplicationStatus } from './application-status';
 import { prepareApplicationAction, finishApplicationAction, type ApplicationActionContext } from './application-action';
+import { inspectAutocomplete } from './autocomplete';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
 import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -52,6 +53,38 @@ async function beginApplicationAction() {
     ? prepareApplicationAction(tab.id) : undefined;
 }
 
+async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?:string;x?:number;y?:number}) {
+  const tab=await getActiveTab();
+  if(!tab?.id || typeof chrome==='undefined' || !chrome.scripting) return null;
+  const hit=await chrome.scripting.executeScript({target:{tabId:tab.id},args:[params.refId||'',params.selector||'',params.text||'',params.x??null,params.y??null],func:(refId:string,selector:string,text:string,x:number|null,y:number|null)=>{
+    let target:Element|null=null;
+    if(refId) target=document.querySelector(`[data-autoform-ref="${CSS.escape(refId)}"]`);
+    else if(selector){try{target=document.querySelector(selector);}catch{}}
+    else if(x!==null && y!==null) target=document.elementFromPoint(x/(devicePixelRatio||1),y/(devicePixelRatio||1))?.closest('button,[role="button"],input[type="submit"]')||null;
+    else if(text) target=Array.from(document.querySelectorAll('button,[role="button"],input[type="submit"]')).find(el=>el.getClientRects().length && (el.textContent||el.getAttribute('value')||'').trim().toLowerCase()===text.toLowerCase().trim())||null;
+    const label=(target?.textContent||target?.getAttribute('value')||'').trim();
+    if(!/^(?:next|continue|save\s*(?:&|and)\s*continue|submit(?: application)?|apply now)$/i.test(label)) return null;
+    const scope=target?.closest('form')||document;
+    return Array.from(scope.querySelectorAll('input[role="combobox"],input[aria-autocomplete],.MuiAutocomplete-root input,[data-autocomplete] input'))
+      .filter(el=>el.getClientRects().length).map(el=>{
+        const input=el as HTMLInputElement;
+        let value=input.value;
+        try {
+          const failed=JSON.parse(input.dataset.openbuaAutocompleteFailure||'null');
+          if(failed?.[1]===value) value=failed[0];
+        } catch {}
+        return {refId:el.getAttribute('data-autoform-ref')||'',selector:el.id?`#${CSS.escape(el.id)}`:'',value};
+      });
+  }});
+  const fields=hit[0]?.result;
+  if(!fields?.length) return null;
+  const observations=await inspectAutocomplete(tab.id,fields,true);
+  const blocked=observations.filter(field=>field.invalid || (field.autocomplete && !field.selected));
+  if(!blocked.length)return null;
+  return {success:false,dispatched:false,validationBlocked:true,fields:blocked,
+    message:`Cannot advance: ${blocked.map(field=>`${field.label||field.refId}: ${field.message||'a dropdown option has not been selected'}; query "${field.value}"; options: ${field.options.join(', ')||'none'}`).join('; ')}. Fix the named field or use a shorter search and select an option. Dismissing the popup and repeating Next will not fix validation. No Next/Submit click was dispatched.`};
+}
+
 async function observeApplicationAction(message: string, dispatched: boolean, context?: ApplicationActionContext) {
   if (!context) return {message,success:dispatched};
   const action = await finishApplicationAction(context);
@@ -96,6 +129,19 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
       const summary = await inspectActiveTabForm(params.selector);
+      const activeTab = await getActiveTab();
+      const observations = activeTab?.id ? await inspectAutocomplete(activeTab.id).catch(()=>[]) : [];
+      for (const field of summary.fields) {
+        const observed = observations.find(item=>item.refId===field.refId);
+        if (!observed) continue;
+        if (!field.label && observed.label) field.label=observed.label;
+        if (observed.autocomplete) {
+          field.type='autocomplete';
+          field.options=observed.options.map(label=>({value:label,label,selected:label===observed.value}));
+          field.sectionHint=[field.sectionHint,observed.message,observed.needsSelection?'Dropdown selection required':''].filter(Boolean).join(' · ');
+        }
+        if(observed.invalid) field.sectionHint=[field.sectionHint,'INVALID',observed.message].filter(Boolean).join(' · ');
+      }
       const totalFields = summary.fields.length;
       const visibleFields = summary.fields.filter(f => f.isVisible);
       const fieldsToShow = summary.fields.filter(f => f.isVisible || f.type === 'file').slice(0, 100);
@@ -126,7 +172,8 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
 
       return {
         content: [{ type: 'text', text: textOutput }],
-        details: summary,
+        details: {...summary, fields:fieldsToShow.map(field=>({...field,options:field.options?.length
+          ? [...field.options.filter(option=>option.selected),...field.options.filter(option=>!option.selected)].slice(0,12) : field.options})),buttons},
       };
     } catch (err: any) {
       return {
@@ -207,6 +254,8 @@ export const clickElementTool: AgentTool<typeof ClickElementSchema> = {
   parameters: ClickElementSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     try {
+      const blocked = await recoverBeforeAdvance(params);
+      if(blocked) return {content:[{type:'text',text:blocked.message}],details:blocked as any};
       const context = await beginApplicationAction();
       const result = await clickActiveTabElement(params);
       const observed = await observeApplicationAction(result.message, result.success, context);
@@ -1179,6 +1228,8 @@ export const clickAtPositionTool: AgentTool<typeof ClickAtPositionSchema> = {
           details: { success: false },
         };
       }
+      const blocked = await recoverBeforeAdvance(params);
+      if(blocked) return {content:[{type:'text',text:blocked.message}],details:blocked as any};
       const context = await beginApplicationAction();
       const res = await clickAtPosition({
         x: params.x,
