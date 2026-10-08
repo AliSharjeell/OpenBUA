@@ -17,6 +17,7 @@ import { ProviderConfig } from '../types';
 import { incrementGeminiDailyUsage } from '../services/storage';
 
 let lastFreeRequestTimestamp = 0;
+const unsupportedReasoningEndpoints = new Set<string>();
 
 export function createCustomModel(config: ProviderConfig): Model<any> {
   const isGemini =
@@ -382,18 +383,11 @@ async function streamOpenAI(
     payload.tool_choice = recoveryRequiresTool(context.messages || []) ? 'required' : 'auto';
   }
 
-  // Request thoughts / reasoning traces for Gemini models via Google OpenAI-compatible endpoint
-  if (isGemini) {
-    const thinkingConfig: any = {
-      include_thoughts: true,
-      thinking_budget: 1024,
-    };
-
-    payload.extra_body = {
-      google: {
-        thinking_config: thinkingConfig,
-      },
-    };
+  // Gemini 3 Flash supports minimal effort; other Gemini models use low.
+  // Routine browser steps do not need a streamed thought summary.
+  const reasoningEndpointKey = `${endpoint}|${payload.model}`;
+  if (isGemini && !unsupportedReasoningEndpoints.has(reasoningEndpointKey)) {
+    payload.reasoning_effort = /gemini-3(?:\.\d+)?-flash/i.test(payload.model) ? 'minimal' : 'low';
   }
 
   // If using Groq, clamp max_tokens to prevent OTPM (output tokens per minute) errors on Groq's free tier.
@@ -464,17 +458,10 @@ async function streamOpenAI(
       continue;
     }
 
-    // If Gemini model rejected thinking_config with 400 Bad Request on attempt 0, try reasoning_effort fallback
-    if (response && response.status === 400 && payload.google && attempt === 0) {
-      console.warn('[streamOpenAI] Model returned 400 with thinking_config. Retrying with reasoning_effort...');
-      delete payload.google;
-      delete payload.extra_body;
-      payload.reasoning_effort = 'low';
-      continue;
-    }
-    // If reasoning_effort was also rejected with 400, strip reasoning controls completely
-    if (response && response.status === 400 && payload.reasoning_effort && attempt <= 1) {
+    // Only retry incompatible reasoning controls, not unrelated bad requests.
+    if (response.status === 400 && payload.reasoning_effort && /reasoning[_ ]effort|thinking[_ ](?:level|budget|config)/i.test(errorBody) && attempt < maxRetries) {
       console.warn('[streamOpenAI] Model returned 400 with reasoning_effort. Retrying without reasoning params...');
+      unsupportedReasoningEndpoints.add(reasoningEndpointKey);
       delete payload.reasoning_effort;
       continue;
     }
