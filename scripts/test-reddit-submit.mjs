@@ -22,6 +22,34 @@ try {
   const action = () => page.evaluate(async () => { const { submitRedditPostTool } = await import('/src/agent/tools.ts'); return submitRedditPostTool.execute('submit', {}); });
   await setup(true);
   let result = await action(); assert.equal(result.details.dispatched, false); assert.match(result.details.message, /disabled/); assert.equal(await page.evaluate(() => window.clicks), 0);
+  for (const layout of ['light-button', 'role-wrapper', 'slotted-button']) {
+    await setup();
+    await page.evaluate(layout => {
+      const previous = document.querySelector('r-post-form-submit-button');
+      const host = document.createElement('r-post-form-submit-button'); previous.replaceWith(host);
+      if (layout === 'light-button') host.innerHTML = '<button id="real-post">Post</button>';
+      else if (layout === 'role-wrapper') host.innerHTML = '<div role="button"> <button id="real-post">Post</button> </div>';
+      else {
+        host.innerHTML = '<button id="real-post">Post</button>';
+        host.attachShadow({ mode: 'open' }).innerHTML = '<div role="button"><slot></slot></div>';
+      }
+      host.querySelector('button').onclick = () => {
+        window.clicks++; history.pushState({}, '', '/r/test/comments/nested/post/'); document.body.innerHTML = '<h1>Four word post title</h1>';
+      };
+    }, layout);
+    result = await action(); assert.equal(result.details.postVerified, true, `one physical Post is resolved for ${layout}`);
+    assert.equal(await page.evaluate(() => window.clicks), 1);
+  }
+  await setup();
+  await page.evaluate(() => { document.body.insertAdjacentHTML('beforeend', '<button>Post</button>'); });
+  result = await action(); assert.equal(result.details.dispatched, false); assert.match(result.details.message, /2 independent Post controls/);
+  assert.equal(await page.evaluate(() => window.clicks), 0, 'genuinely separate controls remain ambiguous');
+  await setup();
+  await page.evaluate(() => {
+    const host = document.querySelector('r-post-form-submit-button');
+    host.setAttribute('aria-disabled', 'true');
+  });
+  result = await action(); assert.equal(result.details.dispatched, false); assert.match(result.details.message, /disabled/);
   await setup();
   await page.evaluate(() => { document.querySelector('textarea[name="body"]').value += ' bad tail'; });
   result = await action(); assert.equal(result.details.dispatched, false); assert.equal(await page.evaluate(() => window.clicks), 0);
