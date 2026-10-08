@@ -234,6 +234,8 @@ export function ChatView({
 }: ChatViewProps) {
   const [input, setInput] = useState(inputDraft || '');
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
+  const chatScopeRef = useRef(activeSessionId);
+  chatScopeRef.current = activeSessionId;
   const [mentionCursor, setMentionCursor] = useState(0);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [mentionsDismissed, setMentionsDismissed] = useState(false);
@@ -424,6 +426,7 @@ export function ChatView({
   const handleChatFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length || !onUploadDocument) return;
+    const uploadScope = activeSessionId;
     const confirmations: ChatMessage[] = [];
     setIsUploadingDoc(true);
     try {
@@ -437,7 +440,7 @@ export function ChatView({
             content: `Could not attach **${file.name}**: ${error?.message || error}`, timestamp: Date.now()});
         }
       }
-      onMessagesChange([...messages, ...confirmations]);
+      if (chatScopeRef.current === uploadScope) onMessagesChange([...messages, ...confirmations]);
     } finally {
       setIsUploadingDoc(false);
       e.target.value = '';
@@ -460,6 +463,7 @@ export function ChatView({
       timestamp: Date.now(),
     };
 
+    const promptScope = activeSessionId;
     const newMessages = [...messages, userMsg];
     onMessagesChange(newMessages);
     handleInputChange('');
@@ -478,10 +482,11 @@ export function ChatView({
         setIsPreparingFiles(true);
         const prepared = onPreparePrompt ? await onPreparePrompt(promptText) : promptText;
         setIsPreparingFiles(false);
+        if (chatScopeRef.current !== promptScope) return;
         await harness.prompt(prepared);
       } catch (e: any) {
         console.error('[ChatView] Prompt error:', e);
-        onMessagesChange([...newMessages, {id: `file-error-${Date.now()}`, role: 'assistant', content: `Could not prepare attachments: ${e?.message || e}`, timestamp: Date.now()}]);
+        if (chatScopeRef.current === promptScope) onMessagesChange([...newMessages, {id: `file-error-${Date.now()}`, role: 'assistant', content: `Could not prepare attachments: ${e?.message || e}`, timestamp: Date.now()}]);
       } finally {
         setIsPreparingFiles(false);
       }

@@ -17,5 +17,8 @@ try {
   assert.deepEqual(referencedAttachments('Describe @photo.png, then apply with Ali resume.pdf', docs).map(r=>r.doc.id), ['pic1','resume']);
   assert.equal(referencedAttachments('@img20 @missing.pdf', docs).length, 0);
   assert.equal(referencedAttachments('@img2 @"photo 2.png"', docs).length, 1);
+  assert.equal(referencedAttachments('Use my attached resume', docs)[0].doc.id, 'resume');
+  assert.equal(referencedAttachments('Describe this image', docs)[0].doc.id, 'pic2');
+  assert.equal(referencedAttachments('Read my @missing.pdf file', docs).length, 0);
   console.log('PASS media aliases, quoted filenames, plain filename mentions, deduplication and missing references');
 } finally {rmSync(out, {force:true});}
