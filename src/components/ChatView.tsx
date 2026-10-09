@@ -27,6 +27,7 @@ import {
   Globe,
   Wrench,
   Brain,
+  PanelsTopLeft,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
 import { ThinkingOrb } from 'thinking-orbs';
@@ -233,6 +234,8 @@ export function ChatView({
   onInputDraftChange,
 }: ChatViewProps) {
   const [input, setInput] = useState(inputDraft || '');
+  const [parallelEnabled, setParallelEnabled] = useState(false);
+  useEffect(() => { setParallelEnabled(false); }, [activeSessionId]);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
   const chatScopeRef = useRef(activeSessionId);
   chatScopeRef.current = activeSessionId;
@@ -483,6 +486,7 @@ export function ChatView({
         const prepared = onPreparePrompt ? await onPreparePrompt(promptText) : promptText;
         setIsPreparingFiles(false);
         if (chatScopeRef.current !== promptScope) return;
+        harness.setParallelEnabled(parallelEnabled);
         await harness.prompt(prepared);
       } catch (e: any) {
         console.error('[ChatView] Prompt error:', e);
@@ -955,6 +959,17 @@ export function ChatView({
             disabled={isBusy || isPreparingFiles || !hasKey || !harness}
           />
 
+          <button
+            type="button"
+            aria-label="Parallel subagent Chrome windows"
+            aria-pressed={parallelEnabled}
+            title="Parallel subagent Chrome windows: let OpenBUA split independent tasks across up to 3 separate Chrome windows and collect their results. Off by default. Each worker uses your selected model and API key."
+            disabled={isBusy || isPreparingFiles || !harness}
+            onClick={() => setParallelEnabled(value => !value)}
+            className={`self-center shrink-0 h-7 w-7 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 ${parallelEnabled ? 'bg-blue-500/20 text-blue-500' : 'text-muted-foreground hover:bg-muted'}`}
+          >
+            <PanelsTopLeft className="w-4 h-4" />
+          </button>
           {/* End of Bar: Send / Stop Button */}
           <div className="self-center flex items-center shrink-0">
             {isBusy ? (
