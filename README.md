@@ -90,6 +90,16 @@ Because OpenBUA runs directly in your existing browser, it executes end-to-end a
 
 ---
 
+## Multiple windows and parallel tasks
+
+Open a separate Chrome window and open OpenBUA there to give it a separate task. Each instance uses its own chat and browser window. Changing window focus does not redirect another instance's actions. Chats already open in another window cannot be selected or deleted until that window closes or switches chats.
+
+The windows icon immediately before Send enables parallel subagents for the current chat. It is off by default; hover over it for a description. When enabled, OpenBUA can split independent work across up to three additional Chrome windows, using the selected model and API key. Workers inherit the task's approved documents and restrictions, keep separate histories, and return results to the parent. Sequential work stays in the parent window.
+
+Each worker window includes an OpenBUA task tab showing its assignment, progress, result, and Stop button. Stop in the parent cancels its workers; closing a worker window or task tab cancels that worker. Browser windows remain available for reviewing their pages. All windows in the same Chrome profile share the profile's signed-in accounts.
+
+For developers, `npm run test:windows` checks coordination and ownership. After building, `npm run test:windows-extension` tests the real extension with local forms and a simulated model; it requires Playwright with an extension-capable Chromium executable. Set `OPENBUA_PLAYWRIGHT_MODULE` and `OPENBUA_EXTENSION_CHROME_PATH` to override their locations.
+
 ## AI Models and Supported Providers
 
 OpenBUA supports both zero-cost free operation and flexible Bring Your Own Key (BYOK) providers:
