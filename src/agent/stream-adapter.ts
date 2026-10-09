@@ -19,6 +19,20 @@ import { incrementGeminiDailyUsage } from '../services/storage';
 let lastFreeRequestTimestamp = 0;
 const unsupportedReasoningEndpoints = new Set<string>();
 
+export function transcriptTools(context: TranscriptContext) {
+  const tools = new Map<string, any>();
+  let declared = false;
+  for (const message of context.messages) {
+    if (message.role !== 'system') continue;
+    if (message.toolsAdded !== undefined || message.toolsRemoved !== undefined) declared = true;
+    for (const tool of message.toolsAdded || []) tools.set(tool.name, tool);
+    for (const tool of message.toolsRemoved || []) tools.delete(tool.name);
+  }
+  // Normalized pi-agent-core transcripts carry declarations on system messages.
+  // Keep compatibility with older callers supplying a raw context.
+  return declared ? [...tools.values()] : (context as any).tools ?? ALL_AGENT_TOOLS;
+}
+
 export function createCustomModel(config: ProviderConfig): Model<any> {
   const isGemini =
     (config.model || '').toLowerCase().includes('gemini') ||
@@ -363,7 +377,7 @@ async function streamOpenAI(
   }
 
   // Tools: Always ensure full tool definitions are passed
-  const tools = ALL_AGENT_TOOLS.map((t) => ({
+  const tools = transcriptTools(context).map((t: any) => ({
     type: 'function',
     function: {
       name: t.name,
@@ -1147,7 +1161,7 @@ async function streamAnthropic(
   }
 
   // Convert tools
-  const tools = ALL_AGENT_TOOLS.map((t) => ({
+  const tools = transcriptTools(context).map((t: any) => ({
     name: t.name,
     description: t.description,
     input_schema: t.parameters,
