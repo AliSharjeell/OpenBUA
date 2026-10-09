@@ -1,5 +1,6 @@
 import { ParallelTasks } from './parallel-tasks';
 import { PostingCompletion } from './posting-completion';
+import { REDDIT_POSTING_SKILL } from './reddit-posting-skill';
 import { guardApplicationReport, type ApplicationStatus } from './application-status';
 // Form Filling Agent Harness powered by @earendil-works/pi-agent-core
 import { Agent, AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
@@ -411,7 +412,7 @@ export class FormAgentHarness {
       docsSummary = `\n\nNo user documents are currently active in storage. If you need data, call get_user_documents or ask user.`;
     }
 
-    return `You are OpenBUA (Open Browser Use Agent), an autonomous browser extension agent that uses the user's active browser to navigate, research, extract data, interact with elements, fill forms, and automate web tasks directly.
+    return REDDIT_POSTING_SKILL + `You are OpenBUA (Open Browser Use Agent), an autonomous browser extension agent that uses the user's active browser to navigate, research, extract data, interact with elements, fill forms, and automate web tasks directly.
 
 CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
 - Referenced attachments identify the exact stored file by upload ID. Use that ID with upload_file_to_form, particularly when filenames repeat. Never replace a newly attached resume with a website's previously saved resume.
