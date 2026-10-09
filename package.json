@@ -38,6 +38,7 @@
     "test:session-title": "node scripts/test-session-title.mjs",
     "test:session-title-ui": "node scripts/test-session-title-ui.mjs",
     "test:selection-recovery": "node scripts/test-selection-recovery.mjs",
+    "test:page-controls": "node scripts/test-page-controls.mjs",
     "test:reddit-submit": "node scripts/test-reddit-submit.mjs",
     "test:reddit-review": "node scripts/test-reddit-review.mjs",
     "test:reddit-outcomes": "node scripts/test-reddit-outcomes.mjs",

@@ -2,6 +2,7 @@ import { inspectApplicationStatus, describeApplicationStatus } from './applicati
 import { prepareApplicationAction, finishApplicationAction, type ApplicationActionContext } from './application-action';
 import { inspectAutocomplete } from './autocomplete';
 import { inspectSelectionControls } from './selection-controls';
+import { inspectPageControls } from './page-controls';
 import { readCommunityRules, observeRulesPage, completedRulesNavigation, describeCommunityRules } from './community-rules';
 import { writeRedditDraft } from './reddit-editor';
 import { inPageReadYouTubeVideos } from './youtube-page';
@@ -159,6 +160,41 @@ export const verifyApplicationStatusTool: AgentTool<any> = {
   },
 };
 
+const InspectPageControlsSchema = Type.Object({
+  selector: Type.Optional(Type.String({ description: 'Scope to a known container or exact control selector. Omit for the full page including open shadow roots.' })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, description: 'Use the previous result nextOffset to retrieve the next page of controls.' })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+  optionOffset: Type.Optional(Type.Integer({ minimum: 0, description: 'Use nextOptionOffset with a select control selector to inspect remaining dropdown options.' })),
+});
+
+export const inspectPageControlsTool: AgentTool<typeof InspectPageControlsSchema> = {
+  name: 'inspect_page_controls',
+  label: 'Inspect Page Controls',
+  description: 'Read a live inventory of buttons, links, inputs, editors, dropdowns and options, tabs, menus, toggles, sliders and other interactive DOM controls, including open shadow roots. Returns exact actionable refs, labels, values, validation and selected/disabled/expanded states, popup context and visibility. Pagination exposes the entire available inventory instead of silently dropping later controls. Passwords are redacted. Frame boundaries and canvas limitations are reported.',
+  parameters: InspectPageControlsSchema,
+  execute: async (_id, params): Promise<AgentToolResult> => {
+    const tab = await getActiveTab();
+    if (!tab?.id || typeof chrome === 'undefined' || !chrome.scripting) return { content: [{ type: 'text', text: 'No browser tab is available for control inspection.' }], details: { success: false } };
+    try {
+      const inventory = await inspectPageControls(tab.id, params);
+      if (!inventory) throw new Error('Page returned no inventory');
+      // Keep the model's observation compact while retaining explicit choice
+      // states and empty input values. Full metadata remains in tool details.
+      const text = JSON.stringify(inventory, (key, value) => {
+        if (value === null && !['nextOffset', 'nextOptionOffset'].includes(key)) return undefined;
+        if (value === false && ['disabled', 'readonly', 'required', 'invalid', 'valueTruncated'].includes(key)) return undefined;
+        if (value === '' && key !== 'value') return undefined;
+        if (Array.isArray(value) && value.length === 0) return undefined;
+        if (key === 'optionTotal' && value === 0) return undefined;
+        return value;
+      });
+      return { content: [{ type: 'text', text }], details: inventory as any };
+    } catch (error) {
+      return { content: [{ type: 'text', text: `Could not inspect current controls: ${String(error)}. Use a fresh screenshot or inspect the actual tab; do not assume there are no controls.` }], details: { success: false } };
+    }
+  },
+};
+
 // 1. Inspect Form Elements on Current Tab
 const GetActiveTabFormSchema = Type.Object({
   includeButtons: Type.Optional(Type.Boolean({ description: 'Whether to include action buttons (Next, Submit, etc.)' })),
@@ -194,7 +230,7 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
       const fieldsToShow = summary.fields.filter(f => f.isVisible || f.type === 'file').slice(0, 100);
       const buttons = summary.buttons.slice(0, 30);
       
-      let textOutput = `Found ${totalFields} fields (${visibleFields.length} visible, showing ${fieldsToShow.length}) on page "${summary.title}":\n\n` +
+      let textOutput = `For the complete paginated interactive inventory (including controls beyond this form summary), use inspect_page_controls.\nFound ${totalFields} fields (${visibleFields.length} visible, showing ${fieldsToShow.length}) on page "${summary.title}":\n\n` +
         `Current URL: ${summary.url}\n` +
         (summary.stepIndicators.length > 0 ? `Step Progress: ${summary.stepIndicators.join(' | ')}\n\n` : '') +
         `Fields:\n` +
@@ -1509,6 +1545,7 @@ export const clipboardActionTool: AgentTool<typeof ClipboardActionSchema> = {
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy, pagePolicy: PageTrustPolicy = { userRequests: [] }): AgentTool<any>[] {
   return protectPageTrust(protectDocsEdits([
+    inspectPageControlsTool,
     getActiveTabFormTool,
     inspectDocsEditorTool,
     findDocsTextTool,
