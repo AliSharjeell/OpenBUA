@@ -5,6 +5,8 @@
   "description": "OpenBUA - Open Browser Use Agent Chrome Extension powered by pi-agent-core and pi-ai",
   "type": "module",
   "scripts": {
+    "test:windows": "node scripts/test-window-tasks.mjs",
+    "test:windows-extension": "node scripts/test-window-tasks-extension.mjs",
     "dev": "vite",
     "build": "node scripts/build-extension.js",
     "preview": "vite preview",
