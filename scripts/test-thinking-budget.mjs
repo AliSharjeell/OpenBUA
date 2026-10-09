@@ -521,6 +521,20 @@ function finishTool(h, id, toolName, args) {
   check('and does not borrow from the shared one', h.editLoopResumeCount >= FormAgentHarness.MAX_EDIT_LOOP_RESUMES);
 }
 
+{
+  const { h } = makeHarness();
+  const formText = 'Observed selection controls: ' + 'Ride Along Story choice_1 not selected. '.repeat(30);
+  const oldForm = { role: 'toolResult', toolName: 'get_active_tab_form', content: [{ type: 'text', text: 'Old fields '.repeat(100) }] };
+  const currentForm = { role: 'toolResult', toolName: 'get_active_tab_form', content: [{ type: 'text', text: formText }] };
+  const user = { role: 'user', content: 'Choose the relevant flair and publish my reviewed draft.' };
+  h.agent.state.messages = [user, oldForm, currentForm, ...Array.from({ length: 5 }, () => ({ role: 'toolResult', toolName: 'click_element', content: [{ type: 'text', text: 'Click dispatched.' }] }))];
+  h.pruneAgentStateMessages();
+  check('latest form choices survive intervening tools', currentForm.content[0].text === formText);
+  check('superseded form observations still compact', oldForm.content[0].text.includes('compacted'));
+  check('original user goal stays intact during recovery', h.agent.state.messages[0] === user && user.content.includes('publish'));
+  check('general recovery guidance diagnoses before repeating', h.buildSystemPrompt().includes('RECOVER FROM OBSERVED STATE'));
+}
+
 rmSync(outPath, { force: true });
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

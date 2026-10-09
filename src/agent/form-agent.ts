@@ -441,6 +441,13 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
      a transient failure. Switch approach: screenshot, or target the specific element.
    - If two consecutive calls taught you nothing new, stop reading and either act or report the blocker.
 
+0.3. RECOVER FROM OBSERVED STATE, NOT FROM TOOL NAMES:
+   - Keep the user's current objective and completed steps in mind. A failed tool or compacted old DOM does not erase the task; do not restart with a greeting or ask what the user wants.
+   - A dispatched click only proves an event was sent. Verify the intended change: navigation URL, selected option, closed popup, changed field or site confirmation. A click landing on a custom-element host or ordinary div is not proof its nested control was activated.
+   - Diagnose the specific result before choosing the next action. Missing selector: inspect the actual popup/scopes, including shadow-root selectionControls. Invalid field: correct its value and select an offered suggestion. Disabled advance button: resolve the named requirement. Uncertain submission: verify without resubmitting. Explicit validation rejection: fix the requirement, verify the repair, then retry once.
+   - For a picker/radio/menu, choose an observed labeled option by its refId, inspect selected/checked state, then apply the choice and confirm the picker closes. If a guessed [role=dialog] is absent, use the reported custom popup scope; an empty scoped result does not mean there are no choices. Screenshot-based clicks are a fallback after DOM inspection, using fresh coordinates.
+   - Change strategy after a failed attempt rather than replaying it: use exact DOM targets instead of guessed coordinates, a narrower query instead of repeated full-page reads, or visible suggestions instead of free text. Keep each recovery bounded to two distinct evidence-based approaches. Report a real remaining blocker only after those approaches fail; never bypass permissions, site rules, pending submission guards or rate limits.
+
 0.5. CRITICAL PROTOCOL: INCREMENTAL REPORTING & 1-ITEM CYCLE ('append_to_preview'):
    - LIVE PREVIEW IS A CUSTOMER-FACING REPORT AREA:
      * ONLY append clean, finalized findings (e.g. markdown table rows or clean summary sections).
@@ -797,7 +804,7 @@ ${(this.settings.autoConfirmSubmit ?? true)
       Before EVERY Reddit submission, call review_reddit_post on the complete prepared draft. Apply its rules/sidebar evidence to topic, self-promotion permissions, designated promotion threads, links, required title/platform/stage tags and flair. Resolve the checklist; needs_review is NOT approval. Blocked means skip/report the destination, not a coordinate workaround. Re-review after changing the draft or destination. Cached rules make this a bounded check, not a research loop.
       Do not invent or amplify earnings, interviews, user counts, bulk-email results or other outcome claims. Use supported facts from the user, preserve uncertainty and disclose promotional intent. Verify ready-to-test access when the community requires it. Do not mass-post identical promotion or cosmetically reword it to evade filtering; use only permitted, genuinely relevant participation.
       For a promotional batch, review explicit account/platform notices and recent own submissions once if accessible. Use current removal evidence supplied by the user too. Distinguish Reddit filters, moderator removal and account warnings; do not infer an account ban from historical removals. When current promotion is repeatedly removed, stop and report before visiting more destinations. Missing reputation/karma criteria are unknown, not proof of eligibility. Do not offer another test batch as a way around enforcement.
-      When the user authorized posting AND review requirements are satisfied, call submit_reddit_post, which resolves the real Post control and returns disabled/validation evidence or published permalink confirmation. Do not use coordinate clicks or verify_application_status (job applications) for Reddit. If unconfirmed, call verify_reddit_post once and report the remaining blocker; no repeated screenshots, waits or Post clicks. If disabled, address the named requirement (such as required flair), then verify the draft again.
+      When the user authorized posting AND review requirements are satisfied, call submit_reddit_post, which resolves the real Post control and returns disabled/validation evidence or published permalink confirmation. Do not use coordinate clicks or verify_application_status (job applications) for Reddit. If unconfirmed, call verify_reddit_post once; repair an explicit validation requirement if reported, otherwise report the uncertainty without repeated screenshots, waits or Post clicks. If blocked by a required flair, get_active_tab_form exposes selectionControls through custom/shadow popups: select the relevant option by refId, confirm SELECTED, click Add/Apply once and confirm it closed before retrying submission. Never assume an Add click saved an unselected choice.
       A permalink proves a submission exists, not that moderators approved it or that it will remain visible. Call verify_reddit_post once after submission to check current removal notices. Record submitted/visible/removed/unconfirmed separately with the exact notice and URL. If removed, stop the promotional batch and report it, rather than automatically reposting or testing more communities. An explicit removal notice is evidence only of that removal: never assert shadowban, account-wide restrictions, exact trigger, or a cooldown/reset without direct evidence. Suggest reviewing the notice/rules or requesting moderator review of the specific permalink; do not message moderators without user authorization. Never hide links in comments, switch accounts, or otherwise evade filters, and never promise removal-proof copy.
       Modern Reddit can redirect to the community feed with created=t3_<id> after publishing. A tool-confirmed matching created ID/title/permalink is a submitted post; record its returned permalink instead of treating the feed URL as a failed submit. Never repost it. If inspection of that permalink is needed, open the returned URL once and verify without a click.
       rate_limited means a site cooldown, not a broken Post control. Preserve the verified draft and report the exact notice and known retry delay. Stop this posting batch for now; do not run repeated 30-second waits, refresh, re-click Post, or try other communities to bypass a platform limit. Do not invent a cooldown from an unconfirmed result without site evidence.
@@ -950,12 +957,17 @@ ${this.settings.systemInstruction || ''}`.trim();
       msg.role === 'toolResult' && Array.isArray(msg.content) &&
       msg.content.some((item: any) => item.type === 'image' && item.data)
     );
+    // A picker may require inspect -> choose -> verify -> apply. Do not erase
+    // its still-current labels/refs after just a few intervening tool calls.
+    const latestFormResult = [...messages].reverse().find((msg: any) =>
+      msg.role === 'toolResult' && msg.toolName === 'get_active_tab_form'
+    );
 
     // Prune older tool results, retaining the newest image until superseded.
     for (let i = 0; i < total - 3; i++) {
       const msg = messages[i] as any;
       if (msg.role === 'toolResult' && Array.isArray(msg.content)) {
-        if (msg === latestImageResult) continue;
+        if (msg === latestImageResult || msg === latestFormResult) continue;
         // Keep scratchpad and append_to_preview unpruned so accumulated working notes remain intact
         if (msg.toolName === 'scratchpad' || msg.toolName === 'append_to_preview') {
           continue;
