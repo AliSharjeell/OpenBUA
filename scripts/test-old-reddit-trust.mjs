@@ -21,7 +21,7 @@ try {
   assert.equal(result.mode, 'native-form', 'community fields retain normal native filling');
   result = await page.evaluate(async () => { const { fillFormFieldsTool } = await import('/src/agent/tools.ts'); return fillFormFieldsTool.execute('old-community', { assignments: [{ selector: '[name="sr"]', value: 'another' }] }); });
   assert.equal(result.details.successCount, 1); assert.equal(await page.locator('[name="sr"]').inputValue(), 'another');
-  result = await page.evaluate(async () => { const { submitRedditPostTool } = await import('/src/agent/tools.ts'); return submitRedditPostTool.execute('old-submit', {}); });
+  result = await page.evaluate(async () => { const { redditPostAction } = await import('/src/agent/reddit-submit.ts'); const submitRedditPostTool = { execute: async () => ({ details: await redditPostAction(7, true) }) }; return submitRedditPostTool.execute('old-submit', {}); });
   assert.equal(result.details.postVerified, true); assert.equal(await page.evaluate(() => window.posts), 1);
   const trust = await page.evaluate(async () => {
     const { protectPageTrust } = await import('/src/agent/page-trust.ts');

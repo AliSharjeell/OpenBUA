@@ -12,7 +12,7 @@ try {
     delete document.documentElement.dataset.openbuaRedditSubmitAttempt;
     window.clicks = 0;
   });
-  const submit = () => page.evaluate(async () => { const { submitRedditPostTool } = await import('/src/agent/tools.ts'); return (await submitRedditPostTool.execute('submit', {})).details; });
+  const submit = () => page.evaluate(async () => { const { redditPostAction } = await import('/src/agent/reddit-submit.ts'); const submitRedditPostTool = { execute: async () => ({ details: await redditPostAction(7, true) }) }; return (await submitRedditPostTool.execute('submit', {})).details; });
   await setup();
   await page.evaluate(() => { document.querySelector('button').onclick = () => { window.clicks++; history.pushState({}, '', '/r/test/?created=t3_abc123'); document.body.innerHTML = '<shreddit-post post-title="New post" permalink="/r/test/comments/abc123/new_post/"></shreddit-post>'; }; });
   let result = await submit(); assert.equal(result.state, 'posted'); assert.equal(result.postVerified, true); assert.match(result.url, /\/comments\/abc123\//); assert.equal(await page.evaluate(() => window.clicks), 1);

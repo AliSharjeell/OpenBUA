@@ -19,7 +19,18 @@ try {
       host.shadowRoot.querySelector('button').onclick = () => { window.clicks++; };
     }, disabled);
   };
-  const action = () => page.evaluate(async () => { const { submitRedditPostTool } = await import('/src/agent/tools.ts'); return submitRedditPostTool.execute('submit', {}); });
+  const action = () => page.evaluate(async () => { const { redditPostAction } = await import('/src/agent/reddit-submit.ts'); const submitRedditPostTool = { execute: async () => ({ details: await redditPostAction(7, true) }) }; return submitRedditPostTool.execute('submit', {}); });
+  await setup();
+  const ordinary = await page.evaluate(async () => {
+    const { createAgentTools, clickElementTool } = await import('/src/agent/tools.ts');
+    const tools = createAgentTools();
+    document.querySelector('r-post-form-submit-button').shadowRoot.querySelector('button').id = 'actual-post';
+    const result = await clickElementTool.execute('ordinary-post', { selector: '#actual-post' });
+    return { exposedSubmit: tools.some(tool => tool.name === 'submit_reddit_post'), result, clicks: window.clicks };
+  });
+  assert.equal(ordinary.exposedSubmit, false, 'dedicated submission tool is not exposed');
+  assert.equal(ordinary.clicks, 1, 'ordinary click dispatches directly to the inspected Post control');
+  assert.notEqual(ordinary.result.details.postVerified, true, 'a click is not publication proof');
   await setup(true);
   let result = await action(); assert.equal(result.details.dispatched, false); assert.match(result.details.message, /disabled/); assert.equal(await page.evaluate(() => window.clicks), 0);
   // A flair picker opened by Post is a validation rejection even without an alert.
@@ -179,3 +190,4 @@ try {
   assert.equal(await page.evaluate(() => window.clicks), 0, 'an observed removal stops subsequent batch submission');
   console.log('PASS Reddit shadow Post control, disabled and corrupted draft blocking, visible flair rejection, no duplicate uncertain submission, matching permalink/title confirmation and read-only verification after navigation');
 } finally { await browser.close(); }
+
