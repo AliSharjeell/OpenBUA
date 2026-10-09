@@ -20,7 +20,7 @@ export class PostingCompletion {
     }
   }
   needsRecovery(text: string) {
-    return this.requested && this.state && this.state !== 'posted' &&
+    return this.requested && this.state && !['posted', 'removed', 'rate_limited'].includes(this.state) &&
       /^(?:done|all done|all set|finished|completed|posted|published|success)[.!\s]*$/i.test(text.trim());
   }
   directive() {
@@ -28,8 +28,8 @@ export class PostingCompletion {
   }
   report(text: string) {
     if (!this.requested || !this.state || this.state === 'posted') return text;
-    if (this.needsRecovery(text) || /\b(?:successfully (?:posted|published)|(?:posted|published) (?:both|all|the post))\b/i.test(text)) {
-      return `The post has not been confirmed as published. ${this.message}${this.url ? `\nCurrent page: ${this.url}` : ''}\nThe posting task is incomplete.`;
+    if (/^(?:done|all done|all set|finished|completed|posted|published|success)[.!\s]*$/i.test(text.trim()) || /\b(?:successfully (?:posted|published)|(?:posted|published) (?:both|all|the post))\b/i.test(text)) {
+      return `${this.state === 'removed' ? 'The post was submitted but removed.' : 'The post has not been confirmed as published.'} ${this.message}${this.url ? `\nCurrent page: ${this.url}` : ''}\nThe posting task is incomplete.`;
     }
     return text;
   }

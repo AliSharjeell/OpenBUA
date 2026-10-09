@@ -557,6 +557,8 @@ function finishTool(h, id, toolName, args) {
   h.handleAgentEvent({ type: 'tool_execution_end', toolName: 'verify_reddit_post', result: { details: { state: 'posted', postVerified: true, url: 'https://reddit.com/r/test/comments/ok' } } });
   h.handleAgentEvent({ type: 'turn_start' }); h.currentStreamingText = 'Done.'; h.handleAgentEvent({ type: 'turn_end' });
   check('verified publication permits completion', turns.at(-1)?.text === 'Done.');
+  h.postingCompletion.observe('verify_reddit_post', { state: 'removed', message: 'Removed by Reddit filters.', url: 'https://reddit.com/r/test/comments/ok' });
+  check('removed posts stop recovery and retain accurate submission evidence', !h.postingCompletion.needsRecovery('Done.') && h.postingCompletion.report('Done.').includes('submitted but removed'));
   const pageText = 'Destination list ' + 'https://example.com/submit\n'.repeat(50);
   const observation = { role: 'toolResult', toolName: 'get_page_content', content: [{ type: 'text', text: pageText }] };
   h.agent.state.messages = [observation, ...Array.from({ length: 5 }, () => ({ role: 'toolResult', toolName: 'scratchpad', content: [{ type: 'text', text: 'Notes' }] }))];
