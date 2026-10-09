@@ -36,6 +36,7 @@
     "test:reddit-editor": "node scripts/test-reddit-editor.mjs",
     "test:youtube-videos": "node scripts/test-youtube-videos.mjs",
     "test:session-title": "node scripts/test-session-title.mjs",
+    "test:session-title-ui": "node scripts/test-session-title-ui.mjs",
     "test:reddit-submit": "node scripts/test-reddit-submit.mjs",
     "test:reddit-review": "node scripts/test-reddit-review.mjs",
     "test:reddit-outcomes": "node scripts/test-reddit-outcomes.mjs",

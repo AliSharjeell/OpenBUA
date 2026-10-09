@@ -790,14 +790,13 @@ export function App() {
     }
 
     // Auto-rename generic chat session tabs based on first user message
-    const currentSession = sessions.find((s) => s.id === currentTabKeyRef.current);
-    if (currentSession && isGenericSessionTitle(currentSession.title)) {
-      const firstUserMsg = updatedMsgs.find(
-        (m) => m.role === 'user' && m.content && m.content.trim().length > 0
-      );
-      if (firstUserMsg) {
-        void suggestSessionTitle(currentSession.id, firstUserMsg.content, settings, setSessions);
-      }
+    // Read the session in the naming service: React may not yet contain a newly
+    // created chat when its first prompt arrives.
+    const firstUserMsg = updatedMsgs.find(
+      (m) => m.role === 'user' && m.content && m.content.trim().length > 0
+    );
+    if (firstUserMsg) {
+      void suggestSessionTitle(currentTabKeyRef.current, firstUserMsg.content, settings, setSessions);
     }
   };
 
