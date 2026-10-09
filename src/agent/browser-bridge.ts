@@ -2267,6 +2267,7 @@ export async function detectActiveTabEditor(): Promise<CanvasEditorInfo | null> 
 export async function clickAtPosition(
   options: { x: number; y: number; clickCount?: number; button?: number; shiftKey?: boolean; tabId?: number; viewport?: TabViewport | null }
 ): Promise<{ success: boolean; message: string; element?: string; viewport?: TabViewport; cssX?: number; cssY?: number }> {
+  if (options.tabId) await assertOwnedTab(options.tabId);
   const activeTab = options.tabId ? { id: options.tabId } : await getActiveTab();
   if (!activeTab || !activeTab.id) {
     return { success: false, message: 'No active browser tab found to click.' };
