@@ -4,7 +4,7 @@ import { inspectAutocomplete } from './autocomplete';
 import { readCommunityRules, observeRulesPage, completedRulesNavigation, describeCommunityRules } from './community-rules';
 import { writeRedditDraft } from './reddit-editor';
 import { inPageReadYouTubeVideos } from './youtube-page';
-import { redditPostAction } from './reddit-submit';
+import { redditPostAction, redditPostingCooldown } from './reddit-submit';
 import { reviewRedditDraft } from './reddit-review';
 import { xCommunityAction, interceptXCommunityClick } from './x-community';
 import { protectPageTrust, type PageTrustPolicy } from './page-trust';
@@ -1096,6 +1096,8 @@ export const waitSecondsTool: AgentTool<typeof WaitSecondsSchema> = {
   parameters: WaitSecondsSchema,
   execute: async (_toolCallId, params): Promise<AgentToolResult> => {
     const rawSec = typeof params.seconds === 'number' ? params.seconds : 5;
+    const cooldown = redditPostingCooldown();
+    if (cooldown && /reddit|rate.?limit|cooldown|retry.*post/i.test(params.reason || '')) return { content: [{ type: 'text', text: cooldown.message }], details: cooldown };
     const clampedSec = Math.max(1, Math.min(30, Math.round(rawSec)));
     const reasonText = params.reason ? ` for: "${params.reason}"` : '';
 
