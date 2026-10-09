@@ -608,8 +608,8 @@ function inPageFillForm(
         }
 
         // Always dispatch standard input/change events once
-        target.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-        target.dispatchEvent(new Event('change', { bubbles: true }));
+        target.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: item.value }));
+        target.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
       } else {
         target.textContent = item.value;
       }
@@ -618,10 +618,50 @@ function inPageFillForm(
       if (!isContentEditable) {
         target.dispatchEvent(new Event('focus', { bubbles: true }));
         target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
-        target.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        target.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: item.value }));
         target.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
-        target.dispatchEvent(new Event('change', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
         target.dispatchEvent(new Event('blur', { bubbles: true }));
+      }
+
+      // Some Reddit composers update their dirty state only after an editor
+      // transaction. Wake this editor once without Enter or a submit shortcut.
+      if (/reddit\.com$/i.test(location.hostname) && /\/comments\//.test(location.pathname) && item.value.trim() && (tagName === 'textarea' || isContentEditable)) {
+        let scope: Element = target;
+        for (let depth = 0; depth < 6; depth++) {
+          const parent = scope.parentElement || (scope.getRootNode() as ShadowRoot).host;
+          if (!parent) break;
+          scope = parent;
+          if (scope.matches('form,shreddit-comment-composer,shreddit-composer')) break;
+        }
+        const buttons = (root: ParentNode): Element[] => Array.from(root.querySelectorAll('button,input[type="submit"]')).concat(
+          Array.from(root.querySelectorAll('*')).flatMap(el => el.shadowRoot ? buttons(el.shadowRoot) : [])
+        );
+        const ready = buttons(scope).some(button => /^(comment|reply|post)$/i.test((button.textContent || button.getAttribute('value') || '').trim()) && button.getClientRects().length && !button.hasAttribute('disabled') && button.getAttribute('aria-disabled') !== 'true');
+        if (!ready) {
+          target.focus();
+          const event = (key: string, type: string) => target!.dispatchEvent(new KeyboardEvent(type, { key, code: key === ' ' ? 'Space' : 'Backspace', bubbles: true, composed: true }));
+          if (tagName === 'textarea') {
+            const field = target as HTMLTextAreaElement;
+            const end = field.value.length;
+            field.setSelectionRange(end, end);
+            event(' ', 'keydown'); field.setRangeText(' ', end, end, 'end');
+            field.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: ' ' })); event(' ', 'keyup');
+            event('Backspace', 'keydown'); field.setRangeText('', end, end + 1, 'end');
+            field.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' })); event('Backspace', 'keyup');
+          } else {
+            const root = target.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null };
+            const selection = root.getSelection?.() || window.getSelection();
+            if (selection) {
+              const range = document.createRange(); range.selectNodeContents(target); range.collapse(false);
+              selection.removeAllRanges(); selection.addRange(range);
+              event(' ', 'keydown');
+              const inserted = document.execCommand('insertText', false, ' ');
+              event(' ', 'keyup');
+              if (inserted) { event('Backspace', 'keydown'); document.execCommand('delete', false); event('Backspace', 'keyup'); }
+            }
+          }
+        }
       }
 
       // Visual flash highlight
@@ -683,7 +723,7 @@ function inPageFillForm(
       const isFileInput = target.tagName.toLowerCase() === 'input' && (target as HTMLInputElement).type === 'file';
       const isFileAttached = isFileInput && ((target as HTMLInputElement).files?.length ?? 0) > 0;
 
-      const verified = isContentEditable
+      const verified = isContentEditable || tagName === 'textarea'
         ? actualVal.replace(/\r\n/g, '\n').trim() === item.value.replace(/\r\n/g, '\n').trim()
         :
         isFileAttached ||
