@@ -22,6 +22,35 @@ try {
   const action = () => page.evaluate(async () => { const { submitRedditPostTool } = await import('/src/agent/tools.ts'); return submitRedditPostTool.execute('submit', {}); });
   await setup(true);
   let result = await action(); assert.equal(result.details.dispatched, false); assert.match(result.details.message, /disabled/); assert.equal(await page.evaluate(() => window.clicks), 0);
+  // A flair picker opened by Post is a validation rejection even without an alert.
+  await setup();
+  await page.evaluate(() => {
+    document.querySelector('r-post-form-submit-button').shadowRoot.querySelector('button').onclick = () => {
+      window.clicks++;
+      const picker = document.createElement('r-post-flairs-modal');
+      picker.attachShadow({ mode: 'open' }).innerHTML = '<div role="radio">Ride Along Story</div><button>Add</button>';
+      document.body.append(picker);
+    };
+  });
+  result = await action();
+  assert.equal(result.details.state, 'blocked', JSON.stringify({ result, page: await page.evaluate(() => ({ clicks: window.clicks, body: document.body.innerHTML })) }));
+  assert.equal(result.details.validationBlocked, true);
+  assert.equal(result.details.requirement, 'flair');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.openbuaRedditSubmitAttempt), undefined);
+  result = await action();
+  assert.equal(result.details.dispatched, false);
+  assert.equal(await page.evaluate(() => window.clicks), 1, 'Do not click Post with an unresolved picker');
+  await page.evaluate(() => {
+    document.querySelector('r-post-flairs-modal').remove();
+    document.querySelector('r-post-form-submit-button').shadowRoot.querySelector('button').onclick = () => {
+      window.clicks++;
+      history.pushState({}, '', '/r/test/comments/recovered/post/');
+      document.body.innerHTML = '<h1>Four word post title</h1>';
+    };
+  });
+  result = await action();
+  assert.equal(result.details.postVerified, true);
+  assert.equal(await page.evaluate(() => window.clicks), 2, 'An explicit validation rejection can recover after repair');
   for (const layout of ['light-button', 'role-wrapper', 'slotted-button']) {
     await setup();
     await page.evaluate(layout => {
