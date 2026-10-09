@@ -541,6 +541,29 @@ function finishTool(h, id, toolName, args) {
   check('a newer inventory supersedes older form observations', currentForm.content[0].text.includes('compacted'));
 }
 
+{
+  const { h, prompts, turns, settle } = makeHarness();
+  h.postingCompletion.begin('Post the reviewed promotion');
+  h.handleAgentEvent({ type: 'tool_execution_end', toolName: 'submit_reddit_post', result: { details: { state: 'blocked', postVerified: false, message: 'Optional tags dialog is open.' } } });
+  for (let i = 0; i < 3; i++) {
+    h.handleAgentEvent({ type: 'turn_start' });
+    h.currentStreamingText = 'Done.';
+    h.handleAgentEvent({ type: 'turn_end' });
+    await settle();
+  }
+  check('unverified Done triggers bounded posting recovery', prompts.length === 2);
+  check('posting recovery explains optional tags instead of imaginary flair', prompts[0]?.includes('Optional tags without flair choices'));
+  check('recovery exhaustion reports incomplete task instead of Done', turns.at(-1)?.text.includes('not been confirmed') && !turns.at(-1)?.text.startsWith('Done'));
+  h.handleAgentEvent({ type: 'tool_execution_end', toolName: 'verify_reddit_post', result: { details: { state: 'posted', postVerified: true, url: 'https://reddit.com/r/test/comments/ok' } } });
+  h.handleAgentEvent({ type: 'turn_start' }); h.currentStreamingText = 'Done.'; h.handleAgentEvent({ type: 'turn_end' });
+  check('verified publication permits completion', turns.at(-1)?.text === 'Done.');
+  const pageText = 'Destination list ' + 'https://example.com/submit\n'.repeat(50);
+  const observation = { role: 'toolResult', toolName: 'get_page_content', content: [{ type: 'text', text: pageText }] };
+  h.agent.state.messages = [observation, ...Array.from({ length: 5 }, () => ({ role: 'toolResult', toolName: 'scratchpad', content: [{ type: 'text', text: 'Notes' }] }))];
+  h.pruneAgentStateMessages();
+  check('current destination list survives intervening actions without rereading', observation.content[0].text === pageText);
+}
+
 rmSync(outPath, { force: true });
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

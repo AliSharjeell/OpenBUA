@@ -25,6 +25,34 @@ try {
   // A flair picker opened by Post is a validation rejection even without an alert.
   await setup();
   await page.evaluate(() => {
+    const modal = document.createElement('r-post-flairs-modal');
+    modal.hidden = true;
+    modal.attachShadow({ mode: 'open' }).innerHTML = '<button>Add</button><button>Cancel</button>';
+    document.body.append(modal);
+    document.querySelector('r-post-form-submit-button').shadowRoot.querySelector('button').onclick = () => {
+      window.clicks++; history.pushState({}, '', '/r/test/comments/hidden-tags/post/'); document.body.innerHTML = '<h1>Four word post title</h1>';
+    };
+  });
+  result = await action();
+  assert.equal(result.details.postVerified, true, 'Hidden optional tags component must not block a real Post');
+  await setup();
+  await page.evaluate(() => {
+    const modal = document.createElement('r-post-flairs-modal');
+    modal.attachShadow({ mode: 'open' }).innerHTML = '<div><span>Not Safe For Work (NSFW)</span><button role="switch" aria-checked="false"></button></div><div><span>Brand affiliate</span><button role="switch" aria-checked="false"></button></div><button id="cancel">Cancel</button><button>Add</button>';
+    modal.shadowRoot.querySelector('#cancel').onclick = () => modal.remove();
+    document.body.append(modal);
+    document.querySelector('r-post-form-submit-button').shadowRoot.querySelector('button').onclick = () => {
+      window.clicks++; history.pushState({}, '', '/r/test/comments/optional-tags/post/'); document.body.innerHTML = '<h1>Four word post title</h1>';
+    };
+  });
+  result = await action();
+  assert.equal(result.details.requirement, 'close_tags_dialog');
+  assert.equal(result.details.dispatched, false);
+  assert(!result.details.message.startsWith('Reddit requires a flair'));
+  await page.evaluate(() => document.querySelector('r-post-flairs-modal').shadowRoot.querySelector('#cancel').click());
+  result = await action(); assert.equal(result.details.postVerified, true, 'Closing optional tags permits publication without inventing flair');
+  await setup();
+  await page.evaluate(() => {
     document.querySelector('r-post-form-submit-button').shadowRoot.querySelector('button').onclick = () => {
       window.clicks++;
       const picker = document.createElement('r-post-flairs-modal');
