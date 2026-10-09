@@ -29,7 +29,7 @@ export async function generateModelSessionTitle(prompt: string, settings: AppSet
     });
     let response = await send();
     // Match the agent's compatibility recovery for models rejecting reasoning controls.
-    if (response.status === 400 && payload.reasoning_effort && /reasoning[_ ]effort|thinking[_ ](?:level|budget|config)/i.test(await response.text())) {
+    if (response.status === 400 && 'reasoning_effort' in payload && payload.reasoning_effort && /reasoning[_ ]effort|thinking[_ ](?:level|budget|config)/i.test(await response.text())) {
       delete payload.reasoning_effort;
       response = await send();
     }
