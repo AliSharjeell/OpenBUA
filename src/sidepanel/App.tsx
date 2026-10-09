@@ -109,6 +109,11 @@ export function App() {
   };
 
   const harnessRef = useRef<FormAgentHarness | null>(null);
+  useEffect(() => {
+    const stopOnClose = () => harnessRef.current?.abort();
+    window.addEventListener('pagehide', stopOnClose);
+    return () => window.removeEventListener('pagehide', stopOnClose);
+  }, []);
   const currentTabKeyRef = useRef<string>('session_default');
   const activeNavTabRef = useRef<'chat' | 'memory' | 'settings' | 'preview' | 'suggestions'>('chat');
   const thinkingStartTimeRef = useRef<number | null>(null);

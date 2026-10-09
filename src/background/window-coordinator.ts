@@ -16,12 +16,25 @@ export function installWindowCoordinator() {
     work.then(value => reply({ value }), error => reply({ error: error.message }));
     return true;
   });
+  chrome.tabs.onRemoved.addListener(tabId => {
+    queue = queue.then(async () => {
+      const jobs = (await chrome.storage.local.get(JOBS_KEY))[JOBS_KEY] || {};
+      for (const job of Object.values(jobs) as any[]) if (job.workerTabId === tabId && !terminal(job.state)) {
+        job.state = 'cancelled'; job.result = 'Worker control tab was closed.';
+        delete job.settings; delete job.documents; delete job.authorization;
+      }
+      await chrome.storage.local.set({ [JOBS_KEY]: jobs });
+    }).catch(console.error);
+  });
   chrome.windows.onRemoved.addListener(windowId => {
     queue = queue.then(async () => {
       const jobs = (await chrome.storage.local.get(JOBS_KEY))[JOBS_KEY] || {};
       for (const job of Object.values(jobs) as any[]) {
         if (job.windowId === windowId && !terminal(job.state)) { job.state = 'failed'; job.result = 'Worker window was closed.'; }
         if (job.ownerWindowId === windowId && !terminal(job.state)) { job.state = 'cancelled'; job.result = 'Parent window was closed.'; }
+      }
+      for (const job of Object.values(jobs) as any[]) if (terminal(job.state)) {
+        delete job.settings; delete job.documents; delete job.authorization;
       }
       await chrome.storage.local.set({ [JOBS_KEY]: jobs });
     }).catch(console.error);
@@ -63,8 +76,10 @@ async function handle(message: any, sender: chrome.runtime.MessageSender) {
     if (!job || sender.tab?.windowId !== job.windowId) throw new Error('Worker ownership mismatch');
     if (message.type === 'OPENBUA_WINDOWS_WORKER_UPDATE') {
       if (!terminal(job.state)) {
+        if (!['starting', 'running', 'completed', 'failed', 'cancelled'].includes(message.state)) throw new Error('Invalid worker state');
         job.state = message.state;
         job.result = String(message.result || '').slice(-16000);
+        if (terminal(job.state)) { delete job.settings; delete job.documents; delete job.authorization; }
         await chrome.storage.local.set({ [JOBS_KEY]: jobs });
       }
       return job;
@@ -77,6 +92,12 @@ async function handle(message: any, sender: chrome.runtime.MessageSender) {
     if (!Array.isArray(tasks) || tasks.length < 1 || tasks.length > 3) throw new Error('Choose 1 to 3 independent tasks');
     const active = Object.values(jobs).filter((job: any) => job.ownerWindowId === ownerWindowId && !terminal(job.state));
     if (active.length + tasks.length > 3) throw new Error('At most 3 workers can run in this window. Check existing worker results first.');
+    // Validate the entire batch before creating windows to avoid orphaned workers.
+    for (const task of tasks) {
+      if (!task.instruction?.trim()) throw new Error('Each worker needs a specific independent task');
+      const url = new URL(task.url || 'https://www.google.com');
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Worker start URL must be HTTP or HTTPS');
+    }
     const started = [];
     for (const task of tasks) {
       if (!task.instruction?.trim()) throw new Error('Each worker needs a specific independent task');
@@ -91,6 +112,7 @@ async function handle(message: any, sender: chrome.runtime.MessageSender) {
         job.windowId = win.id;
         await chrome.storage.local.set({ [JOBS_KEY]: jobs });
         const worker = await chrome.tabs.create({ windowId: win.id, url: chrome.runtime.getURL(`worker.html?job=${id}&ownerWindowId=${win.id}`), active: false });
+        job.workerTabId = worker.id;
         if (worker.id) await chrome.tabs.update(worker.id, { autoDiscardable: false });
         started.push({ id, windowId: win.id, task: task.instruction });
       } catch (error: any) { job.state = 'failed'; job.result = error.message; started.push({ id, error: error.message }); }
