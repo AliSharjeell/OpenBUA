@@ -1,4 +1,5 @@
 import { ParallelTasks } from './parallel-tasks';
+import { PostingCompletion } from './posting-completion';
 import { guardApplicationReport, type ApplicationStatus } from './application-status';
 // Form Filling Agent Harness powered by @earendil-works/pi-agent-core
 import { Agent, AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
@@ -280,6 +281,7 @@ export class FormAgentHarness {
   private documents: UserDocument[];
   private listeners: AgentUpdateListeners = {};
   private lastApplicationStatus: ApplicationStatus | null = null;
+  private postingCompletion = new PostingCompletion();
   private activeToolCalls = new Map<string, ToolCallState>();
   private currentStreamingText = '';
   private currentThinkingText = '';
@@ -352,6 +354,7 @@ export class FormAgentHarness {
   }
 
   public setSessionId(sessionId: string) {
+    if (sessionId !== this.sessionId) this.postingCompletion = new PostingCompletion();
     if (sessionId !== this.sessionId) this.pageTrustPolicy.userRequests = [];
     this.sessionId = sessionId;
     this.lastApplicationStatus = null;
@@ -1337,6 +1340,7 @@ ${this.settings.systemInstruction || ''}`.trim();
         const anyEvt = event as any;
         const toolCallId = anyEvt.toolCallId || anyEvt.toolCall?.id;
         const existing = toolCallId ? this.activeToolCalls.get(toolCallId) : null;
+        this.postingCompletion.observe(anyEvt.toolName || existing?.toolName || '', anyEvt.result?.details);
         // A keypress is also "acting", so the shared budget cannot stop a
         // Backspace/Enter oscillation. This guard can.
         this.noteEditKeyForLoopGuard(
@@ -1452,10 +1456,14 @@ ${this.settings.systemInstruction || ''}`.trim();
           this.listeners.onError?.(event.message.errorMessage);
         }
         const hasTools = this.activeToolCalls.size > 0;
+        if (!this.userAborted && !hasTools && this.postingCompletion.needsRecovery(this.currentStreamingText) && this.postingCompletion.retries < 2) {
+          if (this.resumeWithDirective(this.postingCompletion.directive())) this.postingCompletion.retries++;
+          break;
+        }
         const thinkingForTurn =
           this.currentThinkingText ||
           (hasTools && this.currentStreamingText.trim() ? this.currentStreamingText.trim() : undefined);
-        const textForTurn = guardApplicationReport(hasTools && !this.currentThinkingText ? '' : this.currentStreamingText, this.lastApplicationStatus);
+        const textForTurn = this.postingCompletion.report(guardApplicationReport(hasTools && !this.currentThinkingText ? '' : this.currentStreamingText, this.lastApplicationStatus));
 
         this.listeners.onTurnComplete?.(
           textForTurn,
@@ -1472,6 +1480,7 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public async prompt(input: string): Promise<void> {
+    this.postingCompletion.begin(input);
     this.pageTrustPolicy.userRequests.push(input);
     this.lastApplicationStatus = null;
     if (!/^(continue|resume|try again|keep going)[.!]*$/i.test(input.trim())) {
