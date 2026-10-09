@@ -533,6 +533,12 @@ function finishTool(h, id, toolName, args) {
   check('superseded form observations still compact', oldForm.content[0].text.includes('compacted'));
   check('original user goal stays intact during recovery', h.agent.state.messages[0] === user && user.content.includes('publish'));
   check('general recovery guidance diagnoses before repeating', h.buildSystemPrompt().includes('RECOVER FROM OBSERVED STATE'));
+  const inventoryText = 'Current page controls: ' + 'Settings button af_42 expanded=false. '.repeat(30);
+  const inventory = { role: 'toolResult', toolName: 'inspect_page_controls', content: [{ type: 'text', text: inventoryText }] };
+  h.agent.state.messages.push(inventory, ...Array.from({ length: 4 }, () => ({ role: 'toolResult', toolName: 'click_element', content: [{ type: 'text', text: 'Click dispatched.' }] })));
+  h.pruneAgentStateMessages();
+  check('latest complete control inventory survives recovery', inventory.content[0].text === inventoryText);
+  check('a newer inventory supersedes older form observations', currentForm.content[0].text.includes('compacted'));
 }
 
 rmSync(outPath, { force: true });

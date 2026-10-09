@@ -442,6 +442,7 @@ CRITICAL OPERATING RULES & ENVIRONMENT CONTEXT:
    - If two consecutive calls taught you nothing new, stop reading and either act or report the blocker.
 
 0.3. RECOVER FROM OBSERVED STATE, NOT FROM TOOL NAMES:
+   - Use inspect_page_controls when deciding how to interact with an unfamiliar page or when form inspection misses a target. It exposes current buttons, links, inputs, custom controls, dropdown options and their states through open shadow roots. Use its exact refs; choose based on the user's objective, labels, popup context and current state rather than guessing a site-specific sequence. Follow nextOffset when the relevant target is not in the first page, or narrow by selector; use nextOptionOffset to inspect further select options. Hidden file inputs remain available for uploading. Frame/canvas limitations require a suitable supported path or a fresh screenshot, not invented refs.
    - Keep the user's current objective and completed steps in mind. A failed tool or compacted old DOM does not erase the task; do not restart with a greeting or ask what the user wants.
    - A dispatched click only proves an event was sent. Verify the intended change: navigation URL, selected option, closed popup, changed field or site confirmation. A click landing on a custom-element host or ordinary div is not proof its nested control was activated.
    - Diagnose the specific result before choosing the next action. Missing selector: inspect the actual popup/scopes, including shadow-root selectionControls. Invalid field: correct its value and select an offered suggestion. Disabled advance button: resolve the named requirement. Uncertain submission: verify without resubmitting. Explicit validation rejection: fix the requirement, verify the repair, then retry once.
@@ -960,7 +961,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     // A picker may require inspect -> choose -> verify -> apply. Do not erase
     // its still-current labels/refs after just a few intervening tool calls.
     const latestFormResult = [...messages].reverse().find((msg: any) =>
-      msg.role === 'toolResult' && msg.toolName === 'get_active_tab_form'
+      msg.role === 'toolResult' && ['get_active_tab_form', 'inspect_page_controls'].includes(msg.toolName)
     );
 
     // Prune older tool results, retaining the newest image until superseded.
