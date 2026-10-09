@@ -1,6 +1,9 @@
+import { installWindowCoordinator } from './window-coordinator';
 // Chrome Extension Manifest V3 Background Service Worker
 // Supports Google Chrome (native side panel) and Arc Browser, Brave, Edge, Opera (floating panel window fallback)
 import { captureScheduled } from '../agent/screenshot-capture';
+
+installWindowCoordinator();
 
 const SIDEPANEL_PATH = 'sidepanel.html';
 const FLOATING_WINDOW_WIDTH = 420;

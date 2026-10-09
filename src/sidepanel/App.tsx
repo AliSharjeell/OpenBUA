@@ -1,3 +1,4 @@
+import { windowRpc } from '../agent/window-rpc';
 import { initializeBrowserWindow, getBrowserWindowId } from '../agent/window-context';
 import { referencedAttachments } from '../services/attachment-references';
 import { suggestSessionTitle } from '../services/session-title';
@@ -193,10 +194,16 @@ export function App() {
         lastActive.sessionId = fresh.id;
         await saveLastActiveState('chat', fresh.id);
       }
-      const targetSessionId = (lastActive.sessionId && loadedSessions.some((s) => s.id === lastActive.sessionId))
+      let targetSessionId = (lastActive.sessionId && loadedSessions.some((s) => s.id === lastActive.sessionId))
         ? lastActive.sessionId
         : (loadedSessions[0]?.id || 'session_default');
 
+      if (getBrowserWindowId() !== undefined && !await windowRpc({ type: 'OPENBUA_WINDOWS_CLAIM', windowId: getBrowserWindowId(), sessionId: targetSessionId })) {
+        targetSessionId = (await createNewChatSession()).id;
+        loadedSessions.splice(0, loadedSessions.length, ...(await loadChatSessions()));
+        await windowRpc({ type: 'OPENBUA_WINDOWS_CLAIM', windowId: getBrowserWindowId(), sessionId: targetSessionId });
+        await saveLastActiveState('chat', targetSessionId);
+      }
       currentTabKeyRef.current = targetSessionId;
       setActiveSessionIdState(targetSessionId);
 
@@ -537,7 +544,11 @@ export function App() {
 
   // When active session changes, load its scoped chat history and tab memories
   const handleSelectSession = async (sessionId: string) => {
-    if (sessionId === activeSessionId) return;
+    if (sessionId === activeSessionId || isBusy) return;
+    if (getBrowserWindowId() !== undefined && !await windowRpc({ type: 'OPENBUA_WINDOWS_CLAIM', windowId: getBrowserWindowId(), sessionId })) {
+      window.alert('This chat is open in another Chrome window. Create a new chat for a separate task.');
+      return;
+    }
     setActiveSessionId(sessionId);
     currentTabKeyRef.current = sessionId;
     setActiveSessionIdState(sessionId);

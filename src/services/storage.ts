@@ -1,3 +1,4 @@
+import { windowRpc } from '../agent/window-rpc';
 import { getBrowserWindowId } from '../agent/window-context';
 // Local storage service using chrome.storage.local with browser fallback for dev/testing
 
@@ -300,6 +301,7 @@ export async function toggleDocumentActive(id: string): Promise<UserDocument[]> 
 const CHAT_SESSIONS_KEY = 'autoform_chat_sessions';
 
 export async function loadChatSessions(): Promise<ChatSession[]> {
+  if (getBrowserWindowId() !== undefined) return (await windowRpc({ type: 'OPENBUA_WINDOWS_SESSIONS', action: 'load' })).sessions;
   const sessions = await getStorageItem<ChatSession[]>(CHAT_SESSIONS_KEY, []);
   if (sessions.length === 0) {
     const defaultSession: ChatSession = {
@@ -319,6 +321,7 @@ export async function saveChatSessions(sessions: ChatSession[]): Promise<void> {
 }
 
 export async function createNewChatSession(title?: string): Promise<ChatSession> {
+  if (getBrowserWindowId() !== undefined) return (await windowRpc({ type: 'OPENBUA_WINDOWS_SESSIONS', action: 'create', title })).created;
   const sessions = await loadChatSessions();
   let defaultTitle = title;
   if (!defaultTitle) {
@@ -351,6 +354,11 @@ export async function createNewChatSession(title?: string): Promise<ChatSession>
 }
 
 export async function deleteChatSession(sessionId: string): Promise<ChatSession[]> {
+  if (getBrowserWindowId() !== undefined) {
+    const result = await windowRpc({ type: 'OPENBUA_WINDOWS_SESSIONS', action: 'delete', sessionId });
+    await Promise.all([clearChatHistoryForTab(sessionId), clearScratchpad(sessionId), clearSuggestedMemories(sessionId)]);
+    return result.sessions;
+  }
   const sessions = await loadChatSessions();
   const updated = sessions.filter((s) => s.id !== sessionId);
   const finalSessions = updated.length > 0 ? updated : [
@@ -370,6 +378,7 @@ export async function deleteChatSession(sessionId: string): Promise<ChatSession[
 }
 
 export async function renameChatSession(sessionId: string, newTitle: string): Promise<ChatSession[]> {
+  if (getBrowserWindowId() !== undefined) return (await windowRpc({ type: 'OPENBUA_WINDOWS_SESSIONS', action: 'rename', sessionId, title: newTitle })).sessions;
   const sessions = await loadChatSessions();
   const trimmed = newTitle.trim();
   if (!trimmed) return sessions;
