@@ -65,6 +65,12 @@ async function beginApplicationAction() {
 async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?:string;x?:number;y?:number}) {
   const tab=await getActiveTab();
   if(!tab?.id || typeof chrome==='undefined' || !chrome.scripting) return null;
+  if (/^https:\/\/(?:www\.|old\.|new\.)?reddit\.com\//i.test(tab.url || '')) {
+    const cooldown = redditPostingCooldown();
+    if (cooldown) return cooldown;
+    const observed = await redditPostAction(tab.id, false);
+    if (observed.state === 'rate_limited') return observed;
+  }
   const membership = await interceptXCommunityClick({ id: tab.id, url: tab.url }, params);
   if (membership) return membership;
   if (/reddit\.com\/r\/[^/]+\/submit/i.test(tab.url || '')) {
@@ -127,6 +133,11 @@ async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?
 }
 
 async function observeApplicationAction(message: string, dispatched: boolean, context?: ApplicationActionContext) {
+  const tab = await getActiveTab();
+  if (dispatched && tab?.id && /^https:\/\/(?:www\.|old\.|new\.)?reddit\.com\//i.test(tab.url || '')) {
+    const outcome = await redditPostAction(tab.id, false);
+    if (outcome.state === 'rate_limited') return { ...outcome, dispatched, message: `${message}\n${outcome.message}` };
+  }
   if (!context) return {message,success:dispatched};
   const action = await finishApplicationAction(context);
   if (dispatched && action.blockedUrl) {
