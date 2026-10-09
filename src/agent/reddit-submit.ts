@@ -34,9 +34,9 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
     if (!modal) return null;
     const choices = all('[role="radio"],input[type="radio"],faceplate-radio-input,[role="option"]', modal).filter(visible);
     if (choices.length) return flairBlocked(dispatched);
-    return { ...result('blocked', 'The optional tags dialog is open, but no selectable flair options are available. NSFW and Brand affiliate switches are tags, not flair. Do not invent a flair or turn on unrelated tags. Close the dialog with Cancel or its close button, then submit_reddit_post. Only a site validation error can establish that flair is required.', dispatched), validationBlocked: true, requirement: 'close_tags_dialog' };
+    return { ...result('blocked', 'The optional tags dialog is open, but no selectable flair options are available. NSFW and Brand affiliate switches are tags, not flair. Do not invent a flair or turn on unrelated tags. Close the dialog with Cancel or its close button, then click the visible Post button. Only a site validation error can establish that flair is required.', dispatched), validationBlocked: true, requirement: 'close_tags_dialog' };
   };
-  const flairBlocked = (dispatched = false) => ({ ...result('blocked', 'Reddit requires a flair selection. Inspect get_active_tab_form selectionControls, choose the relevant option by refId, verify SELECTED, then click Add/Apply and verify the picker closes. After fixing this validation requirement, submit_reddit_post may be used again.', dispatched), validationBlocked: true, requirement: 'flair' });
+  const flairBlocked = (dispatched = false) => ({ ...result('blocked', 'Reddit requires a flair selection. Inspect get_active_tab_form selectionControls, choose the relevant option by refId, verify SELECTED, then click Add/Apply and verify the picker closes. After fixing this validation requirement, the visible Post button may be clicked again.', dispatched), validationBlocked: true, requirement: 'flair' });
   const publication = (): { url: string; node: HTMLElement | null } | null => {
     if (!expected?.values.title) return null;
     const matches = (el: HTMLElement) => visible(el) && fold(el.getAttribute('post-title') || el.innerText || '') === fold(expected!.values.title!);
@@ -177,8 +177,10 @@ export function redditPostingCooldown() {
   if (!known || (known.until !== null && known.until <= Date.now())) return null;
   return { success: false, state: 'rate_limited', dispatched: false, postVerified: false, retryAfterSeconds: known.until === null ? null : Math.ceil((known.until - Date.now()) / 1000), message: `Reddit reported a posting cooldown: ${known.evidence}. Preserve the draft and report it; do not loop on waits, retries or other posting destinations. An unspecified expiry is unknown; inspect later rather than inventing a reset time.` };
 }
-export async function redditPostAction(tabId: number, submit: boolean) {
-  if (submit) {
+// Validate and remember a draft without resolving or clicking Post.
+export async function prepareRedditClick(tabId: number) {
+    const attempt = await chrome.scripting.executeScript({ target: { tabId }, func: () => Boolean(document.documentElement.dataset.openbuaRedditSubmitAttempt) });
+    if (attempt[0]?.result) return { success: false, dispatched: false, state: 'unconfirmed', postVerified: false, message: 'A Post click was already dispatched. Use verify_reddit_post before any retry.' };
     const cooldown = redditPostingCooldown();
     if (cooldown) return cooldown;
     const blocker = redditRemovalBlocker();
@@ -193,6 +195,12 @@ export async function redditPostAction(tabId: number, submit: boolean) {
       if (blocker) return { success: false, state: 'blocked', dispatched: false, postVerified: false, message: blocker };
       rememberedDrafts.set(tabId, capture[0].result);
     }
+  return null;
+}
+export async function redditPostAction(tabId: number, submit: boolean) {
+  if (submit) {
+    const blocker = await prepareRedditClick(tabId);
+    if (blocker) return blocker;
   }
   let results;
   try { results = await chrome.scripting.executeScript({ target: { tabId }, func: inPageRedditSubmit, args: [submit, rememberedDrafts.get(tabId) || null] }); }

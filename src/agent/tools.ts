@@ -6,7 +6,7 @@ import { inspectPageControls } from './page-controls';
 import { readCommunityRules, observeRulesPage, completedRulesNavigation, describeCommunityRules } from './community-rules';
 import { writeRedditDraft } from './reddit-editor';
 import { inPageReadYouTubeVideos } from './youtube-page';
-import { redditPostAction, redditPostingCooldown } from './reddit-submit';
+import { redditPostAction, redditPostingCooldown, prepareRedditClick } from './reddit-submit';
 import { reviewRedditDraft } from './reddit-review';
 import { xCommunityAction, interceptXCommunityClick } from './x-community';
 import { protectPageTrust, type PageTrustPolicy } from './page-trust';
@@ -94,7 +94,7 @@ async function recoverBeforeAdvance(params:{refId?:string;selector?:string;text?
       posting = Boolean(targets[0]?.result);
     }
     if (posting) {
-      return redditPostAction(tab.id, true);
+      return prepareRedditClick(tab.id);
     }
   }
   const hit=await chrome.scripting.executeScript({target:{tabId:tab.id},args:[params.refId||'',params.selector||'',params.text||'',params.x??null,params.y??null],func:(refId:string,selector:string,text:string,x:number|null,y:number|null)=>{
@@ -636,10 +636,11 @@ export const getPageContentTool: AgentTool<typeof GetPageContentSchema> = {
   },
 };
 
-function createRedditPostTool(submit: boolean): AgentTool {
+function createRedditVerificationTool(): AgentTool {
+  const submit = false;
   return {
-    name: submit ? 'submit_reddit_post' : 'verify_reddit_post', label: submit ? 'Submit Reddit Post' : 'Verify Reddit Post',
-    description: submit ? 'Submit the fully prepared Reddit draft through its actual Post button after review_reddit_post checks are resolved. Reports requirements or matching permalink, including observed removals. A task removal stops the batch. No coordinate guessing or automatic re-clicks. Call only when the user authorized posting.' : 'Read-only Reddit publication verification. Checks matching permalink/title and removal notices, distinguishing submitted-but-removed from visible or unconfirmed. Never clicks or posts.',
+    name: 'verify_reddit_post', label: 'Verify Reddit Post',
+    description: 'Read-only Reddit publication verification after clicking the visible Post button. Checks matching permalink/title and removal notices, distinguishing submitted-but-removed from visible or unconfirmed. Never clicks or posts.',
     parameters: Type.Object({}),
     execute: async (): Promise<AgentToolResult> => {
       const tab = await getActiveTab();
@@ -651,8 +652,7 @@ function createRedditPostTool(submit: boolean): AgentTool {
     },
   };
 }
-export const submitRedditPostTool = createRedditPostTool(true);
-export const verifyRedditPostTool = createRedditPostTool(false);
+export const verifyRedditPostTool = createRedditVerificationTool();
 
 export const readYouTubeVideosTool: AgentTool = {
   name: 'read_youtube_videos', label: 'Read YouTube Videos',
@@ -683,7 +683,7 @@ export const prepareRedditPostTool: AgentTool<typeof PrepareRedditPostSchema> = 
     try {
       const result = await writeRedditDraft(tab.id, [{ role: 'title', value: params.title }, { role: 'body', value: params.body }]);
       const success = result.successCount === 2 && result.errors.length === 0;
-      return { content: [{ type: 'text', text: success ? 'Distinct title and complete body verified, including paragraph breaks. Draft prepared; not submitted. If the user authorized posting, use submit_reddit_post next, not coordinate clicks or verify_application_status.' : `Draft needs repair; do not append or submit. ${result.errors.join('\n')}` }], details: { ...result, success } };
+      return { content: [{ type: 'text', text: success ? 'Distinct title and complete body verified, including paragraph breaks. Draft prepared; not submitted. If the user authorized posting, click the visible Post button using its inspected refId or selector, then use verify_reddit_post.' : `Draft needs repair; do not append or submit. ${result.errors.join('\n')}` }], details: { ...result, success } };
     } catch (error: any) { return { content: [{ type: 'text', text: `Draft write could not be confirmed. Inspect before retrying: ${error?.message || error}` }], details: { success: false } }; }
   },
 };
@@ -705,7 +705,7 @@ export const readCommunityRulesTool: AgentTool = {
 
 export const reviewRedditPostTool: AgentTool = {
   name: 'review_reddit_post', label: 'Review Reddit Draft',
-  description: 'Review the exact prepared Reddit draft before publishing. Retrieves cached community rules/sidebar guidance, flags duplicate submissions and observed removals, and lists promotion, link, flair/tag and factual-claim checks. This is not a guarantee of moderation approval. Resolve the checks before submit_reddit_post.',
+  description: 'Review the exact prepared Reddit draft before publishing. Retrieves cached community rules/sidebar guidance, flags duplicate submissions and observed removals, and lists promotion, link, flair/tag and factual-claim checks. This is not a guarantee of moderation approval. Resolve the checks before clicking the visible Post button.',
   parameters: Type.Object({}),
   execute: async (): Promise<AgentToolResult> => {
     try {
@@ -1557,7 +1557,6 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     prepareRedditPostTool,
     reviewRedditPostTool,
     joinXCommunityTool,
-    submitRedditPostTool,
     verifyRedditPostTool,
     readYouTubeVideosTool,
     uploadFileToFormTool,
