@@ -355,7 +355,7 @@ export async function createNewChatSession(title?: string): Promise<ChatSession>
 
 export async function deleteChatSession(sessionId: string): Promise<ChatSession[]> {
   if (getBrowserWindowId() !== undefined) {
-    const result = await windowRpc({ type: 'OPENBUA_WINDOWS_SESSIONS', action: 'delete', sessionId });
+    const result = await windowRpc({ type: 'OPENBUA_WINDOWS_SESSIONS', action: 'delete', sessionId, windowId: getBrowserWindowId() });
     await Promise.all([clearChatHistoryForTab(sessionId), clearScratchpad(sessionId), clearSuggestedMemories(sessionId)]);
     return result.sessions;
   }

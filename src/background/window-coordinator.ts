@@ -44,6 +44,15 @@ const terminal = (state: string) => ['completed', 'failed', 'cancelled'].include
 
 async function handle(message: any, sender: chrome.runtime.MessageSender) {
   if (message.type === 'OPENBUA_WINDOWS_SESSIONS') {
+    if (message.action === 'delete') {
+      const claims = (await chrome.storage.session.get('openbua_window_chats')).openbua_window_chats || {};
+      const owner = claims[message.sessionId];
+      if (owner !== undefined && owner !== message.windowId) {
+        let alive = false;
+        try { await chrome.windows.get(owner); alive = true; } catch {}
+        if (alive) throw new Error('This chat is open in another Chrome window. Close it there before deleting it.');
+      }
+    }
     let sessions: ChatSession[] = (await chrome.storage.local.get(SESSIONS))[SESSIONS] || [];
     const now = Date.now();
     const make = (title?: string): ChatSession => ({ id: `session_${crypto.randomUUID()}`, title: title || `Chat ${Math.max(0, ...sessions.map(s => Number(s.title.match(/^Chat (\d+)$/)?.[1]) || 0)) + 1}`, createdAt: now, updatedAt: now });

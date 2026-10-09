@@ -87,6 +87,14 @@ export function App() {
   const [tabMemories, setTabMemories] = useState<UserDocument[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  useEffect(() => {
+    if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return;
+    const refresh = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === 'local' && Array.isArray(changes.autoform_chat_sessions?.newValue)) setSessions(changes.autoform_chat_sessions.newValue);
+    };
+    chrome.storage.onChanged.addListener(refresh);
+    return () => chrome.storage.onChanged.removeListener(refresh);
+  }, []);
   const [activeSessionId, setActiveSessionId] = useState<string>('session_default');
   const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
   const [previewMarkdown, setPreviewMarkdown] = useState<string>('');
@@ -652,6 +660,7 @@ export function App() {
   };
 
   const handleCreateSession = async () => {
+    if (isBusy) return;
     const newSession = await createNewChatSession();
     const updated = await loadChatSessions();
     setSessions(updated);
@@ -660,7 +669,10 @@ export function App() {
 
   const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
-    const updated = await deleteChatSession(sessionId);
+    if (isBusy) return;
+    let updated: ChatSession[];
+    try { updated = await deleteChatSession(sessionId); }
+    catch (error: any) { window.alert(error.message); return; }
     setSessions(updated);
     setInputDrafts((prev) => {
       const copy = { ...prev };
