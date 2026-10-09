@@ -17,8 +17,10 @@ try {
   const setup = async markdown => {
     await page.setContent('<reddit-composer></reddit-composer>');
     await page.evaluate(markdown => {
+      if (window.originalExecCommand) document.execCommand = window.originalExecCommand;
       delete document.documentElement.dataset.openbuaRedditDraft;
       delete document.documentElement.dataset.openbuaRedditSubmitAttempt;
+      delete document.documentElement.dataset.openbuaRedditClearFailure;
       const root = document.querySelector('reddit-composer').attachShadow({ mode: 'open' });
       root.innerHTML = '<textarea name="title" aria-label="Post title"></textarea><div contenteditable="true" name="body" aria-label="Post body text field"><p>Garbled old draft. Garbled old draft.</p></div><button type="button">Post</button>';
       window.postClicks = 0; root.querySelector('button').onclick = () => window.postClicks++;
@@ -75,6 +77,28 @@ try {
   const rich = await prepare(); assert.equal(rich.details.success, true); assert.equal(rich.details.mode, 'rich-text');
   assert.equal((await read()).body, body); assert.equal((await read()).title, title);
   await prepare(); assert.equal((await read()).body, body, 'framework paste replacement does not duplicate old text');
+  // Reproduce a framework that ignores native DOM deletion until its keyboard
+  // selection model handles Ctrl+A and Backspace.
+  await setup(false);
+  await page.evaluate(() => {
+    const target = document.querySelector('reddit-composer').shadowRoot.querySelector('[name="body"]');
+    window.recoveryKeys = 0;
+    window.originalExecCommand = document.execCommand;
+    document.execCommand = (command, ...args) => command === 'delete' ? false : window.originalExecCommand.call(document, command, ...args);
+    target.onbeforeinput = event => { if (event.inputType.startsWith('delete')) event.preventDefault(); };
+    target.onkeydown = event => {
+      if (event.ctrlKey && event.key === 'a') { event.preventDefault(); window.editorSelected = true; window.recoveryKeys++; }
+      if (event.key === 'Backspace' && window.editorSelected) { event.preventDefault(); target.replaceChildren(); window.savedBody = ''; window.editorSelected = false; }
+    };
+  });
+  const recovered = await prepare(); assert.equal(recovered.details.success, true); assert.equal((await read()).body, body); assert.equal((await read()).saved, body);
+  await prepare(); assert.equal(await page.evaluate(() => window.recoveryKeys), 1, 'a matching framework draft skips destructive rewriting');
+  await setup(false);
+  await page.evaluate(() => { const target = document.querySelector('reddit-composer').shadowRoot.querySelector('[name="body"]'); window.originalExecCommand = document.execCommand; document.execCommand = (command, ...args) => command === 'delete' ? false : window.originalExecCommand.call(document, command, ...args); window.failedRecoveryKeys = 0; target.onbeforeinput = event => { if (event.inputType.startsWith('delete')) event.preventDefault(); }; target.onkeydown = () => window.failedRecoveryKeys++; });
+  let stuck = await prepare(); assert.equal(stuck.details.success, false); assert.match(stuck.details.errors.join(' '), /bounded|scoped selection/);
+  const recoveryKeys = await page.evaluate(() => window.failedRecoveryKeys);
+  stuck = await prepare(); assert.equal(stuck.details.success, false); assert.match(stuck.details.errors.join(' '), /already failed/); assert.equal(await page.evaluate(() => window.failedRecoveryKeys), recoveryKeys, 'unchanged failure does not repeat keyboard recovery');
+  await setup(false); await prepare();
   const duplicate = await page.evaluate(async body => {
     const root = document.querySelector('reddit-composer').shadowRoot;
     root.querySelector('[name="body"]').setAttribute('data-autoform-ref', 'af_test');
@@ -84,6 +108,7 @@ try {
   assert.equal(duplicate.details.successCount, 0); assert.equal((await read()).body, body, 'duplicate title/body target refused before mutation');
   await page.evaluate(() => {
     const root = document.querySelector('reddit-composer').shadowRoot;
+    root.querySelector('[name="body"]').textContent = 'Old draft requiring replacement';
     root.querySelector('[name="body"]').onpaste = event => { event.preventDefault(); event.currentTarget.textContent = event.clipboardData.getData('text/plain').slice(0, 25); };
   });
   const truncated = await prepare(); assert.equal(truncated.details.success, false, 'matching prefix cannot verify a truncated body');

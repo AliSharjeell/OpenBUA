@@ -87,6 +87,14 @@ export async function inPageWriteRedditDraft(assignments: RedditAssignment[], ve
         setPlain(target, item.value);
         result.mode = fieldRole === 'body' ? (target.getAttribute('name') === 'text' ? 'plain-text' : 'markdown') : result.mode;
       } else if (target.isContentEditable && fieldRole === 'body') {
+        if (fold(read(target) || '') === fold(item.value)) {
+          result.mode = 'rich-text';
+          result.successCount++;
+          result.verifications.push({ refId: item.refId || fieldRole!, selector: item.selector, requestedValue: item.value, actualValue: read(target), verified: true, elementFound: true });
+          continue; // Matching drafts do not need a destructive delete/paste cycle.
+        }
+        const repairKey = JSON.stringify([location.href, item.value, read(target)]);
+        if (document.documentElement.dataset.openbuaRedditClearFailure === repairKey) throw new Error('This unchanged body replacement already failed its bounded recovery. Stop retrying, do not submit the old body, and report the editor requirement.');
         // Select only this editor's contents. Never use document-wide selectAll.
         target.focus();
         const root = target.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null };
@@ -94,8 +102,33 @@ export async function inPageWriteRedditDraft(assignments: RedditAssignment[], ve
         if (!selection) throw new Error('Could not establish a body-only selection.');
         const range = document.createRange(); range.selectNodeContents(target);
         selection.removeAllRanges(); selection.addRange(range);
+        // Framework editors keep their own selection state. Give their
+        // selectionchange handler a turn before native editing commands.
+        document.dispatchEvent(new Event('selectionchange'));
+        await settle();
         document.execCommand('delete'); await settle();
-        if (fold(read(target))) throw new Error('Existing body was not cleared. No replacement appended.');
+        if (fold(read(target))) {
+          // One scoped keyboard recovery for editors that own Ctrl+A/Backspace.
+          // Synthetic keys have no browser default action; only editor handlers
+          // may consume them. Never clear DOM behind the framework's back.
+          target.focus();
+          const select = new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', ctrlKey: true, keyCode: 65, bubbles: true, cancelable: true, composed: true });
+          target.dispatchEvent(select); await settle();
+          if (!select.defaultPrevented) {
+            range.selectNodeContents(target); selection.removeAllRanges(); selection.addRange(range);
+            document.dispatchEvent(new Event('selectionchange')); await settle();
+          }
+          const deletion = new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, bubbles: true, cancelable: true, composed: true });
+          target.dispatchEvent(deletion);
+          if (!deletion.defaultPrevented) document.execCommand('delete');
+          target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Backspace', code: 'Backspace', bubbles: true, composed: true }));
+          await settle();
+        }
+        if (fold(read(target))) {
+          document.documentElement.dataset.openbuaRedditClearFailure = JSON.stringify([location.href, item.value, read(target)]);
+          throw new Error('Existing body could not be cleared after scoped selection and keyboard recovery. No replacement appended. Stop retrying this unchanged draft; report the editor requirement.');
+        }
+        delete document.documentElement.dataset.openbuaRedditClearFailure;
         const data = new DataTransfer(); data.setData('text/plain', item.value);
         const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         data.setData('text/html', item.value.replace(/\r\n?/g, '\n').split(/\n\n+/).map(paragraph => `<p>${escape(paragraph).replace(/\n/g, '<br>')}</p>`).join(''));
