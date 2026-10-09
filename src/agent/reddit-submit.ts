@@ -1,5 +1,6 @@
 import { writeRedditDraft } from './reddit-editor';
 import { recordRedditOutcome, redditRemovalBlocker, redditDraftReviewBlocker } from './reddit-review';
+import { getActiveSessionIdState } from '../services/storage';
 
 // Runs in the page. Find the real submit control through custom-element shadows,
 // report site validation, and never retry an unconfirmed submission automatically.
@@ -17,8 +18,30 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
   if (!expected && !submit) expected = remembered;
   const errors = () => all('[role="alert"],[aria-invalid="true"],.error-message,.error,[data-testid*="error"],[slot="error"],faceplate-form-helper-text[error]')
     .filter(visible).map(el => fold(el.innerText || el.getAttribute('aria-label') || '')).filter(Boolean);
-  const posted = () => Boolean(expected?.values.title && /\/comments\/[^/]+/.test(location.pathname) &&
-    all('h1,shreddit-post[post-title],.thing.link a.title').some(el => visible(el) && fold(el.getAttribute('post-title') || el.innerText || '') === fold(expected!.values.title!)));
+  const publication = (): { url: string; node: HTMLElement | null } | null => {
+    if (!expected?.values.title) return null;
+    const matches = (el: HTMLElement) => visible(el) && fold(el.getAttribute('post-title') || el.innerText || '') === fold(expected!.values.title!);
+    if (/\/comments\/[^/]+/.test(location.pathname) && all('h1,shreddit-post[post-title],.thing.link a.title').some(matches)) return { url: location.href, node: null };
+    // Modern Reddit may return to the community feed after publishing. Require
+    // its created post ID AND the matching visible card/title/permalink.
+    const created = new URL(location.href).searchParams.get('created')?.match(/^t3_([a-z0-9]+)$/i)?.[1];
+    if (!created) return null;
+    for (const card of all('shreddit-post[post-title],.thing.link').filter(visible)) {
+      const title = card.getAttribute('post-title') || card.querySelector('a.title,h1,h2,h3')?.textContent || '';
+      if (fold(title) !== fold(expected.values.title)) continue;
+      const hrefs = [card.getAttribute('permalink'), ...Array.from(card.querySelectorAll('a[href]')).map(link => link.getAttribute('href'))];
+      for (const href of hrefs) {
+        if (!href) continue;
+        try {
+          const url = new URL(href, location.href);
+          if (url.origin === location.origin && url.pathname.match(/\/comments\/([a-z0-9]+)(?:\/|$)/i)?.[1] === created) return { url: url.href, node: card };
+        } catch {}
+      }
+    }
+    return null;
+  };
+  const posted = () => Boolean(publication());
+  const confirmed = (dispatched = false) => ({ ...result('posted', 'Reddit confirms the matching created post and permalink with no removal notice observed. Later moderation remains possible.', dispatched), url: publication()!.url, submitted: true });
   const closestComposed = (element: HTMLElement, selector: string): HTMLElement | null => {
     let cursor: HTMLElement | null = element;
     while (cursor) {
@@ -28,12 +51,14 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
     return null;
   };
   const moderation = (dispatched = false) => {
-    if (!posted()) return null;
+    const published = publication();
+    if (!published) return null;
     const notice = all('p,div,span,[role="alert"],shreddit-post-removal-notice').filter(visible).find(el => {
       // Never interpret a quote in the submitted body or a neighbouring post as
       // moderation of this permalink. Match the complete notice, not substrings.
       if (closestComposed(el, '.usertext-body,[slot="text-body"],shreddit-post-text-body,[data-testid="post-content"],blockquote')) return false;
       const owner = closestComposed(el, 'shreddit-post,.thing.link,article');
+      if (published.node && owner !== published.node) return false;
       if (owner) {
         const ownerTitle = owner.getAttribute('post-title') || owner.querySelector('h1,a.title')?.textContent;
         if (ownerTitle && fold(ownerTitle) !== fold(expected!.values.title!)) return false;
@@ -41,11 +66,25 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
       return /^(?:sorry,?\s+)?this post (?:was|has been|is) removed (?:by|due to) (?:reddit|the moderators|moderators)/i.test(fold(el.innerText || el.textContent || '')) &&
         fold(el.innerText || el.textContent || '').length < 400;
     });
-    return notice ? { ...result('removed', `Submitted, but removed: ${fold(notice.innerText || notice.textContent || '')}. Stop this batch; do not repost. The notice does not establish an account-wide restriction or the exact cause.`, dispatched), submitted: true, removalEvidence: fold(notice.innerText || notice.textContent || '') } : null;
+    return notice ? { ...result('removed', `Submitted, but removed: ${fold(notice.innerText || notice.textContent || '')}. Stop this batch; do not repost. The notice does not establish an account-wide restriction or the exact cause.`, dispatched), url: published.url, submitted: true, removalEvidence: fold(notice.innerText || notice.textContent || '') } : null;
+  };
+  const rateLimit = (dispatched = false) => {
+    const notice = all('p,div,span,faceplate-form-helper-text,[role="alert"],[slot*="error"]').filter(visible).find(el => {
+      if (closestComposed(el, '[contenteditable="true"],.usertext-body,[slot="text-body"],shreddit-post-text-body,blockquote')) return false;
+      const text = fold(el.innerText || el.textContent || '');
+      return text.length < 400 && /^(?:rate limit exceeded|you(?:'|’)?re doing that too much|try again in \d+)/i.test(text);
+    });
+    if (!notice) return null;
+    const evidence = fold(notice.innerText || notice.textContent || '');
+    const duration = evidence.match(/(?:wait|in)\s+(\d+)\s*(second|minute|hour)s?/i);
+    const retryAfterSeconds = duration ? Number(duration[1]) * ({ second: 1, minute: 60, hour: 3600 }[duration[2].toLowerCase()] || 1) : null;
+    return { ...result('rate_limited', `Reddit posting is rate limited: ${evidence}. Preserve the draft and report the cooldown. Do not repeatedly wait_seconds, retry Post, or continue this posting batch.`, dispatched), retryAfterSeconds, rateLimitEvidence: evidence };
   };
   const removed = moderation();
   if (removed) return removed;
-  if (posted()) return result('posted', 'Reddit opened the matching permalink with no removal notice observed. Later moderation remains possible.');
+  if (posted()) return confirmed();
+  const limited = rateLimit();
+  if (limited) return limited;
   const messages = errors();
   if (!submit) return messages.length ? result('blocked', `Reddit reports: ${messages.join('; ')}. Fix the requirement; do not re-click Post.`)
     : result('unconfirmed', 'No published post confirmation yet. Do not click Post again or claim success. Inspect the current page for a site requirement or pending request.');
@@ -91,7 +130,9 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
     await new Promise(resolve => setTimeout(resolve, 150));
     const removed = moderation(true);
     if (removed) return removed;
-    if (posted()) return result('posted', 'Reddit opened the matching permalink with no removal notice observed. Later moderation remains possible.', true);
+    if (posted()) return confirmed(true);
+    const limited = rateLimit(true);
+    if (limited) return limited;
     const failures = errors();
     if (failures.length) {
       delete document.documentElement.dataset.openbuaRedditSubmitAttempt; // Rejected, not an uncertain success.
@@ -102,8 +143,16 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
 }
 
 const rememberedDrafts = new Map<number, { url: string; values: { title?: string; body?: string } }>();
+const cooldowns = new Map<string, { until: number | null; evidence: string }>();
+export function redditPostingCooldown() {
+  const known = cooldowns.get(getActiveSessionIdState() || 'default');
+  if (!known || (known.until !== null && known.until <= Date.now())) return null;
+  return { success: false, state: 'rate_limited', dispatched: false, postVerified: false, retryAfterSeconds: known.until === null ? null : Math.ceil((known.until - Date.now()) / 1000), message: `Reddit reported a posting cooldown: ${known.evidence}. Preserve the draft and report it; do not loop on waits, retries or other posting destinations. An unspecified expiry is unknown; inspect later rather than inventing a reset time.` };
+}
 export async function redditPostAction(tabId: number, submit: boolean) {
   if (submit) {
+    const cooldown = redditPostingCooldown();
+    if (cooldown) return cooldown;
     const blocker = redditRemovalBlocker();
     if (blocker) return { success: false, state: 'blocked', dispatched: false, postVerified: false, message: blocker };
     const draft = await writeRedditDraft(tabId, [], true);
@@ -126,6 +175,11 @@ export async function redditPostAction(tabId: number, submit: boolean) {
     results = await chrome.scripting.executeScript({ target: { tabId }, func: inPageRedditSubmit, args: [false, rememberedDrafts.get(tabId) || null] });
   }
   const outcome = results[0]?.result;
+  if (outcome?.state === 'rate_limited') {
+    const duration = 'retryAfterSeconds' in outcome && typeof outcome.retryAfterSeconds === 'number' ? outcome.retryAfterSeconds : null;
+    const evidence = 'rateLimitEvidence' in outcome && typeof outcome.rateLimitEvidence === 'string' ? outcome.rateLimitEvidence : outcome.message;
+    cooldowns.set(getActiveSessionIdState() || 'default', { until: duration === null ? null : Date.now() + Math.max(1, duration) * 1000, evidence });
+  }
   const draft = rememberedDrafts.get(tabId);
   if (outcome && draft) recordRedditOutcome(draft, outcome.state, outcome.url);
   return outcome || { success: false, state: 'unconfirmed', dispatched: false, postVerified: false, message: 'Could not verify Reddit state. Inspect before any retry.' };
