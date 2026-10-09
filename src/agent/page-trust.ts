@@ -19,7 +19,7 @@ export function authorizedRedditLayout(requests: string[], host: string): boolea
   });
 }
 export function protectPageTrust(tools: AgentTool<any>[], policy: PageTrustPolicy): AgentTool<any>[] {
-  const readers = new Set(['get_page_content', 'get_active_tab_form', 'capture_tab_screenshot', 'read_community_rules', 'review_reddit_post', 'join_x_community', 'read_youtube_videos', 'search_web']);
+  const readers = new Set(['get_page_content', 'get_active_tab_form', 'inspect_page_controls', 'capture_tab_screenshot', 'read_community_rules', 'review_reddit_post', 'join_x_community', 'read_youtube_videos', 'search_web']);
   return tools.map(tool => ({ ...tool, execute: async (...args: Parameters<typeof tool.execute>) => {
     const params = args[1] as { url?: string; selector?: string; refId?: string; text?: string; x?: number; y?: number };
     const navigation = tool.name === 'navigate_browser_tab' || tool.name === 'open_new_tab';
