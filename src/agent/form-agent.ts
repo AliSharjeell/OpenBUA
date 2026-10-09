@@ -982,12 +982,13 @@ ${this.settings.systemInstruction || ''}`.trim();
     const latestFormResult = [...messages].reverse().find((msg: any) =>
       msg.role === 'toolResult' && ['get_active_tab_form', 'inspect_page_controls'].includes(msg.toolName)
     );
+    const latestPageResult = [...messages].reverse().find((msg: any) => msg.role === 'toolResult' && msg.toolName === 'get_page_content');
 
     // Prune older tool results, retaining the newest image until superseded.
     for (let i = 0; i < total - 3; i++) {
       const msg = messages[i] as any;
       if (msg.role === 'toolResult' && Array.isArray(msg.content)) {
-        if (msg === latestImageResult || msg === latestFormResult) continue;
+        if (msg === latestImageResult || msg === latestFormResult || msg === latestPageResult) continue;
         // Keep scratchpad and append_to_preview unpruned so accumulated working notes remain intact
         if (msg.toolName === 'scratchpad' || msg.toolName === 'append_to_preview') {
           continue;

@@ -146,6 +146,10 @@ export function analyzeAssistantTurns(messages: any[]): {
     m.content.some((block: any) => block.type === 'image' && block.data)
   );
   if (latestImageResult) olderToolCallIds.delete(latestImageResult.toolCallId);
+  for (const names of [['get_page_content'], ['get_active_tab_form', 'inspect_page_controls']]) {
+    const latest = [...messages].reverse().find(m => m.role === 'toolResult' && names.includes(m.toolName || toolCallIdToName.get(m.toolCallId)));
+    if (latest) olderToolCallIds.delete(latest.toolCallId);
+  }
 
   return { olderToolCallIds, toolCallIdToName };
 }
