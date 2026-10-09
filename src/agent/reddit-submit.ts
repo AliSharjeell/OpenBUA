@@ -11,7 +11,14 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
     for (const host of Array.from(root.querySelectorAll('*'))) if (host.shadowRoot) nodes.push(...all(selector, host.shadowRoot));
     return [...new Set(nodes)];
   };
-  const visible = (el: HTMLElement) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const visible = (el: HTMLElement) => {
+    if (!el.getClientRects().length) return false;
+    for (let node: HTMLElement | null = el; node; node = node.assignedSlot || node.parentElement || (node.getRootNode() as ShadowRoot).host as HTMLElement || null) {
+      const style = getComputedStyle(node);
+      if (node.hidden || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    }
+    return true;
+  };
   const fold = (text: string) => text.replace(/\s+/g, ' ').trim();
   const result = (state: string, message: string, dispatched = false) => ({ state, message, dispatched, success: state === 'posted', postVerified: state === 'posted', url: location.href });
   let expected: { url: string; values: { title?: string; body?: string } } | null = null;
@@ -19,9 +26,16 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
   if (!expected && !submit) expected = remembered;
   const errors = () => all('[role="alert"],[aria-invalid="true"],.error-message,.error,[data-testid*="error"],[slot="error"],faceplate-form-helper-text[error]')
     .filter(visible).map(el => fold(el.innerText || el.getAttribute('aria-label') || '')).filter(Boolean);
-  const flairRequirement = () => all('r-post-flairs-modal,[role="dialog"][aria-label*="flair" i]').some(modal =>
-    all('button,[role="radio"],input[type="radio"],faceplate-radio-input', modal).some(visible)
+  const openPicker = () => all('r-post-flairs-modal,[role="dialog"][aria-label*="flair" i],[role="dialog"][aria-label*="tags" i]').find(modal =>
+    all('button,[role="radio"],input[type="radio"],faceplate-radio-input,[role="switch"]', modal).some(visible)
   );
+  const pickerBlocker = (dispatched = false) => {
+    const modal = openPicker();
+    if (!modal) return null;
+    const choices = all('[role="radio"],input[type="radio"],faceplate-radio-input,[role="option"]', modal).filter(visible);
+    if (choices.length) return flairBlocked(dispatched);
+    return { ...result('blocked', 'The optional tags dialog is open, but no selectable flair options are available. NSFW and Brand affiliate switches are tags, not flair. Do not invent a flair or turn on unrelated tags. Close the dialog with Cancel or its close button, then submit_reddit_post. Only a site validation error can establish that flair is required.', dispatched), validationBlocked: true, requirement: 'close_tags_dialog' };
+  };
   const flairBlocked = (dispatched = false) => ({ ...result('blocked', 'Reddit requires a flair selection. Inspect get_active_tab_form selectionControls, choose the relevant option by refId, verify SELECTED, then click Add/Apply and verify the picker closes. After fixing this validation requirement, submit_reddit_post may be used again.', dispatched), validationBlocked: true, requirement: 'flair' });
   const publication = (): { url: string; node: HTMLElement | null } | null => {
     if (!expected?.values.title) return null;
@@ -91,7 +105,8 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
   const limited = rateLimit();
   if (limited) return limited;
   const messages = errors();
-  if (flairRequirement()) return flairBlocked();
+  const picker = pickerBlocker();
+  if (picker) return picker;
   if (!submit) return messages.length ? result('blocked', `Reddit reports: ${messages.join('; ')}. Fix the requirement; do not re-click Post.`)
     : result('unconfirmed', 'No published post confirmation yet. Do not click Post again or claim success. Inspect the current page for a site requirement or pending request.');
   if (!expected?.values.title || expected.url !== location.href) return result('blocked', 'Prepare and verify the complete title/body with prepare_reddit_post first. No Post click dispatched.');
@@ -141,9 +156,10 @@ export async function inPageRedditSubmit(submit: boolean, remembered: { url: str
     if (limited) return limited;
     // Reddit can reject the attempt by opening its flair picker without an
     // alert. This is validation, not an uncertain publication or a duplicate.
-    if (flairRequirement()) {
+    const picker = pickerBlocker(true);
+    if (picker) {
       delete document.documentElement.dataset.openbuaRedditSubmitAttempt;
-      return flairBlocked(true);
+      return picker;
     }
     const failures = errors();
     if (failures.length) {
