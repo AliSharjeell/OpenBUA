@@ -30,6 +30,30 @@ try {
   assert.equal(result.successCount, 0);
   assert.match(result.errors.join(' '), /did not clear/);
   assert.equal(await page.evaluate(() => document.querySelector('reply-box').shadowRoot.querySelector('div').textContent), 'Original reply');
+  await page.route('https://www.reddit.com/**', route => route.fulfill({ body: '<form><reply-box></reply-box></form>', contentType: 'text/html' }));
+  await page.goto('https://www.reddit.com/r/test/comments/example/thread/');
+  await page.evaluate('(() => {\n' + code + '\nwindow.inPageFillForm = inPageFillForm;\n})()');
+  await page.evaluate(() => {
+    const host = document.querySelector('reply-box');
+    host.attachShadow({ mode: 'open' }).innerHTML = '<textarea data-autoform-ref="reply"></textarea><button hidden disabled>Comment</button>';
+    window.keys = []; window.submissions = 0;
+    host.addEventListener('keydown', event => window.keys.push(event.key));
+    host.addEventListener('input', event => {
+      if (event.inputType === 'deleteContentBackward') {
+        const button = host.shadowRoot.querySelector('button'); button.hidden = false; button.disabled = false;
+      }
+    });
+    host.shadowRoot.querySelector('button').onclick = () => window.submissions++;
+  });
+  result = await fill();
+  assert.equal(result.successCount, 1);
+  const activated = await page.evaluate(() => ({ value: document.querySelector('reply-box').shadowRoot.querySelector('textarea').value, disabled: document.querySelector('reply-box').shadowRoot.querySelector('button').disabled, keys: window.keys, submissions: window.submissions }));
+  assert.equal(activated.value, 'How do you keep the data fresh?');
+  assert.equal(activated.disabled, false, 'one space/backspace activation reveals the comment control');
+  assert.deepEqual(activated.keys, [' ', 'Backspace']);
+  assert.equal(activated.submissions, 0, 'activation never publishes');
+  await fill();
+  assert.deepEqual(await page.evaluate(() => window.keys), [' ', 'Backspace'], 'ready composer does not receive another activation');
   await page.goto('http://127.0.0.1:5173/test-form.html');
   const limited = await page.evaluate(async () => {
     window.chrome = { tabs: { query: (_q, cb) => cb([{ id: 7, url: 'https://www.reddit.com/r/test/comments/example/thread/' }]) }, scripting: { executeScript: async injection => [{ result: await new Function('return (' + injection.func.toString() + ')')()(...(injection.args || [])) }] } };
