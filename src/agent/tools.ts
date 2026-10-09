@@ -1,6 +1,7 @@
 import { inspectApplicationStatus, describeApplicationStatus } from './application-status';
 import { prepareApplicationAction, finishApplicationAction, type ApplicationActionContext } from './application-action';
 import { inspectAutocomplete } from './autocomplete';
+import { inspectSelectionControls } from './selection-controls';
 import { readCommunityRules, observeRulesPage, completedRulesNavigation, describeCommunityRules } from './community-rules';
 import { writeRedditDraft } from './reddit-editor';
 import { inPageReadYouTubeVideos } from './youtube-page';
@@ -174,6 +175,9 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
       const summary = await inspectActiveTabForm(params.selector);
       const activeTab = await getActiveTab();
       const observations = activeTab?.id ? await inspectAutocomplete(activeTab.id).catch(()=>[]) : [];
+      const selection = activeTab?.id && typeof chrome !== 'undefined' && chrome.scripting
+        ? await inspectSelectionControls(activeTab.id, params.selector).catch(() => ({ scopeFound: true, scopes: [], controls: [] }))
+        : { scopeFound: true, scopes: [], controls: [] };
       for (const field of summary.fields) {
         const observed = observations.find(item=>item.refId===field.refId);
         if (!observed) continue;
@@ -213,6 +217,11 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
           buttons.map(b => `- [refId: ${b.refId}] "${b.text}" (${b.isSubmit ? 'SUBMIT' : b.isNext ? 'NEXT STEP' : 'Action'})`).join('\n');
       }
 
+      if (!selection.scopeFound) textOutput += `\nRequested scope was not found. Actual visible popup scopes: ${JSON.stringify(selection.scopes)}. Do not assume the popup is empty.`;
+      if (selection.controls.length) textOutput += '\n\nSelection Controls (click the exact refId, then verify selection before applying):\n' + selection.controls.map(control =>
+        `- [refId: ${control.refId}] "${control.label}" | ${control.role} | ${control.selected ? 'SELECTED' : 'not selected'}${control.disabled ? ' | Disabled' : ''}`
+      ).join('\n');
+      Object.assign(summary, { selectionControls: selection.controls, scopeFound: selection.scopeFound, popupScopes: selection.scopes });
       return {
         content: [{ type: 'text', text: textOutput }],
         details: {...summary, fields:fieldsToShow.map(field=>({...field,options:field.options?.length
