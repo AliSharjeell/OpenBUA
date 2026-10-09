@@ -35,11 +35,11 @@ async function openOpenBUA(targetTab?: chrome.tabs.Tab) {
 
   // 2. Fallback for Arc Browser & browsers without native side panel:
   // Check if an existing OpenBUA floating window is already open
-  const extUrl = chrome.runtime.getURL(SIDEPANEL_PATH);
+  const extUrl = chrome.runtime.getURL(SIDEPANEL_PATH) + (tab?.windowId !== undefined ? `?ownerWindowId=${tab.windowId}` : '');
   try {
     const allWindows = await chrome.windows.getAll({ populate: true, windowTypes: ['popup', 'normal'] });
     for (const win of allWindows) {
-      if (win.tabs?.some((t) => t.url && t.url.includes(chrome.runtime.id) && t.url.includes(SIDEPANEL_PATH))) {
+      if (win.tabs?.some((t) => t.url && t.url.includes(chrome.runtime.id) && t.url === extUrl)) {
         if (win.id !== undefined) {
           await chrome.windows.update(win.id, { focused: true });
           return;

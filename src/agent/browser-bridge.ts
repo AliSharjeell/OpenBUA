@@ -1,3 +1,4 @@
+import { getBrowserWindowId, assertOwnedTab } from './window-context';
 import { inspectAutocomplete } from './autocomplete';
 import { captureScheduled } from './screenshot-capture';
 import { writeRedditDraft } from './reddit-editor';
@@ -30,6 +31,10 @@ export function isExtensionPage(tab?: chrome.tabs.Tab | null): boolean {
 export async function getActiveTab(timeoutMs = 1500): Promise<chrome.tabs.Tab | null> {
   if (typeof chrome === 'undefined' || !chrome.tabs) {
     return null;
+  }
+  const windowId = getBrowserWindowId();
+  if (windowId !== undefined) {
+    return Promise.race([chrome.tabs.query({ windowId, active: true }).then(tabs => tabs.find(t => !isExtensionPage(t)) || null).catch(() => null), new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs))]);
   }
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -107,6 +112,7 @@ export async function sendMessageToTab<T = any>(tabId: number, message: any, tim
     throw new Error('Chrome extension APIs not available in current environment');
   }
 
+  await assertOwnedTab(tabId);
   return new Promise((resolve, reject) => {
     let settled = false;
     const cleanup = () => {
@@ -3090,6 +3096,11 @@ export async function listAllTabs(): Promise<TabInfo[]> {
     ];
   }
 
+  const windowId = getBrowserWindowId();
+  if (windowId !== undefined) {
+    const tabs = await chrome.tabs.query({ windowId });
+    return tabs.filter(t => !isExtensionPage(t)).map(t => ({ id: t.id!, title: t.title || 'Untitled Tab', url: t.url || '', active: Boolean(t.active), favIconUrl: t.favIconUrl }));
+  }
   return new Promise((resolve) => {
     // In Arc Browser or floating window mode, query normal browser windows first
     chrome.tabs.query({ windowType: 'normal' }, (normalTabs) => {
@@ -3124,12 +3135,13 @@ export async function listAllTabs(): Promise<TabInfo[]> {
 }
 
 export async function switchTab(tabId: number): Promise<boolean> {
+  await assertOwnedTab(tabId);
   if (typeof chrome === 'undefined' || !chrome.tabs) {
     return true;
   }
   return new Promise((resolve) => {
     chrome.tabs.update(tabId, { active: true }, (tab) => {
-      if (tab?.windowId) {
+      if (tab?.windowId && getBrowserWindowId() === undefined) {
         chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
       }
       resolve(!chrome.runtime.lastError);
@@ -3143,12 +3155,13 @@ export async function createNewTab(url: string): Promise<number | null> {
   }
   const activeTab = await getActiveTab();
   const createProps: chrome.tabs.CreateProperties = { url, active: true };
+  if (getBrowserWindowId() !== undefined) createProps.windowId = getBrowserWindowId();
   if (activeTab?.windowId) {
     createProps.windowId = activeTab.windowId;
   }
   return new Promise((resolve) => {
     chrome.tabs.create(createProps, (tab) => {
-      if (tab?.windowId) {
+      if (tab?.windowId && getBrowserWindowId() === undefined) {
         chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
       }
       resolve(tab?.id || null);
@@ -3157,6 +3170,7 @@ export async function createNewTab(url: string): Promise<number | null> {
 }
 
 export async function closeBrowserTab(tabId: number): Promise<boolean> {
+  await assertOwnedTab(tabId);
   if (typeof chrome === 'undefined' || !chrome.tabs) {
     return true;
   }

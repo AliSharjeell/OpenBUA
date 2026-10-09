@@ -1,3 +1,4 @@
+import { initializeBrowserWindow, getBrowserWindowId } from '../agent/window-context';
 import { referencedAttachments } from '../services/attachment-references';
 import { suggestSessionTitle } from '../services/session-title';
 import { extractTextForDocument, detectDocumentCategory } from '../services/pdf-parser';
@@ -177,6 +178,7 @@ export function App() {
     let cancelled = false;
     let migrationTimer: ReturnType<typeof setTimeout> | undefined;
     async function init() {
+      await initializeBrowserWindow();
       const [loadedSettings, loadedGlobal, loadedSessions, lastActive] = await Promise.all([
         loadSettings(),
         loadGlobalMemories(),
@@ -185,6 +187,12 @@ export function App() {
       ]);
       if (cancelled) return;
       
+      if (getBrowserWindowId() !== undefined && !lastActive.sessionId) {
+        const fresh = await createNewChatSession();
+        loadedSessions.splice(0, loadedSessions.length, ...(await loadChatSessions()));
+        lastActive.sessionId = fresh.id;
+        await saveLastActiveState('chat', fresh.id);
+      }
       const targetSessionId = (lastActive.sessionId && loadedSessions.some((s) => s.id === lastActive.sessionId))
         ? lastActive.sessionId
         : (loadedSessions[0]?.id || 'session_default');

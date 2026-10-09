@@ -1,3 +1,4 @@
+import { getBrowserWindowId } from '../agent/window-context';
 // Local storage service using chrome.storage.local with browser fallback for dev/testing
 
 import { AppSettings, UserDocument, ChatMessage, ChatSession, SuggestedMemory } from '../types';
@@ -468,15 +469,16 @@ export function generateSessionTitle(prompt: string): string {
 // Last Active State (Nav Tab & Session ID Persistence)
 // ========================================================
 const LAST_ACTIVE_NAV_TAB_KEY = 'openbua_last_active_nav_tab';
+const windowStateKey = (key: string) => getBrowserWindowId() === undefined ? key : `${key}_window_${getBrowserWindowId()}`;
 const LAST_ACTIVE_SESSION_ID_KEY = 'openbua_last_active_session_id';
 
 export async function saveLastActiveState(
   navTab: 'chat' | 'memory' | 'settings' | 'preview' | 'suggestions',
   sessionId?: string
 ): Promise<void> {
-  const ops: Promise<void>[] = [setStorageItem(LAST_ACTIVE_NAV_TAB_KEY, navTab)];
+  const ops: Promise<void>[] = [setStorageItem(windowStateKey(LAST_ACTIVE_NAV_TAB_KEY), navTab)];
   if (sessionId) {
-    ops.push(setStorageItem(LAST_ACTIVE_SESSION_ID_KEY, sessionId));
+    ops.push(setStorageItem(windowStateKey(LAST_ACTIVE_SESSION_ID_KEY), sessionId));
   }
   await Promise.all(ops);
 }
@@ -486,8 +488,8 @@ export async function loadLastActiveState(): Promise<{
   sessionId?: string;
 }> {
   const [navTab, sessionId] = await Promise.all([
-    getStorageItem<'chat' | 'memory' | 'settings' | 'preview' | 'suggestions'>(LAST_ACTIVE_NAV_TAB_KEY, 'chat'),
-    getStorageItem<string | undefined>(LAST_ACTIVE_SESSION_ID_KEY, undefined),
+    getStorageItem<'chat' | 'memory' | 'settings' | 'preview' | 'suggestions'>(windowStateKey(LAST_ACTIVE_NAV_TAB_KEY), 'chat'),
+    getStorageItem<string | undefined>(windowStateKey(LAST_ACTIVE_SESSION_ID_KEY), undefined),
   ]);
   return { navTab, sessionId };
 }
