@@ -25,13 +25,13 @@ if (!existsSync(join(dist, 'assets'))) {
   process.exit(1);
 }
 
-const bundleName = readdirSync(join(dist, 'assets')).find((f) => /^sidepanel-.*\.js$/.test(f));
-const bundle = readFileSync(join(dist, 'assets', bundleName), 'utf8');
-check('found built sidepanel bundle', Boolean(bundleName), bundleName);
-
 // Locate the serialized commit function by a literal only it contains, so the
-// test survives minifier renames.
+// test survives minifier renames and shared chunks used by worker.html.
 const ANCHOR = 'No active file transfer on this page.';
+const bundles = readdirSync(join(dist, 'assets')).filter(f => f.endsWith('.js'));
+const bundleName = bundles.find(name => readFileSync(join(dist, 'assets', name), 'utf8').includes(ANCHOR));
+check('found shipped file-transfer chunk', Boolean(bundleName), bundleName);
+const bundle = bundleName ? readFileSync(join(dist, 'assets', bundleName), 'utf8') : '';
 const anchorAt = bundle.indexOf(ANCHOR);
 check('fallback function present in built bundle', anchorAt > 0);
 
