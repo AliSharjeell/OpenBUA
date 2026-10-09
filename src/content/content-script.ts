@@ -2039,7 +2039,7 @@ function typeTextIntoPage(
     // handler, so a synthetic keydown is the correct signal there. A plain
     // contenteditable ignores untrusted keydowns, so it needs execCommand.
     const jsDriven = editor.isCanvas || target.closest('.kix-appview') !== null;
-    if (/reddit\.com$/i.test(location.hostname) && target.isContentEditable) return { success: false, message: 'Use prepare_reddit_post to replace and verify the distinct title/body. Do not append at an uncertain body caret.', target: 'reddit-body', lines: 0, chars: 0, verified: false };
+    if (/reddit\.com$/i.test(location.hostname) && /\/r\/[^/]+\/submit\/?$/.test(location.pathname) && target.isContentEditable) return { success: false, message: 'Use prepare_reddit_post to replace and verify the distinct title/body. Do not append at an uncertain body caret.', target: 'reddit-body', lines: 0, chars: 0, verified: false };
     if (/^(INPUT|TEXTAREA)$/.test(target.tagName) && !jsDriven) {
       const input = target as HTMLInputElement | HTMLTextAreaElement;
       const start = opts.clearFirst ? 0 : input.selectionStart ?? input.value.length;
@@ -2069,11 +2069,16 @@ function typeTextIntoPage(
       const doc = target.ownerDocument || document;
       if (target.isContentEditable) {
         try {
-          doc.execCommand('selectAll', false);
+          const root = target.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null };
+          const selection = root.getSelection?.() || doc.getSelection();
+          if (!selection) return { success: false, message: 'Could not select the reply editor. No text inserted.', verified: false };
+          const range = doc.createRange(); range.selectNodeContents(target);
+          selection.removeAllRanges(); selection.addRange(range);
           doc.execCommand('delete', false);
         } catch {
           /* fall through */
         }
+        if ((target.innerText || target.textContent || '').trim()) return { success: false, message: 'Editor did not clear. No replacement appended.', verified: false };
       } else if (/^(INPUT|TEXTAREA)$/.test(target.tagName)) {
         (target as HTMLTextAreaElement).value = '';
       }

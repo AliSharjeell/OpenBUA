@@ -580,7 +580,8 @@ function inPageFillForm(
         target.focus();
 
         // 1. Clear any existing content cleanly
-        const sel = window.getSelection();
+        const editorRoot = target.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null };
+        const sel = editorRoot.getSelection?.() || window.getSelection();
         if (sel) {
           const range = document.createRange();
           range.selectNodeContents(target);
@@ -588,9 +589,12 @@ function inPageFillForm(
           sel.addRange(range);
         }
         try {
-          document.execCommand('selectAll', false, undefined);
           document.execCommand('delete', false, undefined);
         } catch {}
+
+        if ((target.innerText || target.textContent || '').trim()) {
+          throw new Error('Editor did not clear. No replacement text inserted; inspect the exact editor before retrying.');
+        }
 
         // 2. Insert text via browser's native text insertion command (single clean execution)
         let inserted = false;
@@ -679,7 +683,9 @@ function inPageFillForm(
       const isFileInput = target.tagName.toLowerCase() === 'input' && (target as HTMLInputElement).type === 'file';
       const isFileAttached = isFileInput && ((target as HTMLInputElement).files?.length ?? 0) > 0;
 
-      const verified =
+      const verified = isContentEditable
+        ? actualVal.replace(/\r\n/g, '\n').trim() === item.value.replace(/\r\n/g, '\n').trim()
+        :
         isFileAttached ||
         isDigitsMatch ||
         isSelectMatch ||
@@ -2020,7 +2026,7 @@ function inPageTypeText(
   const isCanvas = Boolean(
     document.querySelector('.kix-appview, .kix-canvas-tile-content, .docs-texteventtarget-iframe')
   );
-  if (/reddit\.com$/i.test(location.hostname) && target.isContentEditable) return { success: false, message: 'Use prepare_reddit_post to replace the distinct title and body. No text appended.', lines: 0, chars: 0 };
+  if (/reddit\.com$/i.test(location.hostname) && /\/r\/[^/]+\/submit\/?$/.test(location.pathname) && target.isContentEditable) return { success: false, message: 'Use prepare_reddit_post to replace the distinct title and body. No text appended.', lines: 0, chars: 0 };
   if (clearFirst && target.isContentEditable && !isCanvas) {
     const root = target.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null };
     const selection = root.getSelection?.() || doc.getSelection();
