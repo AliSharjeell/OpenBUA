@@ -159,7 +159,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'CAPTURE_VISIBLE_TAB') {
-    captureScheduled(message.windowId, { format: 'jpeg', quality: 80 })
+    captureScheduled(message.windowId, { format: 'jpeg', quality: 80 }, message.tabId)
       .then(dataUrl => sendResponse({ success: true, dataUrl }))
       .catch(error => sendResponse({ success: false, error: error?.message || String(error) }));
     return true;
