@@ -1,3 +1,100 @@
+async function performNodeWebSearch(query, limit = 5) {
+  const cleanQuery = (query || '').replace(/["'“”]/g, ' ').replace(/\s+/g, ' ').trim();
+  const clean = str => (str || '').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  const maxResults = Math.min(Math.max(1, limit || 5), 10);
+
+  // 1. DuckDuckGo HTML
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const resp = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQuery)}`, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+    clearTimeout(timer);
+
+    if (resp.ok) {
+      const html = await resp.text();
+      const results = [];
+      const titleRegex = /<h2[^>]*class="[^"]*result__title[^"]*"[^>]*>[\s\S]*?<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+      const snippetRegex = /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+
+      const rawUrls = [];
+      const rawTitles = [];
+      let m;
+      while ((m = titleRegex.exec(html)) !== null) {
+        let link = m[1];
+        if (link.includes('uddg=')) {
+          try {
+            const parsed = new URL('https://duckduckgo.com' + link);
+            link = decodeURIComponent(parsed.searchParams.get('uddg') || link);
+          } catch {}
+        }
+        rawUrls.push(link);
+        rawTitles.push(clean(m[2]));
+      }
+
+      const rawSnippets = [];
+      while ((m = snippetRegex.exec(html)) !== null) {
+        rawSnippets.push(clean(m[1]));
+      }
+
+      const count = Math.min(rawTitles.length, rawSnippets.length, maxResults);
+      for (let i = 0; i < count; i++) {
+        results.push({
+          title: rawTitles[i],
+          url: rawUrls[i],
+          snippet: rawSnippets[i],
+        });
+      }
+
+      if (results.length > 0) {
+        return { success: true, query: cleanQuery, results };
+      }
+    }
+  } catch {}
+
+  // 2. DuckDuckGo Instant Answer API
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const resp = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(cleanQuery)}&format=json`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (resp.ok) {
+      const data = await resp.json();
+      const results = [];
+      if (data.AbstractText) {
+        results.push({
+          title: data.Heading || cleanQuery,
+          url: data.AbstractURL || '',
+          snippet: data.AbstractText,
+        });
+      }
+      for (const topic of data.RelatedTopics || []) {
+        if (results.length >= maxResults) break;
+        if (topic.Text && topic.FirstURL) {
+          results.push({
+            title: topic.Text.split(' - ')[0] || cleanQuery,
+            url: topic.FirstURL,
+            snippet: topic.Text,
+          });
+        }
+      }
+      if (results.length > 0) {
+        return { success: true, query: cleanQuery, results };
+      }
+    }
+  } catch {}
+
+  return { success: false, query: cleanQuery, results: [] };
+}
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -176,6 +273,20 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     }
     if (name === "activity") {
       return asMcp(await command("activity", args));
+    }
+    if (name === "search_web") {
+      const searchRes = await performNodeWebSearch(args.query, args.limit);
+      if (searchRes.success && searchRes.results.length > 0) {
+        const formatted = searchRes.results
+          .map((r, idx) => `${idx + 1}. **${r.title}**\n   URL: ${r.url}\n   Snippet: ${r.snippet}`)
+          .join('\n\n');
+        return asMcp({
+          content: [
+            { type: 'text', text: `Found ${searchRes.results.length} web search results for "${searchRes.query}":\n\n${formatted}` },
+          ],
+          details: searchRes,
+        });
+      }
     }
     const generic = catalog.some(tool => tool.name === name);
     const value = generic ? await command("tool", { name, params: args }) : await command(name, args);

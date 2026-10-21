@@ -4069,6 +4069,46 @@ export async function searchWeb(
     console.warn('[OpenBUA] searchWeb fallback fetch error:', err?.message || err);
   }
 
+  // 3. Fallback: DuckDuckGo Instant Answer API (CORS friendly)
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const apiResp = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(cleanQuery)}&format=json`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (apiResp.ok) {
+      const data = await apiResp.json();
+      const results: SearchWebResult[] = [];
+      if (data.AbstractText) {
+        results.push({
+          title: data.Heading || cleanQuery,
+          url: data.AbstractURL || '',
+          snippet: data.AbstractText,
+        });
+      }
+      for (const topic of data.RelatedTopics || []) {
+        if (results.length >= maxResults) break;
+        if (topic.Text && topic.FirstURL) {
+          results.push({
+            title: topic.Text.split(' - ')[0] || cleanQuery,
+            url: topic.FirstURL,
+            snippet: topic.Text,
+          });
+        }
+      }
+      if (results.length > 0) {
+        return {
+          success: true,
+          query: cleanQuery,
+          results,
+        };
+      }
+    }
+  } catch (err: any) {
+    console.warn('[OpenBUA] searchWeb API fetch error:', err?.message || err);
+  }
+
   return {
     success: false,
     query: cleanQuery,
