@@ -1587,6 +1587,8 @@ export async function fillActiveTabFields(
     console.log('[Dev Mock] Filled fields:', assignments);
     return {
       successCount: assignments.length,
+      totalRequested: assignments.length,
+      verifiedCount: assignments.length,
       errors: [],
       verifications: assignments.map(a => ({
         refId: a.refId || '',
@@ -1606,7 +1608,7 @@ export async function fillActiveTabFields(
   // Pre-fetch stored documents to automatically attach raw file binary if assignment targets a file or references a stored file/resume
   if (/^https:\/\/(?:www\.|old\.|new\.)?reddit\.com\/r\/[^/]+\/submit\/?(?:\?|$)/i.test(activeTab.url || '')) {
     const draft = await writeRedditDraft(activeTab.id, assignments);
-    if (!('mode' in draft) || !['file-input', 'native-form'].includes(draft.mode)) return draft;
+    if (!('mode' in draft) || !['file-input', 'native-form'].includes(draft.mode)) return { ...draft, totalRequested: assignments.length, verifiedCount: draft.verifications.filter(item => item.verified).length } as FormFillResult;
   }
   const tabKey = getActiveSessionIdState();
   const [globalDocs, tabDocs] = await Promise.all([
@@ -2008,11 +2010,36 @@ function inPageClickAtPoint(
   if (count > 1) target.dispatchEvent(new MouseEvent('dblclick', { ...common, detail: 2 }));
 
   const tag = target.tagName.toLowerCase();
+  // The editor's hidden text mirror reports the line the caret actually landed
+  // on. Trust this over the screenshot estimate - a click a few rows off lands
+  // in a different bullet, and the mirror is the only ground truth for where
+  // the next type_text call will write. Inlined: executeScript serializes one
+  // function only, so this cannot call a module-scope helper.
+  let caretLine = '';
+  try {
+    const frames = Array.from(document.querySelectorAll('iframe'));
+    for (const frame of frames) {
+      const marker = `${frame.className || ''} ${frame.id || ''} ${frame.src || ''}`;
+      if (!/texteventtarget|docs-texteventtarget/i.test(marker)) continue;
+      const inner = frame.contentDocument;
+      if (!inner || !inner.body) continue;
+      const flat = (inner.body.textContent || '').replace(/\s+/g, ' ').trim();
+      caretLine = flat.length <= 160 ? flat : `${flat.slice(0, 159)}…`;
+      break;
+    }
+  } catch {
+    /* cross-origin frame: no mirror available */
+  }
+  const landing = caretLine
+    ? ` The caret now sits on a line that reads: "${caretLine}". If that is NOT the line you meant, ` +
+      `click again higher or lower before typing.`
+    : '';
   return {
     success: true,
     message:
       `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>${count > 1 ? ` (${count} clicks)` : ''}` +
-      `${shiftKey ? ' with Shift held, extending the selection' : ''}. Click dispatched. A click alone does not confirm navigation or establish a text caret; use the actual link/control when the page has not changed.`,
+      `${shiftKey ? ' with Shift held, extending the selection' : ''}.${landing} ` +
+      `Click dispatched. A click alone does not confirm navigation or establish a text caret; use the actual link/control when the page has not changed.`,
     element: tag,
     viewport,
   };
@@ -2221,39 +2248,79 @@ function inPageTypeText(
   }
 
   const failureMessage =
-    `The caret is probably not inside the document. Take a screenshot, click at the exact spot in the document ` +
-    `where the text must go, and call type_text again once. Do NOT try to "give the editor focus" by pressing ` +
-    `caret-movement keys - they reach the document and move the caret. If the one retry also fails, report ` +
-    `the blocker instead of looping.`;
+    `Take a capture_tab_screenshot FIRST and look for the text. If it is already there, do NOT type it again - ` +
+    `retyping text that landed is what duplicates it into the wrong line. Only if the screenshot shows nothing ` +
+    `was written: click_at_position on the exact line where the text must go, then type once. Do NOT try to ` +
+    `"give the editor focus" by pressing caret-movement keys - they reach the document and move the caret.`;
 
   if (isCanvas) {
-    // The hidden input frame's textContent is not proof - it grows even when
-    // the editor discards the text, which is how type_text reported "Typed 44
-    // characters" into a Google Doc that never changed. Confirm against the
-    // page text the user sees instead.
-    const squash = (s: string) => s.replace(/\s+/g, '');
+    // The hidden input frame's textContent is not proof of a successful insert
+    // (it grows even when the editor discards the text), but it IS the editor's
+    // own mirror of the line the caret sits on - the only ground truth we have
+    // for WHERE the caret is. Google Docs keeps body text off the DOM entirely
+    // (body.innerText only carries the outline), so a missing substring is not
+    // proof the insert failed either. Judge every surface we can read, fold
+    // typography so a dash mismatch cannot fail the check, and when nothing is
+    // observable say "could not confirm" and send the agent to a screenshot -
+    // never to a blind retype.
+    const clip = (t: string, max = 160): string => {
+      const flat = (t || '').replace(/\s+/g, ' ').trim();
+      return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
+    };
+    const fold = (s: string) =>
+      s
+        .replace(/[‐-―−–—-]/g, '-')
+        .replace(/[‘’‚]/g, "'")
+        .replace(/[“”„]/g, '"')
+        .replace(/[   ]/g, ' ')
+        .replace(/\s+/g, '');
     let pageText = '';
     try {
       pageText = (document.body && (document.body.innerText || document.body.textContent || '')) || '';
     } catch {
       pageText = '';
     }
-    const after = squash(pageText);
-    const wanted = lines.map(squash).filter(Boolean);
-    const confirmed = wanted.length === 0 || wanted.every((chunk) => after.includes(chunk));
+    let lineText = '';
+    try {
+      const frames = Array.from(document.querySelectorAll('iframe'));
+      for (const frame of frames) {
+        const marker = `${frame.className || ''} ${frame.id || ''} ${frame.src || ''}`;
+        if (!/texteventtarget|docs-texteventtarget/i.test(marker)) continue;
+        const inner = frame.contentDocument;
+        if (!inner || !inner.body) continue;
+        lineText = clip(inner.body.textContent || '');
+        break;
+      }
+    } catch {
+      /* cross-origin frame: no mirror available */
+    }
+    const onPage = fold(pageText);
+    const onLine = fold(lineText);
+    const wanted = lines.map(fold).filter(Boolean);
+    const hits = wanted.filter((chunk) => onPage.includes(chunk) || onLine.includes(chunk));
+    const confirmed = wanted.length === 0 || hits.length === wanted.length;
+    const landingNote = lineText ? ` The caret sits on a line that reads: "${lineText}"` : '';
     if (!confirmed) {
+      const partial =
+        hits.length > 0
+          ? ` Only ${hits.length} of ${wanted.length} line(s) are visible in the text this page exposes.`
+          : '';
       return {
         success: false,
         message:
-          `Dispatched ${chars} character(s) to the canvas editor, but the document text did not change, so the ` +
-          `editor did not accept the text. ${failureMessage}`,
+          `Dispatched ${chars} character(s) to the canvas editor, but I cannot confirm the text from the DOM: ` +
+          `this page does not expose its body text (Google Docs keeps it on a canvas), so "not found" is not ` +
+          `proof the insert failed.${partial}${landingNote} ${failureMessage}`,
         lines: lines.length,
         chars,
       };
     }
     return {
       success: true,
-      message: `Typed ${chars} character(s) and ${breaks} line break(s) into the canvas editor. Verified against the document text.`,
+      message:
+        `Typed ${chars} character(s) and ${breaks} line break(s) into the canvas editor. Verified against the ` +
+        `document text.${landingNote} Confirm with capture_tab_screenshot that it landed on the intended line, ` +
+        `not merged into another one.`,
       lines: lines.length,
       chars,
     };

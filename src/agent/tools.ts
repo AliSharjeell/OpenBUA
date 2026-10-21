@@ -11,7 +11,8 @@ import { reviewRedditDraft } from './reddit-review';
 import { xCommunityAction, interceptXCommunityClick } from './x-community';
 import { protectPageTrust, type PageTrustPolicy } from './page-trust';
 // Tool definitions conforming to @earendil-works/pi-agent-core AgentTool interface
-import { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
+import { AgentTool, type AgentToolResult as PiAgentToolResult } from '@earendil-works/pi-agent-core';
+type AgentToolResult = PiAgentToolResult<any>;
 import { Type } from '@sinclair/typebox';
 import { checkCanvasTextInsertion } from './canvas-edit-check';
 import { protectDocsEdits, DocsEditPolicy } from './docs-edit-safety';

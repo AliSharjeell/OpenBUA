@@ -151,7 +151,8 @@ export interface FieldFillVerification {
   requestedValue: string;
   actualValue: string;
   verified: boolean;
-  status: string;
+  status?: string;
+  elementFound?: boolean;
 }
 
 export interface FormFillResult {

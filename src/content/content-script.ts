@@ -1,3 +1,4 @@
+import type { FormFillResult, FieldFillVerification } from '../types';
 // AutoForm AI - Content Script
 // Injected into web pages to inspect DOM, extract form elements, and fill form fields.
 import { createDomQuery } from '../agent/dom-query';
@@ -1069,7 +1070,7 @@ async function fillFormFields(
       let isRecipientChip = false;
       if (isRecipientInput) {
         const parentContainer = target.closest('tr, td, .form-group, div.M9, div[role="dialog"], div[aria-label*="To" i]');
-        const containerText = parentContainer ? (parentContainer.innerText || parentContainer.textContent || '') : '';
+        const containerText = parentContainer ? ((parentContainer as HTMLElement).innerText || parentContainer.textContent || '') : '';
         isRecipientChip = containerText.toLowerCase().includes(item.value.toLowerCase().trim().slice(0, 10));
       }
 
@@ -1189,7 +1190,7 @@ async function fillFormFields(
     }
   }
 
-  return { successCount, errors, verifications };
+  return { successCount, totalRequested: assignments.length, verifiedCount: verifications.filter(item => item.verified).length, errors, verifications };
 }
 
 function clickElement(refId?: string, selector?: string, text?: string): { success: boolean; message: string } {
@@ -1824,6 +1825,40 @@ function resolveTypingTarget(): { target: HTMLElement; frame: HTMLIFrameElement 
   return { target: document.body, frame: null };
 }
 
+/** Trim a reported line so a whole paragraph cannot flood the tool result. */
+function clipLine(text: string, max = 160): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
+}
+
+/**
+ * The text of the line the caret currently sits on, from the editor's own
+ * mirror.
+ *
+ * Canvas editors keep the document off the DOM, but Google Docs mirrors the
+ * caret's line into its hidden input frame. That mirror is the only ground
+ * truth we have for WHERE the caret is: screenshot coordinates are an estimate,
+ * and a model that cannot see its own mistake keeps typing into the wrong
+ * paragraph - which is exactly how a run wrote a project into an experience
+ * bullet while insisting it was at the heading it meant. This reports
+ * placement only; it is not proof the document changed.
+ */
+function readEditorLine(): string {
+  try {
+    const frames = Array.from(document.querySelectorAll<HTMLIFrameElement>('iframe'));
+    for (const frame of frames) {
+      const marker = `${frame.className || ''} ${frame.id || ''} ${frame.src || ''}`;
+      if (!/texteventtarget|docs-texteventtarget/i.test(marker)) continue;
+      const inner = frame.contentDocument;
+      if (!inner || !inner.body) continue;
+      return clipLine(inner.body.textContent || '');
+    }
+  } catch {
+    /* cross-origin frame: no mirror available */
+  }
+  return '';
+}
+
 /** Correct keyCode/code pairs for the keys an agent actually presses. */
 const SPECIAL_KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
   ENTER: { code: 'Enter', keyCode: 13, text: '\r' },
@@ -2064,6 +2099,22 @@ function typeTextIntoPage(
 
     // Snapshot what we can observe so we never report success we cannot back up.
     const beforeLength = (target.textContent || '').length;
+    // Also snapshot the two surfaces used to VERIFY a canvas insert. A later
+    // read alone cannot tell "the text landed" from "the text was already
+    // sitting there" - the hidden input frame's buffer is grown by
+    // execCommand('insertText') while the canvas document stays unchanged, and
+    // a copy that was already on the caret's line would vouch for a second
+    // insert that went somewhere else. Only NEW appearance counts as evidence.
+    const readPageText = (): string => {
+      try {
+        const body = document.body as HTMLElement | null;
+        return (body && (body.innerText || body.textContent || '')) || '';
+      } catch {
+        return '';
+      }
+    };
+    const pageTextBefore = readPageText();
+    const lineTextBefore = readEditorLine();
 
     if (opts.clearFirst) {
       const doc = target.ownerDocument || document;
@@ -2071,14 +2122,14 @@ function typeTextIntoPage(
         try {
           const root = target.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null };
           const selection = root.getSelection?.() || doc.getSelection();
-          if (!selection) return { success: false, message: 'Could not select the reply editor. No text inserted.', verified: false };
+          if (!selection) return { success: false, message: 'Could not select the reply editor. No text inserted.', verified: false, target: target.tagName, lines: 0, chars: 0 };
           const range = doc.createRange(); range.selectNodeContents(target);
           selection.removeAllRanges(); selection.addRange(range);
           doc.execCommand('delete', false);
         } catch {
           /* fall through */
         }
-        if ((target.innerText || target.textContent || '').trim()) return { success: false, message: 'Editor did not clear. No replacement appended.', verified: false };
+        if ((target.innerText || target.textContent || '').trim()) return { success: false, message: 'Editor did not clear. No replacement appended.', verified: false, target: target.tagName, lines: 0, chars: 0 };
       } else if (/^(INPUT|TEXTAREA)$/.test(target.tagName)) {
         (target as HTMLTextAreaElement).value = '';
       }
@@ -2118,15 +2169,27 @@ function typeTextIntoPage(
     const isPlainTextField = /^(INPUT|TEXTAREA)$/.test(target.tagName);
 
     // Claiming "Typed N characters" when the document never changed is what
-    // makes an agent retry the same call forever. For a canvas editor the
-    // hidden input frame's textContent is NOT proof - it grows even when the
-    // editor discards the text - so confirm against the page text the user
-    // sees, the same source get_page_content reads.
+    // makes an agent retry the same call forever. But the reverse claim is
+    // just as destructive: Google Docs keeps body text OFF the DOM (body
+    //.innerText only carries the outline), so a missing substring is not proof
+    // the insert failed - and a verdict of "did not change" told the agent to
+    // type the same text again, which pasted a project title twice into one
+    // experience bullet. So: judge every surface we can read, fold typography
+    // so a dash mismatch cannot fail the check, and when nothing is observable
+    // say "could not confirm" and send the agent to a screenshot - never to a
+    // blind retype.
+    const fold = (s: string) =>
+      s
+        .replace(/[‐-―−–—-]/g, '-')
+        .replace(/[‘’‚]/g, "'")
+        .replace(/[“”„]/g, '"')
+        .replace(/[   ]/g, ' ')
+        .replace(/\s+/g, '');
     let confirmed: boolean;
+    let landingNote = '';
     if (isPlainTextField) {
       confirmed = true;
     } else if (jsDriven) {
-      const squash = (s: string) => s.replace(/\s+/g, '');
       let pageText = '';
       try {
         const body = document.body as HTMLElement | null;
@@ -2134,9 +2197,21 @@ function typeTextIntoPage(
       } catch {
         pageText = '';
       }
-      const after = squash(pageText);
-      const wanted = lines.map(squash).filter(Boolean);
-      confirmed = wanted.length === 0 || wanted.every((chunk) => after.includes(chunk));
+      const lineText = readEditorLine();
+      const onPage = fold(pageText);
+      const onLine = fold(lineText);
+      const wanted = lines.map(fold).filter(Boolean);
+      const hits = wanted.filter((chunk) => onPage.includes(chunk) || onLine.includes(chunk));
+      confirmed = wanted.length === 0 || hits.length === wanted.length;
+      const partial = hits.length > 0 && hits.length < wanted.length;
+      if (lineText) {
+        landingNote = ` The caret sits on a line that reads: "${lineText}"`;
+      }
+      if (partial) {
+        landingNote +=
+          ` Only ${hits.length} of ${wanted.length} line(s) are visible in the text this page exposes, ` +
+          `so confirm the rest with capture_tab_screenshot.`;
+      }
     } else {
       confirmed = (target.textContent || '').length > beforeLength;
     }
@@ -2150,11 +2225,14 @@ function typeTextIntoPage(
         success: false,
         verified: false,
         message:
-          `Dispatched ${typed} character(s) to ${where}, but the document text did not change, so the editor ` +
-          `did not accept the text. The caret is probably not inside the document. Take a capture_tab_screenshot, ` +
-          `click_at_position on the exact line where the text must go, and call type_text again once. ` +
+          `Dispatched ${typed} character(s) to ${where}, but I cannot confirm the text from the DOM: ` +
+          `this page does not expose its body text (Google Docs keeps it on a canvas), so "not found" is not ` +
+          `proof the insert failed.${landingNote} ` +
+          `Take a capture_tab_screenshot FIRST and look for the text. If it is already there, do NOT type it ` +
+          `again - retyping text that landed is what duplicates it into the wrong line. Only if the screenshot ` +
+          `shows nothing was written: click_at_position on the exact line where the text must go, then type once. ` +
           `Do NOT try to "give the editor focus" by pressing caret-movement keys - they reach the document and ` +
-          `move the caret. If the one retry also fails, report the blocker instead of looping.`,
+          `move the caret.`,
         target: where,
         lines: lines.length,
         chars: typed,
@@ -2168,7 +2246,11 @@ function typeTextIntoPage(
         `Typed ${typed} character(s) and ${newlines} line break(s) into ${where}.${newlineNote}` +
         (isPlainTextField
           ? ''
-          : ' Verified against the document text. Confirm with capture_tab_screenshot if the formatting matters.'),
+          : ' Verified against the document text.') +
+        landingNote +
+        (isPlainTextField
+          ? ''
+          : ' Confirm with capture_tab_screenshot that it landed on the intended line, not merged into another one.'),
       target: where,
       lines: lines.length,
       chars: typed,
@@ -2342,12 +2424,21 @@ function clickAtPoint(
     const hint = editor.isCanvas
       ? ` That is the ${editor.name} canvas, so the caret should now be placed there.`
       : '';
+    // The editor's hidden text mirror reports the line the caret actually
+    // landed on. Trust this over the screenshot estimate - a click a few rows
+    // off lands in a different bullet, and the mirror is the only ground truth
+    // for where the next type_text call will write.
+    const caretLine = readEditorLine();
+    const landing = caretLine
+      ? ` The caret now sits on a line that reads: "${caretLine}". If that is NOT the line you meant, ` +
+        `click again higher or lower before typing.`
+      : '';
 
     return {
       success: true,
       message:
         `Clicked at (${Math.round(x)}, ${Math.round(y)}) CSS px on <${tag}>${clickCount > 1 ? ` (${clickCount} clicks)` : ''}` +
-        `${opts.shiftKey ? ' with Shift held, extending the selection' : ''}.${hint} ` +
+        `${opts.shiftKey ? ' with Shift held, extending the selection' : ''}.${hint}${landing} ` +
         (editor.isCanvas ? 'Inspect caret placement before typing.' : 'Click dispatched. This does not confirm navigation or a text caret. Prefer the actual link/control if the page has not changed.'),
       element: tag,
       canvasEditor: editor.isCanvas ? editor.name : null,

@@ -983,16 +983,14 @@ export function App() {
         <div className="flex items-center pointer-events-auto">
           <button
             type="button"
-            onClick={() => handleSelectNavTab(activeNavTab === 'suggestions' ? 'chat' : 'suggestions')}
+            onClick={() => handleSelectNavTab('suggestions')}
             title={`Suggested Memories${suggestedMemories.length > 0 ? ` (${suggestedMemories.length} pending)` : ''}`}
             className={`relative w-9 h-9 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border transition-all shadow-xl shadow-black/60 cursor-pointer active:scale-95 flex items-center justify-center ${
-              activeNavTab === 'suggestions'
-                ? 'border-zinc-700 bg-zinc-800 text-white'
-                : 'border-zinc-800/90 text-zinc-300 hover:text-white'
+              'border-zinc-800/90 text-zinc-300 hover:text-white'
             }`}
           >
             <Brain className="w-4 h-4 text-white" />
-            {suggestedMemories.length > 0 && activeNavTab !== 'suggestions' && (
+            {suggestedMemories.length > 0 && (
               <span
                 className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full ring-2 ring-zinc-950 animate-pulse"
                 style={{ backgroundColor: '#007AFF' }}

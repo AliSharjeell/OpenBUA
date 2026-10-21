@@ -10,12 +10,16 @@ import {
   ThinkingContent,
   ToolCall,
   TranscriptContext,
+  type ImageContent,
 } from '@earendil-works/pi-ai';
 import { ALL_AGENT_TOOLS } from './tools';
 import { recoveryRequiresTool, toolChoiceRejected } from './recovery-tool-choice';
 import { ProviderConfig } from '../types';
 import { incrementGeminiDailyUsage } from '../services/storage';
 
+function assistantMetadata(config: ProviderConfig) {
+  return { api: config.provider === 'anthropic' ? 'anthropic-messages' as const : 'openai-completions' as const, provider: config.provider, model: config.model, timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+}
 let lastFreeRequestTimestamp = 0;
 const unsupportedReasoningEndpoints = new Set<string>();
 
@@ -64,9 +68,10 @@ export async function createStreamFn(
         await streamOpenAI(config, model, context, stream, signal);
       }
     } catch (err: any) {
-      console.error('[AutoForm StreamAdapter] Stream error:', err);
+      console.error('[OpenBUA StreamAdapter] Stream error:', err);
       if (signal?.aborted) {
         const abortedMsg: AssistantMessage = {
+          ...assistantMetadata(config),
           role: 'assistant',
           content: [{ type: 'text', text: 'Agent interrupted. Type continue to resume.' }],
           stopReason: 'aborted',
@@ -76,6 +81,7 @@ export async function createStreamFn(
         stream.end(abortedMsg);
       } else {
         const errorMsg: AssistantMessage = {
+          ...assistantMetadata(config),
           role: 'assistant',
           content: [{ type: 'text', text: `API Error: ${err?.message || String(err)}` }],
           stopReason: 'error',
@@ -114,7 +120,7 @@ export function analyzeAssistantTurns(messages: any[]): {
     if (m.role === 'assistant') {
       const toolCallIds: string[] = [];
       if (Array.isArray(m.content)) {
-        for (const block of m.content) {
+        for (const block of m.content as any[]) {
           if ((block.type === 'toolCall' || block.type === 'tool_use') && block.id) {
             toolCallIds.push(block.id);
             const name = block.name || block.function?.name || '';
@@ -174,7 +180,7 @@ async function streamOpenAI(
   }
 
   // 1. Extract system prompt from context.messages (where pi-agent-core carries it)
-  let systemPrompt = context.systemPrompt || '';
+  let systemPrompt = (context as TranscriptContext & { systemPrompt?: string }).systemPrompt || '';
   for (const m of context.messages) {
     if (m.role === 'system') {
       const text =
@@ -319,7 +325,7 @@ async function streamOpenAI(
         : JSON.stringify(m.content || '');
 
       const imageBlocks = Array.isArray(m.content)
-        ? m.content.filter((c: any) => c.type === 'image' && c.data)
+        ? m.content.filter((c): c is ImageContent => c.type === 'image' && Boolean(c.data))
         : [];
 
       if (isOlderTurn) {
@@ -468,6 +474,7 @@ async function streamOpenAI(
       break;
     }
 
+    if (!response) throw new Error('No response from provider.');
     const errorBody = await response.text();
 
     if (payload.tool_choice === 'required' && toolChoiceRejected(response.status, errorBody) && attempt < maxRetries) {
@@ -537,6 +544,7 @@ async function streamOpenAI(
       ) {
         stream.push({
           type: 'text_delta',
+          contentIndex: 0, partial: { ...assistantMetadata(config), role: 'assistant', content: [], stopReason: 'stop' },
           delta: `⏳ Free tier token limit reached (requested size exceeded limit). Auto-compacting conversation history...\n`,
         });
 
@@ -575,6 +583,7 @@ async function streamOpenAI(
         payload.max_tokens = Math.max(200, Math.floor(currentMax * 0.5));
         stream.push({
           type: 'text_delta',
+          contentIndex: 0, partial: { ...assistantMetadata(config), role: 'assistant', content: [], stopReason: 'stop' },
           delta: `⏳ Output token limit hit. Retrying with shorter response (max ${payload.max_tokens} tokens)...\n`,
         });
         await new Promise((r) => setTimeout(r, 4000));
@@ -596,6 +605,7 @@ async function streamOpenAI(
         if (signal?.aborted) break;
         stream.push({
           type: 'text_delta',
+          contentIndex: 0, partial: { ...assistantMetadata(config), role: 'assistant', content: [], stopReason: 'stop' },
           delta: attempt === 0 && s === waitSeconds
             ? `⏳ Groq Free Tier rate limit reached. Auto-resuming in ${s}s...\n`
             : ``,
@@ -632,6 +642,7 @@ async function streamOpenAI(
   const decoder = new TextDecoder('utf-8');
 
   let assistantMessage: AssistantMessage = {
+    ...assistantMetadata(config),
     role: 'assistant',
     content: [],
     stopReason: 'stop',
@@ -642,7 +653,7 @@ async function streamOpenAI(
   let textContentBlock: TextContent | null = null;
   let thinkingContentBlock: ThinkingContent | null = null;
   const toolCallAccumulators = new Map<
-    number,
+    string,
     { id: string; name: string; argsStr: string; extra_content?: any; thought_signature?: string }
   >();
   let isInsideInlineThink = false;
@@ -899,7 +910,7 @@ async function streamOpenAI(
     stream.push({
       type: 'thinking_end' as any,
       contentIndex,
-      content: thinkingContentBlock.thinking,
+      content: (thinkingContentBlock as ThinkingContent).thinking,
       partial: assistantMessage,
     });
   }
@@ -977,7 +988,7 @@ async function streamAnthropic(
   }
 
   // 1. Extract system prompt from context.messages
-  let systemText = context.systemPrompt || '';
+  let systemText = (context as TranscriptContext & { systemPrompt?: string }).systemPrompt || '';
   for (const m of context.messages) {
     if (m.role === 'system') {
       const text =
@@ -1013,11 +1024,11 @@ async function streamAnthropic(
     } else if (m.role === 'assistant') {
       const contentBlocks: any[] = [];
       if (typeof m.content === 'string') {
-        if (m.content.trim()) {
+        if (String(m.content).trim()) {
           contentBlocks.push({ type: 'text', text: m.content });
         }
       } else if (Array.isArray(m.content)) {
-        for (const block of m.content) {
+        for (const block of m.content as any[]) {
           if (block.type === 'text' && block.text && block.text.trim()) {
             contentBlocks.push({ type: 'text', text: block.text });
           } else if (block.type === 'thinking' && block.thinking && block.thinking.trim()) {
@@ -1063,7 +1074,7 @@ async function streamAnthropic(
         : JSON.stringify(m.content || '');
 
       const imageBlocks = Array.isArray(m.content)
-        ? m.content.filter((c: any) => c.type === 'image' && c.data)
+        ? m.content.filter((c): c is ImageContent => c.type === 'image' && Boolean(c.data))
         : [];
 
       const toolResultContent: any[] = [];
@@ -1255,6 +1266,7 @@ async function streamAnthropic(
   const decoder = new TextDecoder('utf-8');
 
   let assistantMessage: AssistantMessage = {
+    ...assistantMetadata(config),
     role: 'assistant',
     content: [],
     stopReason: 'stop',

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UserDocument } from '../types';
+import { UserDocument, DocumentFileType } from '../types';
 import { saveDocument, deleteDocument, toggleDocumentActive } from '../services/storage';
 import { readFileContent } from '../services/pdf-parser';
 import { Button } from './ui/button';
@@ -34,7 +34,7 @@ export function VaultView({ documents, onDocumentsChange }: VaultViewProps) {
 
   // New Doc Form
   const [title, setTitle] = useState('');
-  const [type, setType] = useState<'markdown' | 'text' | 'pdf' | 'json'>('markdown');
+  const [type, setType] = useState<DocumentFileType>('markdown');
   const [content, setContent] = useState('');
   const [tagsStr, setTagsStr] = useState('');
 
