@@ -7,6 +7,22 @@ import { loadGlobalMemories, loadTabMemories, getActiveSessionIdState } from '..
 import { tryLoadFileFromLocalPath, extractTextWithVlm } from '../services/pdf-parser';
 import { attemptVisibleCaptcha } from './captcha-auto';
 import { injectFileIntoTab, resolveFileSource, type FileSource } from './file-injection';
+import { imageDimensions, mapScreenshotPoint, sameScreenshotViewport, type ScreenshotGeometry, type ScreenshotViewport } from './screenshot-coordinates';
+
+const screenshotGeometry = new Map<number, ScreenshotGeometry>();
+export function getScreenshotGeometry(tabId: number) { return screenshotGeometry.get(tabId); }
+async function readScreenshotViewport(tabId: number): Promise<ScreenshotViewport> {
+  const [result] = await chrome.scripting.executeScript({ target: { tabId }, func: () => ({ width: innerWidth, height: innerHeight,
+    devicePixelRatio, scrollX, scrollY, scale: visualViewport?.scale || 1, url: location.href }) });
+  if (!result?.result) throw new Error('Cannot verify the screenshot viewport.');
+  return { ...result.result, documentId: result.documentId };
+}
+export async function resolveScreenshotClick(tabId: number, x: number, y: number) {
+  const geometry = screenshotGeometry.get(tabId);
+  if (!geometry) throw new Error('No verified screenshot geometry for this tab. Inspect DOM controls first; use a screenshot only when needed.');
+  return { ...mapScreenshotPoint(geometry, await readScreenshotViewport(tabId), x, y), viewport: geometry.viewport };
+}
+
 
 export interface TabInfo {
   id: number;
@@ -2392,10 +2408,15 @@ export async function clickAtPosition(
     viewport = await getActiveTabViewport().catch(() => null);
   }
   const dpr = viewport?.devicePixelRatio || 1;
-  const cssX = Math.round(options.x / dpr);
-  const cssY = Math.round(options.y / dpr);
-  const scaleNote =
-    dpr !== 1
+  let cssX: number, cssY: number;
+  if (!options.viewport) {
+    try { ({ cssX, cssY, viewport } = await resolveScreenshotClick(activeTab.id, options.x, options.y)); }
+    catch (error) { return { success: false, message: String((error as Error).message) }; }
+  } else { cssX = options.x / dpr; cssY = options.y / dpr; }
+  const imageGeometry = screenshotGeometry.get(activeTab.id);
+  const scaleNote = imageGeometry && !options.viewport
+    ? ` Original image ${imageGeometry.imageWidth}x${imageGeometry.imageHeight} mapped to CSS viewport ${viewport?.width}x${viewport?.height}: (${options.x}, ${options.y}) -> (${cssX}, ${cssY}).`
+    : dpr !== 1
       ? ` Screenshot pixels converted to CSS pixels at devicePixelRatio ${dpr}: (${Math.round(options.x)}, ${Math.round(options.y)}) -> (${cssX}, ${cssY}).`
       : '';
 
@@ -3422,6 +3443,19 @@ export async function captureTabScreenshot(): Promise<string> {
 
   const activeTab = await getActiveTab();
   const windowId = activeTab?.windowId;
+  if (activeTab?.id) screenshotGeometry.delete(activeTab.id);
+  const before = activeTab?.id ? await readScreenshotViewport(activeTab.id).catch(() => null) : null;
+  const finish = async (dataUrl: string) => {
+    if (activeTab?.id) {
+      screenshotGeometry.delete(activeTab.id);
+      const after = await readScreenshotViewport(activeTab.id).catch(() => null);
+      const size = imageDimensions(dataUrl);
+      if (before && after && size && sameScreenshotViewport(before, after))
+        screenshotGeometry.set(activeTab.id, { imageWidth: size.width, imageHeight: size.height, viewport: after, capturedAt: Date.now() });
+      while (screenshotGeometry.size > 20) screenshotGeometry.delete(screenshotGeometry.keys().next().value!);
+    }
+    return dataUrl;
+  };
 
   // Background serialization covers tools, Docs vision and CAPTCHA consumers.
   // Only a missing worker handler permits local fallback; an actual capture
@@ -3429,16 +3463,16 @@ export async function captureTabScreenshot(): Promise<string> {
   if (chrome.runtime?.sendMessage) {
     const response = await new Promise<any>(resolve => {
       const timer = setTimeout(() => resolve({ success: false, error: 'Screenshot worker did not respond within six seconds. Use form/page inspection.' }), 6000);
-      chrome.runtime.sendMessage({ type: 'CAPTURE_VISIBLE_TAB', windowId }, result => {
+      chrome.runtime.sendMessage({ type: 'CAPTURE_VISIBLE_TAB', windowId, tabId: activeTab?.id }, result => {
         clearTimeout(timer);
         const missingHandler = chrome.runtime.lastError;
         resolve(missingHandler ? null : result);
       });
     });
-    if (response?.success && response.dataUrl) return response.dataUrl;
+    if (response?.success && response.dataUrl) return finish(response.dataUrl);
     if (response?.success === false) throw new Error(response.error || 'Screenshot capture failed');
   }
-  return captureScheduled(windowId);
+  return finish(await captureScheduled(windowId, { format: 'jpeg', quality: 80 }, activeTab?.id));
 }
 
 // Development mock data
