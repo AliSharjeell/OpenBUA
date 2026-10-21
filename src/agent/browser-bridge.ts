@@ -2577,7 +2577,23 @@ function inPageScrollPage(
   if (direction === 'element' && selector) {
     const el = document.querySelector<HTMLElement>(selector);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      try {
+        el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
+      } catch {
+        el.scrollIntoView();
+      }
+      let p = el.parentElement;
+      while (p && p !== document.body && p !== document.documentElement) {
+        const s = window.getComputedStyle(p);
+        if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && p.scrollHeight > p.clientHeight + 10) {
+          const elRect = el.getBoundingClientRect();
+          const pRect = p.getBoundingClientRect();
+          if (elRect.top < pRect.top || elRect.bottom > pRect.bottom) {
+            p.scrollTop += (elRect.top - pRect.top) - (p.clientHeight / 2 - elRect.height / 2);
+          }
+        }
+        p = p.parentElement;
+      }
       return { success: true, message: `Scrolled to element "${selector}"` };
     }
   }
@@ -2603,7 +2619,27 @@ function inPageScrollPage(
     } catch {}
   }
 
-  // 2. WhatsApp Web active conversation messages panel (#main)
+  // 2. Active modal or dialog scroll container (LinkedIn Easy Apply, Workable, Greenhouse, Ashby, popups)
+  if (container === window) {
+    const activeDialog = document.querySelector<HTMLElement>(
+      'div[role="dialog"]:not([aria-hidden="true"]), dialog[open], [aria-modal="true"], .artdeco-modal, .modal'
+    );
+    if (activeDialog && isVisible(activeDialog)) {
+      const dialogScrollables = Array.from(activeDialog.querySelectorAll<HTMLElement>('*')).filter((c) => {
+        if (!isVisible(c)) return false;
+        const s = window.getComputedStyle(c);
+        return (s.overflowY === 'auto' || s.overflowY === 'scroll') && c.scrollHeight > c.clientHeight + 20;
+      });
+      if (dialogScrollables.length > 0) {
+        dialogScrollables.sort((a, b) => (b.clientHeight * b.clientWidth) - (a.clientHeight * a.clientWidth));
+        container = dialogScrollables[0];
+      } else if (activeDialog.scrollHeight > activeDialog.clientHeight + 20) {
+        container = activeDialog;
+      }
+    }
+  }
+
+  // 3. WhatsApp Web active conversation messages panel (#main)
   if (container === window) {
     const mainPane = document.querySelector<HTMLElement>('#main');
     if (mainPane && isVisible(mainPane)) {
