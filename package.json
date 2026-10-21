@@ -45,7 +45,8 @@
     "test:reddit-review": "node scripts/test-reddit-review.mjs",
     "test:reddit-outcomes": "node scripts/test-reddit-outcomes.mjs",
     "test:x-community": "node scripts/test-x-community.mjs",
-    "test:old-reddit-trust": "node scripts/test-old-reddit-trust.mjs"
+    "test:old-reddit-trust": "node scripts/test-old-reddit-trust.mjs",
+    "test:dom-first": "node scripts/test-dom-first.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",
