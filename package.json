@@ -51,6 +51,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",
     "@earendil-works/pi-ai": "^0.87.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@sinclair/typebox": "^0.34.47",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
