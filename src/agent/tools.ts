@@ -1488,6 +1488,12 @@ const TypeTextSchema = Type.Object({
   allowUniformParagraphStyle: Type.Optional(Type.Boolean({
     description: 'Allow multiple paragraphs to inherit the current heading/bold formatting ONLY when every inserted paragraph should intentionally have that same style. Keep false for a project title plus technologies and bullets; clone the source formatting and edit each line separately.',
   })),
+  selector: Type.Optional(Type.String({
+    description: 'Optional CSS selector of the target element to focus and type into directly.',
+  })),
+  refId: Type.Optional(Type.String({
+    description: 'Optional reference ID (e.g. "af_42") from inspect_page_controls to target and type into directly.',
+  })),
 });
 
 export const typeTextTool: AgentTool<typeof TypeTextSchema> = {
@@ -1505,6 +1511,8 @@ export const typeTextTool: AgentTool<typeof TypeTextSchema> = {
       const res = await typeActiveTabText({
         text: params.text,
         clearFirst: params.clearFirst,
+        selector: params.selector,
+        refId: params.refId,
       });
       return { content: [{ type: 'text', text: res.message }], details: res };
     } catch (err: any) {

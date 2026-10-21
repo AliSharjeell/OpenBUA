@@ -1819,7 +1819,23 @@ function detectCanvasEditor(): { isCanvas: boolean; name: string | null } {
  * document.activeElement land on the <iframe> element itself and are never seen
  * by the editor, so we descend into that frame when it exists.
  */
-function resolveTypingTarget(): { target: HTMLElement; frame: HTMLIFrameElement | null } {
+function resolveTypingTarget(selector?: string, refId?: string): { target: HTMLElement; frame: HTMLIFrameElement | null } {
+  if (refId) {
+    const el = document.querySelector<HTMLElement>(`[data-autoform-ref="${CSS.escape(refId)}"]`);
+    if (el) {
+      try { el.focus(); } catch {}
+      return { target: el, frame: null };
+    }
+  }
+  if (selector) {
+    try {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el) {
+        try { el.focus(); } catch {}
+        return { target: el, frame: null };
+      }
+    } catch {}
+  }
   // 1. The hidden same-origin input frame that canvas editors use.
   const frames = Array.from(document.querySelectorAll<HTMLIFrameElement>('iframe'));
   for (const frame of frames) {
@@ -2093,7 +2109,7 @@ function primeEditorFocus(target: HTMLElement): void {
 /** Type multi-line text, handling newlines the way the target editor expects. */
 function typeTextIntoPage(
   rawText: string,
-  opts: { pressEnterForNewlines?: boolean; clearFirst?: boolean } = {}
+  opts: { pressEnterForNewlines?: boolean; clearFirst?: boolean; selector?: string; refId?: string } = {}
 ): {
   success: boolean;
   message: string;
@@ -2103,7 +2119,7 @@ function typeTextIntoPage(
   verified: boolean;
 } {
   try {
-    const { target } = resolveTypingTarget();
+    const { target } = resolveTypingTarget(opts.selector, opts.refId);
     const editor = detectCanvasEditor();
     // JS-driven editors (Docs/Sheets/Figma) handle Enter in their own keydown
     // handler, so a synthetic keydown is the correct signal there. A plain
@@ -2452,6 +2468,9 @@ function clickAtPoint(
     if (clickCount > 1) {
       target.dispatchEvent(new MouseEvent('dblclick', { ...common, detail: 2 }));
     }
+    try {
+      if (typeof target.focus === 'function') target.focus();
+    } catch {}
 
     // Report what was actually under the cursor so the agent can correct course.
     const tag = target.tagName.toLowerCase();
@@ -3005,6 +3024,8 @@ if (!(window as any).__OPENBUA_CONTENT_SCRIPT_INITIALIZED__) {
           typeTextIntoPage(request.text, {
             pressEnterForNewlines: request.pressEnterForNewlines !== false,
             clearFirst: Boolean(request.clearFirst),
+            selector: request.selector,
+            refId: request.refId,
           })
         );
         break;

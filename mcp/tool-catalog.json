@@ -514,6 +514,14 @@
         "allowUniformParagraphStyle": {
           "description": "Allow multiple paragraphs to inherit the current heading/bold formatting ONLY when every inserted paragraph should intentionally have that same style. Keep false for a project title plus technologies and bullets; clone the source formatting and edit each line separately.",
           "type": "boolean"
+        },
+        "selector": {
+          "description": "Optional CSS selector of the target element to focus and type into directly.",
+          "type": "string"
+        },
+        "refId": {
+          "description": "Optional reference ID (e.g. \"af_42\") from inspect_page_controls to target and type into directly.",
+          "type": "string"
         }
       }
     }

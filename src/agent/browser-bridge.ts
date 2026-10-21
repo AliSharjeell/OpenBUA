@@ -2032,6 +2032,9 @@ function inPageClickAtPoint(
   target.dispatchEvent(new MouseEvent('mouseup', common));
   target.dispatchEvent(new MouseEvent('click', common));
   if (count > 1) target.dispatchEvent(new MouseEvent('dblclick', { ...common, detail: 2 }));
+  try {
+    if (typeof target.focus === 'function') target.focus();
+  } catch {}
 
   const tag = target.tagName.toLowerCase();
   // The editor's hidden text mirror reports the line the caret actually landed
@@ -2072,12 +2075,23 @@ function inPageClickAtPoint(
 function inPageTypeText(
   text: string,
   pressEnterForNewlines: boolean,
-  clearFirst = false
+  clearFirst = false,
+  selector?: string,
+  refId?: string
 ): { success: boolean; message: string; lines: number; chars: number } {
   // Resolve the surface that actually receives keystrokes. Canvas editors route
   // input through a hidden same-origin iframe, so events sent at the top-level
   // activeElement land on the <iframe> and are never seen by the editor.
   let target: HTMLElement = document.body;
+  if (refId) {
+    const el = document.querySelector<HTMLElement>(`[data-autoform-ref="${CSS.escape(refId)}"]`);
+    if (el) target = el;
+  } else if (selector) {
+    try {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el) target = el;
+    } catch {}
+  }
   let found = false;
   const frames = Array.from(document.querySelectorAll('iframe')) as HTMLIFrameElement[];
   for (const frame of frames) {
@@ -2527,7 +2541,7 @@ export async function clipboardAction(
  * Type text at the current caret on the active tab.
  */
 export async function typeActiveTabText(
-  options: { text: string; pressEnterForNewlines?: boolean; clearFirst?: boolean }
+  options: { text: string; pressEnterForNewlines?: boolean; clearFirst?: boolean; selector?: string; refId?: string }
 ): Promise<{ success: boolean; message: string; lines?: number; chars?: number }> {
   const activeTab = await getActiveTab();
   if (!activeTab || !activeTab.id) {
@@ -2545,6 +2559,8 @@ export async function typeActiveTabText(
         text: options.text,
         pressEnterForNewlines: options.pressEnterForNewlines !== false,
         clearFirst: Boolean(options.clearFirst),
+        selector: options.selector,
+        refId: options.refId,
       },
       8000
     );
@@ -2558,7 +2574,7 @@ export async function typeActiveTabText(
       const results = await chrome.scripting.executeScript({
         target: { tabId: activeTab.id },
         func: inPageTypeText,
-        args: [options.text, options.pressEnterForNewlines !== false, Boolean(options.clearFirst)],
+        args: [options.text, options.pressEnterForNewlines !== false, Boolean(options.clearFirst), options.selector || '', options.refId || ''],
       });
       if (results?.[0]?.result) return results[0].result as any;
     } catch (err: any) {
