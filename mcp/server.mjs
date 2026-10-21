@@ -33,9 +33,15 @@ async function http(endpoint, body) {
     headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (!response.ok) throw new Error(`OpenBUA relay returned ${response.status}.`);
-  const value = await response.json();
-  if (value.error) throw new Error(value.error);
+  let value;
+  try {
+    value = await response.json();
+  } catch {
+    throw new Error(`OpenBUA relay returned ${response.status}.`);
+  }
+  if (!response.ok || value.error) {
+    throw new Error(value.error || `OpenBUA relay returned ${response.status}.`);
+  }
   return value;
 }
 
@@ -150,9 +156,15 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     const name = request.params.name.slice("openbua_".length);
     const args = request.params.arguments || {};
     if (name === "status") {
+      let extension;
+      try {
+        extension = await command("status");
+      } catch (err) {
+        extension = { status: "disconnected", message: String(err?.message || err) };
+      }
       return asMcp({
         relay: await http("/health"),
-        extension: await command("status"),
+        extension,
         localTranscript: logFile,
       });
     }
