@@ -25,7 +25,7 @@ export function inPageSelectionControls(selector = '') {
   const roots = (root: ParentNode): ParentNode[] => {
     const result = [root];
     if (root instanceof Element && root.shadowRoot) result.push(...roots(root.shadowRoot));
-    for (const host of Array.from(root.querySelectorAll('*'))) if (host.shadowRoot) visit(host.shadowRoot);
+    for (const host of Array.from(root.querySelectorAll('*'))) if (host.shadowRoot) result.push(...roots(host.shadowRoot));
     return result;
   };
   const all = (query: string, root: ParentNode = document): HTMLElement[] => [...new Set(roots(root).flatMap(scope => Array.from(scope.querySelectorAll<HTMLElement>(query))))];

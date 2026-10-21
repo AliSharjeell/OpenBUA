@@ -39,6 +39,7 @@ import {
   typeActiveTabText,
   getActiveTabViewport,
   clipboardAction,
+  getScreenshotGeometry,
 } from './browser-bridge';
 import {
   findPlatform,
@@ -177,12 +178,13 @@ const InspectPageControlsSchema = Type.Object({
   offset: Type.Optional(Type.Integer({ minimum: 0, description: 'Use the previous result nextOffset to retrieve the next page of controls.' })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
   optionOffset: Type.Optional(Type.Integer({ minimum: 0, description: 'Use nextOptionOffset with a select control selector to inspect remaining dropdown options.' })),
+  optionQuery: Type.Optional(Type.String({ maxLength: 200, description: 'Read only native-select options whose actual label or value contains this text (case insensitive). Scope to the select selector. Pagination applies to matches; does not select or invent an option.' })),
 });
 
 export const inspectPageControlsTool: AgentTool<typeof InspectPageControlsSchema> = {
   name: 'inspect_page_controls',
   label: 'Inspect Page Controls',
-  description: 'Read a live inventory of buttons, links, inputs, editors, dropdowns and options, tabs, menus, toggles, sliders and other interactive DOM controls, including open shadow roots. Returns exact actionable refs, labels, values, validation and selected/disabled/expanded states, popup context and visibility. Pagination exposes the entire available inventory instead of silently dropping later controls. Passwords are redacted. Frame boundaries and canvas limitations are reported.',
+  description: 'Primary DOM observation: labeled buttons, inputs, options, question groups, custom pointer controls and open shadow roots. Returns exact refs/selectors, states, validation, CSS bounds, occlusion and visible hit points. Use these refs with DOM click/fill tools; CSS hit points are not screenshot pixels. Paginated, password-redacted, with explicit iframe boundaries. Screenshots are a fallback when DOM targeting cannot handle a control.',
   parameters: InspectPageControlsSchema,
   execute: async (_id, params): Promise<AgentToolResult> => {
     const tab = await getActiveTab();
@@ -482,11 +484,11 @@ export const captureTabScreenshotTool: AgentTool<typeof CaptureTabScreenshotSche
 
       // Report the real CSS viewport so coordinate arithmetic is never guesswork.
       const viewport = await getActiveTabViewport().catch(() => null);
+      const tab = await getActiveTab();
+      const imageGeometry = tab?.id ? getScreenshotGeometry(tab.id) : undefined;
       const geometry = viewport
         ? ` CSS viewport: ${viewport.width}x${viewport.height}px, devicePixelRatio ${viewport.devicePixelRatio}.` +
-          (viewport.devicePixelRatio !== 1
-            ? ` This screenshot is ${viewport.devicePixelRatio}x the CSS viewport; click_at_position converts coordinates for you.`
-            : '')
+          (imageGeometry ? ` Original image: ${imageGeometry.imageWidth}x${imageGeometry.imageHeight}px. Pass coordinates from this full-size image; click_at_position maps them exactly and rejects stale views.` : ' Coordinate geometry could not be verified; use DOM targeting.')
         : '';
 
       return {
