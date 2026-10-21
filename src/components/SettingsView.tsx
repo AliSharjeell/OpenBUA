@@ -1,3 +1,4 @@
+import { McpSettings } from './McpSettings';
 import React, { useState, useEffect } from 'react';
 import { AppSettings, ProviderType, ModelMode } from '../types';
 import { saveSettings } from '../services/storage';
@@ -713,6 +714,8 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
       )}
 
       {/* ======================================================== */}
+      <McpSettings />
+
       {/* Bottom Action Buttons: Save Settings & Test API */}
       {/* ======================================================== */}
       <div className="pt-2 space-y-2">
