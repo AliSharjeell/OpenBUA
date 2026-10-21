@@ -46,7 +46,15 @@
     "test:reddit-outcomes": "node scripts/test-reddit-outcomes.mjs",
     "test:x-community": "node scripts/test-x-community.mjs",
     "test:old-reddit-trust": "node scripts/test-old-reddit-trust.mjs",
-    "test:dom-first": "node scripts/test-dom-first.mjs"
+    "test:dom-first": "node scripts/test-dom-first.mjs",
+    "mcp:server": "node mcp/server.mjs",
+    "mcp:relay": "node mcp/relay.mjs",
+    "mcp:catalog": "node mcp/generate-catalog.mjs",
+    "mcp:pairing": "node mcp/pairing.mjs",
+    "mcp:antigravity": "node scripts/setup-antigravity-mcp.mjs",
+    "mcp:codex": "node scripts/setup-codex-mcp.mjs",
+    "mcp:claude": "node scripts/setup-claude-mcp.mjs",
+    "test:mcp": "node scripts/test-mcp.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",
