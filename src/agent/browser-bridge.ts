@@ -780,6 +780,14 @@ function inPageFillForm(
             target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
             target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
 
+            const form = target.closest('form');
+            if (form) {
+              try {
+                if (typeof form.requestSubmit === 'function') form.requestSubmit();
+                else form.submit();
+              } catch {}
+            }
+
             setTimeout(() => {
               // 1. If target text is already cleared, Enter already sent the message! Never click anything.
               const remaining = (
@@ -3707,6 +3715,16 @@ function inPagePressKey(options: {
     target.dispatchEvent(new view.KeyboardEvent('keypress', pressInit));
   }
   target.dispatchEvent(new view.KeyboardEvent('keyup', eventInit));
+
+  if (keyUpper === 'ENTER' && !options.ctrlKey && !options.altKey && !options.metaKey) {
+    const form = target.closest('form');
+    if (form) {
+      try {
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.submit();
+      } catch {}
+    }
+  }
 
   return {
     success: true,

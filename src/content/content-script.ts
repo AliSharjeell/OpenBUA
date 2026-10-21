@@ -1134,6 +1134,14 @@ async function fillFormFields(
             target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
             target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
 
+            const form = target.closest('form');
+            if (form) {
+              try {
+                if (typeof form.requestSubmit === 'function') form.requestSubmit();
+                else form.submit();
+              } catch {}
+            }
+
             setTimeout(() => {
               // 1. If target text is already cleared, Enter already sent the message! Never click anything.
               const remaining = (
