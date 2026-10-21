@@ -173,6 +173,14 @@ function detectStepIndicators(): string[] {
   return steps.slice(0, 5);
 }
 
+function requestedChoiceState(el: HTMLElement, value: string): boolean {
+  const wanted = value.trim().toLowerCase();
+  const input = el as HTMLInputElement;
+  const radio = input.type === 'radio' || el.getAttribute('role') === 'radio';
+  const label = (input.labels?.[0]?.textContent || el.getAttribute('aria-label') || el.textContent || '').trim().toLowerCase();
+  return ['true', '1', 'yes', 'on'].includes(wanted) || radio && (wanted === label || Boolean(input.value && wanted === input.value.trim().toLowerCase()));
+}
+
 function readElementValue(el: HTMLElement): string {
   if (!el) return '';
   const tagName = el.tagName.toLowerCase();
@@ -539,21 +547,8 @@ function setNativeValue(
       } catch (fileErr) {
         console.warn('[AutoForm AI] Error attaching file:', fileErr);
       }
-    } else if (type === 'checkbox') {
-      const boolVal = value === 'true' || value === '1' || value === 'yes' || value === 'on';
-      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked');
-      if (descriptor?.set) {
-        descriptor.set.call(input, boolVal);
-      } else {
-        input.checked = boolVal;
-      }
-    } else if (type === 'radio') {
-      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked');
-      if (descriptor?.set) {
-        descriptor.set.call(input, true);
-      } else {
-        input.checked = true;
-      }
+    } else if (type === 'checkbox' || type === 'radio') {
+      if (input.checked !== requestedChoiceState(input, value)) input.click();
     } else {
       const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
       if (descriptor?.set) {
@@ -562,15 +557,13 @@ function setNativeValue(
         input.value = value;
       }
 
-      // For email inputs, comboboxes, and recipient fields (e.g. Gmail To / Cc / Bcc)
-      // Dispatch Enter and Tab keys to trigger recipient chip creation
+      // Only explicit mail recipient widgets need chip creation. Ordinary
+      // email inputs and comboboxes must never receive implicit Enter.
       const ariaLabel = (element.getAttribute('aria-label') || '').toLowerCase();
       const isRecipientInput =
         !isContentEditable &&
         tagName === 'input' &&
-        (type === 'email' ||
-          element.getAttribute('role') === 'combobox' ||
-          /\bto\b/i.test(ariaLabel) ||
+        (/\bto\b/i.test(ariaLabel) ||
           /\brecipients?\b/i.test(ariaLabel) ||
           element.hasAttribute('peoplekit-id') ||
           element.classList.contains('agP'));
@@ -1102,7 +1095,8 @@ async function fillFormFields(
       const isFileInput = target.tagName.toLowerCase() === 'input' && (target as HTMLInputElement).type === 'file';
       const isFileAttached = isFileInput && ((target as HTMLInputElement).files?.length ?? 0) > 0;
 
-      const isVerified =
+      const isChoice = ['radio', 'checkbox'].includes((target as HTMLInputElement).type || target.getAttribute('role') || '');
+      const isVerified = isChoice ? cleanActual === String(requestedChoiceState(target, item.value)) :
         isFileAttached ||
         isRecipientChip ||
         isDigitsMatch ||
@@ -1110,9 +1104,7 @@ async function fillFormFields(
         (cleanActual.length > 0 && (
           cleanActual.includes(cleanRequested.slice(0, 15)) ||
           cleanRequested.includes(cleanActual.slice(0, 15)) ||
-          cleanActual === cleanRequested ||
-          (target as HTMLInputElement).type === 'checkbox' ||
-          (target as HTMLInputElement).type === 'radio'
+          cleanActual === cleanRequested
         ));
 
       verifications.push({
