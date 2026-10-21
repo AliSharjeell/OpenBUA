@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenBUA · MCP Bridge</title>
+</head>
+<body style="margin:0;background:#09090b;color:#e4e4e7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+  <main style="max-width:680px;margin:12vh auto;padding:36px;border:1px solid #27272a;border-radius:24px;background:#111113;box-shadow:0 20px 40px rgba(0,0,0,0.6)">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px">
+      <div style="width:40px;height:40px;border-radius:10px;background:#007AFF;display:flex;align-items:center;justify-content:center;font-weight:bold;color:white;font-size:20px">B</div>
+      <h1 id="bridge-heading" style="margin:0;font-size:24px;font-weight:600">OpenBUA MCP Bridge</h1>
+    </div>
+    <div style="margin:20px 0;padding:14px 18px;border-radius:12px;background:#18181b;border:1px solid #27272a">
+      <p id="connection" role="status" style="margin:0;font-weight:500;color:#38bdf8">Connecting to local OpenBUA bridge…</p>
+    </div>
+    <p id="bridge-desc" style="color:#a1a1aa;line-height:1.7;font-size:14px">
+      Keep this tab open while using Antigravity, Codex, or Claude. The external model drives OpenBUA via MCP tools to inspect web pages, fill forms, edit documents, and automate tasks.
+    </p>
+    <div style="display:flex;align-items:center;gap:16px;margin-top:24px">
+      <a href="sidepanel.html" style="color:#38bdf8;text-decoration:none;font-size:14px;font-weight:500">Open Sidepanel</a>
+    </div>
+    <p id="detail" style="color:#71717a;font-size:13px;margin-top:16px"></p>
+  </main>
+  <script type="module" src="/src/mcp/bridge.ts"></script>
+</body>
+</html>

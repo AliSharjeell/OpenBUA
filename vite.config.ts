@@ -17,6 +17,7 @@ export default defineConfig({
       input: {
         sidepanel: resolve(__dirname, 'sidepanel.html'),
         worker: resolve(__dirname, 'worker.html'),
+        bridge: resolve(__dirname, 'mcp-bridge.html'),
         background: resolve(__dirname, 'src/background/service-worker.ts'),
       },
       output: {

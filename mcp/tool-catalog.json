@@ -1,0 +1,869 @@
+[
+  {
+    "name": "inspect_page_controls",
+    "description": "Primary DOM observation: labeled buttons, inputs, options, question groups, custom pointer controls and open shadow roots. Returns exact refs/selectors, states, validation, CSS bounds, occlusion and visible hit points. Use these refs with DOM click/fill tools; CSS hit points are not screenshot pixels. Paginated, password-redacted, with explicit iframe boundaries. Screenshots are a fallback when DOM targeting cannot handle a control.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "selector": {
+          "description": "Scope to a known container or exact control selector. Omit for the full page including open shadow roots.",
+          "type": "string"
+        },
+        "offset": {
+          "minimum": 0,
+          "description": "Use the previous result nextOffset to retrieve the next page of controls.",
+          "type": "integer"
+        },
+        "limit": {
+          "minimum": 1,
+          "maximum": 100,
+          "type": "integer"
+        },
+        "optionOffset": {
+          "minimum": 0,
+          "description": "Use nextOptionOffset with a select control selector to inspect remaining dropdown options.",
+          "type": "integer"
+        },
+        "optionQuery": {
+          "maxLength": 200,
+          "description": "Read only native-select options whose actual label or value contains this text (case insensitive). Scope to the select selector. Pagination applies to matches; does not select or invent an option.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_active_tab_form",
+    "description": "Inspect all form fields, input elements, textareas, dropdown selects, buttons, and multi-step indicators on the current tab. Automatically prioritizes active modals, popups, and compose windows.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "includeButtons": {
+          "description": "Whether to include action buttons (Next, Submit, etc.)",
+          "type": "boolean"
+        },
+        "selector": {
+          "description": "Optional CSS selector to scope inspection to a specific dialog or container (e.g. \"[role=dialog]\" or \".M9\")",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "inspect_docs_editor",
+    "description": "Inspect Google Docs toolbar DOM: bold, italic, underline, list controls, paragraph style, font and size, with actual pressed/checked states and screenshot coordinates. Also returns visible selection text when exposed and a fresh screenshot. Use after selecting text and before changing formatting. Canvas body text is not a normal DOM text field.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "find_docs_text",
+    "description": "Locate existing Google Docs body text using visible rendered SVG/accessibility labels and report screenshot coordinates for the labeled runs. Excludes the document outline and hidden input buffers. Returns a fresh screenshot. Use before selecting or clicking a project heading instead of guessing coordinates. Empty matches mean the text is not exposed or not visible, not that it is absent from the document.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "description": "Existing heading or text from the document body to locate, e.g. Termote.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "select_docs_text",
+    "description": "Select a visible Google Docs text chunk by clicking its start and Shift-clicking its end. Coordinates are pixels from the latest full screenshot, not CSS pixels. Returns selection DOM, formatting states and a screenshot: verify the highlighted range covers exactly the source heading, technologies and final bullet before docs_clipboard copy. Both endpoints must be visible. For longer blocks, click the start, scroll, then click_at_position with shiftKey true at the end. Never copy/paste or replace until the highlighted range is visually verified.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "object",
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "y": {
+              "minimum": 0,
+              "type": "number"
+            }
+          }
+        },
+        "end": {
+          "type": "object",
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "y": {
+              "minimum": 0,
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "set_docs_formatting",
+    "description": "Set bold, italic, underline or native list formatting to a desired on/off state using the DOM toolbar. Does nothing if already correct; refuses unknown/mixed states. Returns current toolbar and screenshot for verification. Use native bullets with text that has no literal bullet prefix. Paragraph style controls found by inspect_docs_editor can be opened using click_element and selected through their menus.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "controlId",
+        "enabled"
+      ],
+      "properties": {
+        "controlId": {
+          "anyOf": [
+            {
+              "const": "boldButton",
+              "type": "string"
+            },
+            {
+              "const": "italicButton",
+              "type": "string"
+            },
+            {
+              "const": "underlineButton",
+              "type": "string"
+            },
+            {
+              "const": "bulletedListButton",
+              "type": "string"
+            },
+            {
+              "const": "numberedListButton",
+              "type": "string"
+            }
+          ]
+        },
+        "enabled": {
+          "description": "Desired state, not a blind toggle. Select the intended text first.",
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "docs_clipboard",
+    "description": "Copy a Google Docs selection and verify its actual system clipboard text and rich HTML. Paste that verified HTML through the Docs paste handler at a collapsed destination caret. First select and inspect the source; copy; click before the source heading with Shift off; inspect the caret; paste; confirm_docs_clone from the returned screenshot. Never paste over the original selected block or assume dispatch created a clone. Cut only if moving/removing was requested. Copy/cut overwrite the system clipboard.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "const": "copy",
+              "type": "string"
+            },
+            {
+              "const": "paste",
+              "type": "string"
+            },
+            {
+              "const": "cut",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "confirm_docs_clone",
+    "description": "Report the visual result of the latest Docs paste after inspecting its screenshot. Use duplicated ONLY when a second complete source block is visible at the destination and the original is preserved. Command acceptance, clipboard contents or a single unchanged block are insufficient. Report no_change if only the original remains, merged if the boundary joined text, or wrong_location if pasted elsewhere. This controls whether clone text editing is allowed; it does not independently verify the document.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "outcome",
+        "evidence"
+      ],
+      "properties": {
+        "outcome": {
+          "anyOf": [
+            {
+              "const": "duplicated",
+              "type": "string"
+            },
+            {
+              "const": "no_change",
+              "type": "string"
+            },
+            {
+              "const": "merged",
+              "type": "string"
+            },
+            {
+              "const": "wrong_location",
+              "type": "string"
+            }
+          ]
+        },
+        "evidence": {
+          "minLength": 1,
+          "description": "What the latest screenshot shows: positions of the new block and preserved original, or why no correct duplicate is visible.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "fill_form_fields",
+    "description": "Fills form fields on the active webpage with the provided values. Compatible with React, Vue, contenteditable rich text editors, and standard HTML forms. Supports pressEnter: true to type and send messages or submit search in a single action.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "assignments"
+      ],
+      "properties": {
+        "assignments": {
+          "description": "List of fields and values to fill",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "refId": {
+                "description": "The refId from get_active_tab_form (e.g. \"af_1\")",
+                "type": "string"
+              },
+              "selector": {
+                "description": "CSS selector if refId is not available",
+                "type": "string"
+              },
+              "value": {
+                "description": "The exact value to set into the input/select/textarea",
+                "type": "string"
+              },
+              "reason": {
+                "description": "Explanation of which user data was matched to this field",
+                "type": "string"
+              },
+              "pressEnter": {
+                "description": "If true, automatically dispatches Enter immediately after typing this field (ideal for sending chat messages in 1 single turn)",
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "pressEnter": {
+          "description": "If true, automatically dispatches Enter immediately after filling the fields (ideal for sending WhatsApp/chat messages or submitting search in 1 single turn)",
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "prepare_reddit_post",
+    "description": "Replace and fully verify a Reddit draft using distinct title/body fields. Preserves paragraphs using Markdown mode when available, otherwise editor paste. Does not submit. Use this for repairs instead of typing at an uncertain caret.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "title",
+        "body"
+      ],
+      "properties": {
+        "title": {
+          "description": "Single-line post title, separate from body",
+          "type": "string"
+        },
+        "body": {
+          "description": "Complete post body, with blank lines between paragraphs and standalone URLs separated from following text",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "review_reddit_post",
+    "description": "Review the exact prepared Reddit draft before publishing. Retrieves cached community rules/sidebar guidance, flags duplicate submissions and observed removals, and lists promotion, link, flair/tag and factual-claim checks. This is not a guarantee of moderation approval. Resolve the checks before clicking the visible Post button.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "join_x_community",
+    "description": "Join the active X community through one native click per stage. Returns joined, requested, rules_required, blocked or unconfirmed. Already-joined/pending membership is never toggled. Read returned rules, then confirmRules:true once if appropriate. After unconfirmed use verifyOnly:true once; do not retry with coordinates or generic clicks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "confirmRules": {
+          "description": "Confirm a visible Agree and join dialog only after reading its community rules. Default false.",
+          "type": "boolean"
+        },
+        "verifyOnly": {
+          "description": "Read membership state without clicking. Use once after an unconfirmed attempt.",
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "verify_reddit_post",
+    "description": "Read-only Reddit publication verification after clicking the visible Post button. Checks matching permalink/title and removal notices, distinguishing submitted-but-removed from visible or unconfirmed. Never clicks or posts.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "read_youtube_videos",
+    "description": "Read actual video titles and watch URLs in displayed order on YouTube search or channel pages. Excludes channel avatars, tabs and playlist links. Waits briefly for real results instead of fixed sleeps. Use videos[0].url with navigate_browser_tab for the first video.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "upload_file_to_form",
+    "description": "Programmatically attaches a stored raw file (marketing video mp4/webm/mov, resume.pdf, PNG/JPG photo, or document) from the user's Memory to a file input (<input type=\"file\">), dropzone, or open social media composer. Works on any site: X/Twitter, LinkedIn, Reddit, Facebook, Instagram, Threads, Bluesky, Mastodon, and job boards. Files of any size are streamed in chunks, so large videos are supported. Use this whenever a form or composer asks for a file upload, or when posting media to a social platform. It does NOT submit the post - review the result, then click the Post/Share button.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fileName": {
+          "description": "Exact filename, document ID, or title from get_user_documents or referenced attachments (e.g. \"resume.pdf\", \"mem-123\", \"profile.png\"). Prefer the document ID to disambiguate duplicate names. Named files never fall back to another attachment. If omitted, an application page prefers the stored resume and a social composer prefers video.",
+          "type": "string"
+        },
+        "refId": {
+          "description": "The refId of the file input element from get_active_tab_form (e.g. \"af_2\")",
+          "type": "string"
+        },
+        "selector": {
+          "description": "CSS selector of the file input or upload dropzone (e.g. \"input[type='file']\" or \".upload-dropzone\"). Usually omit this: OpenBUA finds the composer file input automatically, preferring the one inside the visible dialog.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "post_to_social",
+    "description": "Posts to ANY social platform in one step: resolves the platform (X/Twitter, LinkedIn, Reddit, Facebook, Instagram, Threads, Bluesky, Mastodon, YouTube, Pinterest, Tumblr, TikTok), opens its composer, attaches one or more stored videos/images from Memory by streaming them in chunks, and types the caption. Returns the composer state so you can verify the media preview rendered, then click the Post/Share/Submit button. Does NOT publish automatically unless you click submit afterwards.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "description": "Platform to post to: x, linkedin, reddit, facebook, instagram, threads, bluesky, mastodon, youtube, pinterest, tumblr, or tiktok. Omit to use the platform of the current tab.",
+          "type": "string"
+        },
+        "text": {
+          "description": "The post caption/body to type into the composer. Omit to attach media only.",
+          "type": "string"
+        },
+        "media": {
+          "description": "Names or keywords of stored Memory files to attach (e.g. [\"consistnet.mp4\"], [\"demo\"]). Omit for a text-only post.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "openComposer": {
+          "description": "Navigate the current tab to the platform composer first. Default true. Set false if the user already has the composer open.",
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "click_element",
+    "description": "Clicks a button or link on the active webpage, such as \"Next\", \"Continue\", \"Add Experience\", or form tabs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "refId": {
+          "description": "The refId of the button/element",
+          "type": "string"
+        },
+        "text": {
+          "description": "The visible text on the button (e.g. \"Next\", \"Save & Continue\")",
+          "type": "string"
+        },
+        "selector": {
+          "description": "CSS selector if refId/text is not known",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "verify_application_status",
+    "description": "Read the current application step and visible success/error feedback. Use after submitting or when a job may be closed. A dispatched click does not prove submission.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "scroll_page",
+    "description": "Scrolls the active webpage or chat message container down, up, top, bottom, or to a specific element to reveal older messages, more fields, or lazy-loaded elements.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "direction"
+      ],
+      "properties": {
+        "direction": {
+          "description": "Direction or target to scroll",
+          "anyOf": [
+            {
+              "const": "down",
+              "type": "string"
+            },
+            {
+              "const": "up",
+              "type": "string"
+            },
+            {
+              "const": "top",
+              "type": "string"
+            },
+            {
+              "const": "bottom",
+              "type": "string"
+            },
+            {
+              "const": "element",
+              "type": "string"
+            }
+          ]
+        },
+        "selector": {
+          "description": "CSS selector if scrolling to a specific element",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "click_at_position",
+    "description": "Clicks at an exact viewport (x, y) coordinate instead of the centre of a matched element. This is the ONLY way to place a text caret inside a canvas-rendered editor: Google Docs, Sheets, Slides, Figma, Canva and Word Online paint their content onto a <canvas>, so there is no element to target and click_element cannot reach them. Take a screenshot first, read the target position off it, then click. The reply tells you which element was under the cursor and whether this is a canvas editor.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "description": "Horizontal position in pixels of the actual capture_tab_screenshot image. Pass the image coordinate unchanged; the tool converts to CSS pixels.",
+          "type": "number"
+        },
+        "y": {
+          "description": "Vertical position in pixels of the actual capture_tab_screenshot image. Pass the image coordinate unchanged; do not estimate from a resized preview or divide by devicePixelRatio.",
+          "type": "number"
+        },
+        "clickCount": {
+          "description": "Number of clicks. Use 2 to double-click (select a word). Default 1.",
+          "type": "number"
+        },
+        "shiftKey": {
+          "description": "Hold Shift to extend the selection from the existing caret to this point. This is the only way to select a range of text in a canvas editor such as Google Docs, where there is no element to target. Use it to select an existing block before copying it.",
+          "type": "boolean"
+        },
+        "button": {
+          "description": "0 = left, 2 = right. Default 0. Right-click opens a context menu.",
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "type_text",
+    "description": "Types text at the current cursor position, one line at a time. Required for canvas editors such as Google Docs. Place the caret with click_at_position, then inspect a screenshot and any reported caret-line text before writing into a specific section. Text verification does not verify placement or formatting. An unverified insert may have landed: inspect a screenshot before retrying. Line breaks are typed as Enter.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "description": "The text to type. Use \\n between lines; each newline is sent as a real Enter (or paragraph break) so multi-line documents work.",
+          "type": "string"
+        },
+        "clearFirst": {
+          "description": "Select-all and delete before typing. Use this to replace an existing document rather than append to it. Default false.",
+          "type": "boolean"
+        },
+        "expectedCaretText": {
+          "description": "Existing text expected in the selected range, such as the target project title. When the editor exposes a different selection, typing is blocked. An empty selection cannot verify the caret; always inspect a screenshot after moving it.",
+          "type": "string"
+        },
+        "allowUniformParagraphStyle": {
+          "description": "Allow multiple paragraphs to inherit the current heading/bold formatting ONLY when every inserted paragraph should intentionally have that same style. Keep false for a project title plus technologies and bullets; clone the source formatting and edit each line separately.",
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "clipboard_action",
+    "description": "Dispatch a clipboard keyboard shortcut in the active tab. Dispatch success does not verify clipboard contents or document changes. In Google Docs use select_docs_text and docs_clipboard to clone formatted blocks, and inspect_docs_editor to inspect formatting. Do not use duplicate in Docs: Ctrl+D is not a document block duplication command. Verify selection and placement with screenshots.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "description": "copy, cut, paste, selectAll, or duplicate. Dispatches keyboard events; inspect the result because dispatch does not prove a clipboard operation occurred. In Google Docs use docs_clipboard for copy, cut and paste.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_user_documents",
+    "description": "Reads the user stored documents, resumes, PDF text, and profiles from local extension storage to obtain accurate personal and application data.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "Optional search keyword to find specific information",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "capture_tab_screenshot",
+    "description": "Captures a screenshot of the visible area of the current active browser tab for visual inspection. The result also reports the page's CSS viewport size and device pixel ratio. Screenshot pixels may be larger than CSS pixels on a HiDPI display; click_at_position takes screenshot pixel coordinates and converts them for you, so just read the position off the image and pass it straight through.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "list_browser_tabs",
+    "description": "Lists all open tabs in the current browser window with their IDs, titles, URLs, and active status.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "switch_browser_tab",
+    "description": "Switches the active browser focus to another tab by tabId.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "tabId"
+      ],
+      "properties": {
+        "tabId": {
+          "description": "The ID of the tab to switch to",
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "navigate_browser_tab",
+    "description": "Navigates the active browser tab to a specified URL. WARNING: This replaces the current page — if you are mid-form, use open_new_tab instead to avoid losing form progress!",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "description": "The URL to navigate the active tab to",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_page_content",
+    "description": "Extracts full readable text content and metadata from the active webpage.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "read_community_rules",
+    "description": "Read the active Reddit community rules and visible sidebar/composer guidance in one bounded lookup. Returns found, explicit empty, or unavailable. Reuses the result for five minutes; do not cycle alternate rules pages afterwards.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "append_to_preview",
+    "description": "Appends a markdown chunk, table row, or section to the live preview buffer. Call this IMMEDIATELY when any single item, society, induction date, or result is discovered so the user sees real-time progress in their Preview tab.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "content"
+      ],
+      "properties": {
+        "content": {
+          "description": "Markdown snippet to append to the live preview buffer (e.g. table header, table row, bullet point, or section heading). Call this immediately when any single society, date, flight, or candidate is discovered.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "scratchpad",
+    "description": "MANDATORY REAL-TIME PREVIEW & RESEARCH SCRATCHPAD. Content appended here is displayed immediately in real time to the user in their dedicated \"Preview\" tab as you work! Whenever you discover ANY matching item, qualifying society induction date, event, flight, lead, or research note, you MUST IMMEDIATELY call scratchpad with action=\"append\" and clean Markdown so the user watches discoveries appear live without waiting.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "description": "Action to perform: \"append\" to add newly discovered items/research/notes, \"read\" to review all collected data, \"write\" to overwrite, \"clear\" to reset.",
+          "anyOf": [
+            {
+              "const": "append",
+              "type": "string"
+            },
+            {
+              "const": "read",
+              "type": "string"
+            },
+            {
+              "const": "write",
+              "type": "string"
+            },
+            {
+              "const": "clear",
+              "type": "string"
+            }
+          ]
+        },
+        "content": {
+          "description": "Text to append or write to the scratchpad (required for \"append\" and \"write\")",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "suggest_memory",
+    "description": "Suggests personal information, preferences, repeatable task steps, or facts discovered during your execution to be remembered. The user sees a badge on their top-right Suggested Memories button and can approve it with 1 click as Global Memory or Tab Memory, or discard it.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "title",
+        "content"
+      ],
+      "properties": {
+        "title": {
+          "description": "Short descriptive title of the memory (e.g. \"User Contact Phone\", \"Preferred Airline\", \"LinkedIn Easy Apply Routine\")",
+          "type": "string"
+        },
+        "content": {
+          "description": "The exact fact, personal detail, user preference, or repeatable task instruction to remember",
+          "type": "string"
+        },
+        "category": {
+          "description": "Category: \"profile\" for user identity/contact, \"preference\" for user choices, \"workflow\" or \"task\" for repeatable task instructions, \"fact\" for general facts",
+          "anyOf": [
+            {
+              "const": "profile",
+              "type": "string"
+            },
+            {
+              "const": "preference",
+              "type": "string"
+            },
+            {
+              "const": "workflow",
+              "type": "string"
+            },
+            {
+              "const": "fact",
+              "type": "string"
+            },
+            {
+              "const": "task",
+              "type": "string"
+            }
+          ]
+        },
+        "reason": {
+          "description": "Why this memory is suggested (e.g. \"Extracted from LinkedIn job form\", \"User specified in chat\")",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "press_key_combination",
+    "description": "Dispatches keyboard shortcuts (e.g. Ctrl+Enter to immediately send in Gmail, Escape to dismiss dialogs, Enter to submit forms) without needing to search for dynamic button IDs.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "description": "Key to dispatch, e.g. \"Enter\", \"Escape\", \"Tab\", \"ArrowDown\"",
+          "type": "string"
+        },
+        "ctrlKey": {
+          "description": "Whether Control key is held down (e.g. Ctrl+Enter to send in Gmail)",
+          "type": "boolean"
+        },
+        "shiftKey": {
+          "description": "Whether Shift key is held down",
+          "type": "boolean"
+        },
+        "altKey": {
+          "description": "Whether Alt key is held down",
+          "type": "boolean"
+        },
+        "selector": {
+          "description": "Optional CSS selector of target element",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "send_web_email",
+    "description": "Fast compound action to compose and send an email via Gmail in a single turn. Navigates directly to the pre-filled compose window and dispatches Send without requiring multi-turn micro-actions.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "to",
+        "subject",
+        "body"
+      ],
+      "properties": {
+        "to": {
+          "description": "Recipient email address (e.g. user@example.com)",
+          "type": "string"
+        },
+        "subject": {
+          "description": "Email subject line",
+          "type": "string"
+        },
+        "body": {
+          "description": "Email body text",
+          "type": "string"
+        },
+        "userEmail": {
+          "description": "Optional user Gmail address (e.g. alisharjeelofficial@gmail.com) for direct authuser routing",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "quick_url_check",
+    "description": "Performs a lightweight background HTTP check (under 3 seconds) to verify if a website or portfolio is live (HTTP 200 OK) without navigating the active browser tab or loading heavy scripts.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "description": "The website or portfolio URL to verify (e.g. https://person.github.io)",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "search_web",
+    "description": "Performs a fast, lightweight background web search (under 1.5s) returning top titles, URLs, and clean snippets. Use this whenever you need to check facts, find a website URL, or look up information WITHOUT opening new tabs, scraping spammy wikis, or disrupting your active page focus.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "description": "The search query or terms to look up on the web (e.g. \"Foundersuite 59 VC firms 2025\", \"The Last of Us quote\")",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Maximum number of results to return (default 5, max 10)",
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "wait_seconds",
+    "description": "Pauses execution for a specified number of seconds (1 to 30) before the next action. MANDATORY for polling in multi-round chat loops (WhatsApp, Slack, Telegram) while waiting for contacts to reply, waiting for AI streaming responses to complete, or waiting for asynchronous page updates. NEVER call search_web to pass time.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "seconds"
+      ],
+      "properties": {
+        "seconds": {
+          "description": "Number of seconds to pause execution (1 to 30 seconds, default 5). Use when waiting for a chat contact to reply on WhatsApp/Slack/Telegram, waiting for AI streaming responses, or waiting for page updates. NEVER call search_web to pass time.",
+          "minimum": 1,
+          "maximum": 30,
+          "type": "number"
+        },
+        "reason": {
+          "description": "Reason for pausing (e.g. \"Waiting for Mustafa to type reply in WhatsApp Web\")",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "open_new_tab",
+    "description": "Opens a new browser tab with the specified URL and automatically focuses and switches to it as the active tab. Use this when you want to open a destination in a fresh tab or look up information without replacing the current tab. The new tab is ALREADY active and focused upon creation, so you do NOT need to call switch_browser_tab.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "description": "The URL to open in the new tab",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "close_tab",
+    "description": "Closes a browser tab by its ID. Use this to clean up tabs you opened with open_new_tab after you are done reading information from them.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "tabId"
+      ],
+      "properties": {
+        "tabId": {
+          "description": "The ID of the tab to close (get tab IDs from list_browser_tabs or open_new_tab)",
+          "type": "number"
+        }
+      }
+    }
+  }
+]

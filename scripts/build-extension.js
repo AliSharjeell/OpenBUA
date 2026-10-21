@@ -4,6 +4,9 @@ import fs from 'fs';
 import path from 'path';
 
 async function buildExtension() {
+  console.log('🤖 Updating OpenBUA MCP tool catalog...');
+  execSync('node mcp/generate-catalog.mjs', { stdio: 'inherit' });
+
   console.log('🚀 [1/4] Running Vite build for Sidepanel & Background...');
   execSync('npx vite build', { stdio: 'inherit' });
 
