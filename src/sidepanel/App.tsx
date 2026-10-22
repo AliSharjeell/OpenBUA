@@ -917,6 +917,17 @@ export function App() {
             >
               BYOK
             </button>
+            <button
+              type="button"
+              onClick={() => setSettingsTab('mcp')}
+              className={`h-7 px-3.5 rounded-full text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                settingsTab === 'mcp'
+                  ? 'bg-zinc-100 text-zinc-950 font-semibold shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              MCP
+            </button>
           </div>
         ) : activeNavTab === 'suggestions' ? (
           <div className="absolute inset-x-0 flex justify-center pointer-events-none">
