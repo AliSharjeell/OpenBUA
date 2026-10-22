@@ -2,6 +2,9 @@
 
 export type ProviderType = 'openai' | 'anthropic';
 export type ModelMode = 'free' | 'byok';
+// Settings view tabs. 'mcp' is a separate concern from the model modes,
+// so it lives outside ModelMode and never reaches the persisted selectedMode.
+export type SettingsTab = 'free' | 'byok' | 'mcp';
 
 export interface FreeModelConfig {
   baseUrl: string;
