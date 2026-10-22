@@ -742,7 +742,8 @@ export function App() {
 
   const handleSettingsSaved = (updated: AppSettings) => {
     setSettings(updated);
-    setSettingsTab(updated.selectedMode || 'free');
+    // The visible settings tab stays as-is on save. 'mcp' is not a model mode,
+    // so the persisted selectedMode must never override the active tab.
     if (harnessRef.current) {
       harnessRef.current.updateConfig(updated, activeDocuments);
     }
