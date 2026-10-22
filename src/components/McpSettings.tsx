@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { MCP_CONFIG_KEY, MCP_STATUS_KEY, type McpConfig, type McpClientType, type McpStatus } from "../mcp/external-model";
+import { MCP_CONFIG_KEY, MCP_STATUS_KEY, MCP_CLIENTS, mcpClientName, mcpSetupCommand, mcpClientConfig, type McpConfig, type McpClientType, type McpStatus } from "../mcp/external-model";
 
 export function McpSettings() {
   const [selectedClient, setSelectedClient] = useState<McpClientType>("antigravity");
   const [config, setConfig] = useState<McpConfig>({ enabled: false, url: "http://127.0.0.1:32155", token: "", client: "antigravity" });
   const [status, setStatus] = useState<McpStatus>();
   const [error, setError] = useState("");
+  const [copied,setCopied]=useState(false);
+  const [now,setNow]=useState(Date.now());
+  useEffect(()=>{const id=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(id);},[]);
 
   useEffect(() => {
     if (typeof chrome === "undefined" || !chrome.storage?.local) return;
@@ -32,11 +35,11 @@ export function McpSettings() {
   }, []);
 
   const activeClient = config.client || "antigravity";
-  const activeClientName = activeClient === "antigravity" ? "Antigravity" : activeClient === "claude" ? "Claude" : "Codex";
-  const selectedClientName = selectedClient === "antigravity" ? "Antigravity" : selectedClient === "claude" ? "Claude" : "Codex";
+  const activeClientName = mcpClientName(activeClient, config.clientName);
+  const selectedClientName = mcpClientName(selectedClient, config.clientName);
   const isSelectedActive = config.enabled && activeClient === selectedClient;
   const isClientConnected = Boolean(status?.mcpConnected);
-  const connected = isSelectedActive && isClientConnected && Date.now() - (status?.lastSeen || 0) < 15000;
+  const connected = isSelectedActive && isClientConnected && now - (status?.lastSeen || 0) < 15000;
 
   async function connect(clientToConnect: McpClientType) {
     setError("");
@@ -89,49 +92,21 @@ export function McpSettings() {
         </span>
       </div>
 
-      <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800 gap-1">
-        <button
-          type="button"
-          onClick={() => setSelectedClient("antigravity")}
-          className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition ${
-            selectedClient === "antigravity"
-              ? "bg-[#007AFF] text-white shadow-xs"
-              : "text-zinc-400 hover:text-white"
-          }`}
-        >
-          Antigravity
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelectedClient("codex")}
-          className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition ${
-            selectedClient === "codex"
-              ? "bg-[#007AFF] text-white shadow-xs"
-              : "text-zinc-400 hover:text-white"
-          }`}
-        >
-          Codex
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelectedClient("claude")}
-          className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition ${
-            selectedClient === "claude"
-              ? "bg-[#007AFF] text-white shadow-xs"
-              : "text-zinc-400 hover:text-white"
-          }`}
-        >
-          Claude
-        </button>
-      </div>
-
-      <p className="text-zinc-400 leading-relaxed text-[11px]">
-        {selectedClient === "antigravity"
-          ? "Let Google Antigravity drive browser perception, form filling, document editing, and navigation through MCP. Keep the bridge tab open while using it."
-          : selectedClient === "claude"
-          ? "Connect Claude Desktop directly to OpenBUA. Call openbua_* tools to interact with your live browser tab."
-          : "Let Codex drive browser automation tools directly from your terminal or editor. Keep the bridge tab open while using it."}
-      </p>
+      <label className="block space-y-1">
+        <span className="text-zinc-300">MCP client</span>
+        <select aria-label="MCP client" value={selectedClient} onChange={event=>setSelectedClient(event.target.value as McpClientType)} className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-zinc-100">
+          {MCP_CLIENTS.map(client=><option key={client.id} value={client.id}>{client.name}</option>)}
+        </select>
+      </label>
+      {selectedClient==="custom" && <label className="block space-y-1"><span className="text-zinc-300">App name</span><input aria-label="Custom MCP app name" value={config.clientName||""} onChange={event=>setConfig({...config,clientName:event.target.value})} placeholder="Your agent or desktop app" className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-zinc-100"/></label>}
+      <p className="text-zinc-400 leading-relaxed text-[11px]">Connect any app that supports MCP over stdio. Client profiles change the setup instructions; all use the same OpenBUA tools. Keep the bridge tab open.</p>
+      <details className="rounded-xl border border-zinc-800 p-3 space-y-2">
+        <summary className="cursor-pointer text-zinc-200">Copy MCP configuration</summary>
+        <p className="text-zinc-400">Run <code>npm run mcp:config</code> in the OpenBUA folder for JSON with the correct absolute server path. For VS Code use <code>npm run mcp:config -- --vscode</code>.</p>
+        <label className="block space-y-1"><span>Absolute server.mjs path</span><input aria-label="MCP server script path" value={config.serverPath||""} onChange={event=>setConfig({...config,serverPath:event.target.value})} placeholder="C:\Apps\OpenBUA\mcp\server.mjs" className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-zinc-100"/></label>
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-zinc-950 p-2 text-zinc-300">{JSON.stringify(mcpClientConfig(config.serverPath||"",selectedClient),null,2)}</pre>
+        <button type="button" disabled={!config.serverPath?.trim()} onClick={()=>void navigator.clipboard.writeText(JSON.stringify(mcpClientConfig(config.serverPath||"",selectedClient),null,2)).then(()=>setCopied(true)).catch(()=>setError("Copy failed; select the JSON text instead."))} className="rounded-lg bg-zinc-800 px-3 py-2 text-zinc-100 disabled:opacity-40">{copied?"Copied":"Copy JSON"}</button>
+      </details>
 
       <label className="block space-y-1">
         <span className="text-zinc-300">Local bridge URL</span>
@@ -156,7 +131,7 @@ export function McpSettings() {
       </label>
 
       <p className="text-zinc-500 text-[10px] leading-relaxed">
-        Run <code>npm run mcp:{selectedClient}</code> to configure {selectedClientName}, then <code>npm run mcp:pairing</code> to view your token.
+        Run <code>{mcpSetupCommand(selectedClient)}</code> to configure {selectedClientName}, then <code>npm run mcp:pairing</code> to view your token.
       </p>
 
       {config.enabled && !status?.relayConnected && (

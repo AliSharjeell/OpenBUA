@@ -1,5 +1,5 @@
 import { McpRuntime } from "./runtime";
-import { MCP_CONFIG_KEY, MCP_STATUS_KEY, type McpConfig } from "./external-model";
+import { MCP_CONFIG_KEY, MCP_STATUS_KEY, mcpClientName, type McpConfig } from "./external-model";
 import { appendTrace, installTraceCapture, redact } from "./trace";
 
 installTraceCapture("mcp-bridge");
@@ -67,7 +67,7 @@ while (running) {
   let delay = 0;
   const config = (await chrome.storage.local.get(MCP_CONFIG_KEY))[MCP_CONFIG_KEY] as McpConfig | undefined;
   const clientType = config?.client || "antigravity";
-  const clientName = clientType === "antigravity" ? "Antigravity" : clientType === "claude" ? "Claude" : "Codex";
+  const clientName = mcpClientName(clientType, config?.clientName);
 
   const heading = document.getElementById("bridge-heading") || document.querySelector("h1");
   if (heading) heading.textContent = `OpenBUA + ${clientName}`;

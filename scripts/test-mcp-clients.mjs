@@ -1,0 +1,14 @@
+﻿import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {clientConfig} from '../mcp/export-config.mjs';
+const code=await build({entryPoints:['src/mcp/external-model.ts'],bundle:true,write:false,format:'esm',platform:'node'});
+const profiles=await import('data:text/javascript;base64,'+Buffer.from(code.outputFiles[0].text).toString('base64'));
+assert.ok(profiles.MCP_CLIENTS.some(client=>client.id==='custom'));
+assert.ok(profiles.MCP_CLIENTS.some(client=>client.id==='pi'));
+assert.equal(profiles.mcpClientName('custom','My own agent'),'My own agent');
+assert.equal(profiles.mcpSetupCommand('cursor'),'npm run mcp:config');
+const standard=clientConfig();assert.ok(standard.mcpServers.openbua.args[0].endsWith('server.mjs'));
+assert.ok(!JSON.stringify(standard).includes('token'));
+assert.equal(clientConfig(true).servers.openbua.type,'stdio');
+assert.equal(profiles.mcpClientConfig('/tmp/server.mjs','gemini').mcpServers.openbua.args[0],'/tmp/server.mjs');
+console.log('Generic MCP client profiles, config formats and credential-free export passed');

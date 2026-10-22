@@ -114,7 +114,7 @@ const logDirectory = process.env.OPENBUA_MCP_LOG_DIR || path.join(os.homedir(), 
 await fs.mkdir(logDirectory, { recursive: true });
 const logFile = path.join(logDirectory, `${new Date().toISOString().replace(/[:.]/g, "-")}-${clientId}.jsonl`);
 
-const instructions = `Antigravity, Codex, or Claude is the OpenBUA agent in this session.
+const instructions = `Your connected MCP client is the OpenBUA agent in this session.
 OpenBUA is a fast, accurate browser-use agent for web navigation, form filling, document editing, and interaction.
 Key principles:
 1. DOM-FIRST: Always use openbua_inspect_page_controls as your primary perception tool. It returns exact labeled refs, selectors, states, bounding rects, occlusion hit-tests, and question groups.
@@ -300,7 +300,7 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => ({
   prompts: [
     {
       name: "openbua_agent",
-      description: "Drive OpenBUA using Antigravity, Codex, or Claude to inspect and interact with the browser.",
+      description: "Drive OpenBUA using Your connected MCP client to inspect and interact with the browser.",
     },
   ],
 }));

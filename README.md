@@ -272,3 +272,12 @@ OpenBUA is completely client-side. We do not operate external application server
 ## License
 
 MIT
+
+
+### Connect any MCP client
+
+Settings > External MCP Server now includes Gemini CLI, Cursor, VS Code, Windsurf, Cline, Pi / Reel Studio, and **Any MCP client** with a custom app name. These profiles all use the same stdio MCP protocol; the model vendor does not restrict the available browser tools.
+
+Run `npm run mcp:config` from this folder to print portable `mcpServers` JSON with the actual absolute Node and server paths. Use `npm run mcp:config -- --vscode` for VS Code's `servers` layout. Copy this into your client's MCP settings (or Reel Studio's MCP config). The export contains no pairing token; the server reads your existing local pairing configuration. Keep the extension's bridge tab open and connected. The settings panel also includes a JSON preview and copy button for a server path you provide.
+
+`npm run test:mcp-clients` checks profiles and exported configuration. Existing pairing/origin/exactly-once delivery checks remain in `npm run test:mcp`.

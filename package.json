@@ -54,7 +54,9 @@
     "mcp:antigravity": "node scripts/setup-antigravity-mcp.mjs",
     "mcp:codex": "node scripts/setup-codex-mcp.mjs",
     "mcp:claude": "node scripts/setup-claude-mcp.mjs",
-    "test:mcp": "node scripts/test-mcp.mjs"
+    "test:mcp": "node scripts/test-mcp.mjs",
+    "mcp:config": "node mcp/export-config.mjs",
+    "test:mcp-clients": "node scripts/test-mcp-clients.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",

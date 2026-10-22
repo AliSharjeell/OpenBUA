@@ -2,13 +2,30 @@ import { appendTrace, modelRecord } from "./trace";
 
 export const MCP_CONFIG_KEY = "openbua_mcp_config_v1";
 export const MCP_STATUS_KEY = "openbua_mcp_status_v1";
-export type McpClientType = "antigravity" | "codex" | "claude";
+export const MCP_CLIENTS = [
+  {id:"antigravity",name:"Antigravity"},{id:"codex",name:"Codex"},{id:"claude",name:"Claude"},
+  {id:"gemini",name:"Gemini CLI"},{id:"cursor",name:"Cursor"},{id:"vscode",name:"VS Code"},
+  {id:"windsurf",name:"Windsurf"},{id:"cline",name:"Cline"},{id:"pi",name:"Pi / Reel Studio"},{id:"custom",name:"Any MCP client"},
+] as const;
+export type McpClientType = typeof MCP_CLIENTS[number]["id"];
+export function mcpClientName(client:McpClientType,customName?:string) {
+  return client==="custom" ? (customName?.trim() || "MCP client") : MCP_CLIENTS.find(item=>item.id===client)?.name || "MCP client";
+}
+export function mcpSetupCommand(client:McpClientType) {
+  return ["antigravity","codex","claude"].includes(client) ? `npm run mcp:${client}` : "npm run mcp:config";
+}
+export function mcpClientConfig(serverPath:string, client:McpClientType) {
+  const server={command:"node",args:[serverPath.trim()||"/absolute/path/to/OpenBUA/mcp/server.mjs"]};
+  return client==="vscode" ? {servers:{openbua:{type:"stdio",...server}}} : {mcpServers:{openbua:server}};
+}
 
 export interface McpConfig {
   enabled: boolean;
   url: string;
   token: string;
   client?: McpClientType;
+  clientName?: string;
+  serverPath?: string;
 }
 
 export interface McpStatus {
