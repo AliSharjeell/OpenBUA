@@ -10,7 +10,7 @@ import {
   ChatMessage,
   ToolCallState,
   ChatSession,
-  ModelMode,
+  SettingsTab,
   SuggestedMemory,
 } from '../types';
 import {
@@ -81,7 +81,7 @@ function TwoLineMenu({ className = 'w-4 h-4' }: { className?: string }) {
 
 export function App() {
   const [activeNavTab, setActiveNavTab] = useState<'chat' | 'memory' | 'settings' | 'preview' | 'suggestions'>('chat');
-  const [settingsTab, setSettingsTab] = useState<ModelMode>(DEFAULT_SETTINGS.selectedMode || 'free');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(DEFAULT_SETTINGS.selectedMode || 'free');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [globalMemories, setGlobalMemories] = useState<UserDocument[]>([]);
   const [tabMemories, setTabMemories] = useState<UserDocument[]>([]);
@@ -892,7 +892,7 @@ export function App() {
           )}
         </div>
 
-        {/* Center: Chat / Memory / Preview Floating Toggle OR Free / BYOK Toggle in Settings OR Suggested memory Pill */}
+        {/* Center: Chat / Memory / Preview Floating Toggle OR Free / BYOK / MCP Toggle in Settings OR Suggested memory Pill */}
         {activeNavTab === 'settings' ? (
           <div className="flex items-center p-0.5 bg-zinc-900/95 border border-zinc-800/90 rounded-full shadow-xl shadow-black/60 pointer-events-auto">
             <button

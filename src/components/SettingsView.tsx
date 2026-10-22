@@ -1,6 +1,6 @@
 import { McpSettings } from './McpSettings';
 import React, { useState, useEffect } from 'react';
-import { AppSettings, ProviderType, ModelMode } from '../types';
+import { AppSettings, ProviderType, ModelMode, SettingsTab } from '../types';
 import { saveSettings } from '../services/storage';
 import { Input } from './ui/input';
 import {
@@ -75,13 +75,13 @@ export const FREE_GEMINI_MODELS: FreeGeminiModelOption[] = [
 interface SettingsViewProps {
   settings: AppSettings;
   onSettingsSaved: (updated: AppSettings) => void;
-  activeTab?: ModelMode;
-  onTabChange?: (tab: ModelMode) => void;
+  activeTab?: SettingsTab;
+  onTabChange?: (tab: SettingsTab) => void;
 }
 
 export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange }: SettingsViewProps) {
   // Mode: Free vs BYOK (synced from App header)
-  const [currentTab, setCurrentTab] = useState<ModelMode>(activeTab || settings.selectedMode || 'free');
+  const [currentTab, setCurrentTab] = useState<SettingsTab>(activeTab || settings.selectedMode || 'free');
 
   useEffect(() => {
     if (activeTab && activeTab !== currentTab) {
@@ -180,6 +180,13 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
   const handleTestConnection = async () => {
     setIsTesting(true);
     setTestResult(null);
+
+    // The MCP tab has no model endpoint to test.
+    if (currentTab === 'mcp') {
+      setTestResult({ success: false, message: 'API testing is only available on the Free and BYOK tabs.' });
+      setIsTesting(false);
+      return;
+    }
 
     const isFree = currentTab === 'free';
     const isAnthropic = !isFree && activeProvider === 'anthropic';
@@ -714,10 +721,23 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
       )}
 
       {/* ======================================================== */}
-      <McpSettings />
-
-      {/* Bottom Action Buttons: Save Settings & Test API */}
+      {/* MCP TAB (External MCP server / client pairing) */}
       {/* ======================================================== */}
+      {currentTab === 'mcp' && (
+        <div className="space-y-4">
+          {/* Header Row: Title & Hint */}
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-zinc-100">MCP</span>
+            <span className="text-[10px] text-zinc-500">Connect external MCP clients</span>
+          </div>
+
+          <McpSettings />
+        </div>
+      )}
+
+      {/* Bottom Action Buttons: Save Settings & Test API (model tabs only) */}
+      {/* ======================================================== */}
+      {currentTab !== 'mcp' && (
       <div className="pt-2 space-y-2">
         <div className="flex items-center gap-2">
           {/* Main Save Settings Button in iMessage Blue (#007AFF) */}
@@ -767,6 +787,7 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
