@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 let chromium;
 try {({chromium}=await import(process.env.OPENBUA_PLAYWRIGHT_MODULE || '@playwright/test'));} catch {({chromium}=await import('file:///C:/AppsNew/nascon-agentika/node_modules/@playwright/test/index.mjs'));}
@@ -49,4 +49,3 @@ try {
  assert.equal(committed[0].selected,true);assert.equal(committed[0].value,'Karachi, Sindh, Pakistan');
  console.log('PASS: MiniMax effort and endpoints, unchanged-failure guard, native no-op safety, delayed dropdown inspection and committed autocomplete selection');
 } finally {await browser.close();}
-
