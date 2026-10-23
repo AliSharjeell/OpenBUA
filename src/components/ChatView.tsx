@@ -825,7 +825,7 @@ export function ChatView({
           <Textarea
             ref={textareaRef}
             rows={1}
-            placeholder={dictation.listening?'Listening…':harness ? 'Ask OpenBUA · @ files · / commands' : 'Loading saved data…'}
+            placeholder={harness ? 'Ask OpenBUA · @ files · / commands' : 'Loading saved data…'}
             value={input}
             onChange={(e) => {
               handleInputChange(e.target.value);
