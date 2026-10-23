@@ -312,7 +312,7 @@ function inPageFindUploadTarget(fileName: string, mimeType: string, refId?: stri
   return best;
 }
 /** Read the website's attachment UI; an empty input is not an upload verdict. */
-function inPageVerifyFileUpload(fileName: string): { state: 'selected' | 'present' | 'not-found' } {
+function inPageVerifyFileUpload(fileName: string): { state: 'selected' | 'present' | 'not-found' | 'failed' } {
   const visible = (el: Element): boolean => {
     const style = getComputedStyle(el);
     return el.getClientRects().length > 0 && style.visibility !== 'hidden' && style.display !== 'none'
@@ -326,6 +326,7 @@ function inPageVerifyFileUpload(fileName: string): { state: 'selected' | 'presen
     }
   };
   visit(document);
+  if(all.some(el=>visible(el) && /^(?:upload failed|failed to upload(?: (?:file|resume))?)[.!]?$/i.test(((el as HTMLElement).innerText ?? el.textContent ?? '').trim())))return {state:'failed'};
   const dialogs = all.filter(el => el.matches('[role="dialog"], dialog[open], [aria-modal="true"]') && visible(el));
   const candidates = all.filter(el => visible(el) && ((el as HTMLElement).innerText ?? el.textContent ?? '').trim() === fileName
     && (!dialogs.length || dialogs.some(dialog => dialog.contains(el))));
@@ -354,6 +355,7 @@ export async function verifyFileUploadInTab(tabId: number, fileName: string): Pr
         target: { tabId, allFrames: true }, func: inPageVerifyFileUpload, args: [fileName],
       });
       const selected = frames.some(frame => frame.result?.state === 'selected');
+      if(frames.some(frame=>frame.result?.state==='failed'))return {success:false,attached:false,verified:false,fileName,message:'The website reports Upload failed. A filename preview is not a successful upload. Inspect the error before retrying; do not advance or claim the file is attached.'};
       const present = selected || frames.some(frame => frame.result?.state === 'present');
       if (present) return {
         success: true, attached: true, previewDetected: true, verified: true,
