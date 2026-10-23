@@ -430,8 +430,11 @@ export const getUserDocumentsTool: AgentTool<typeof GetUserDocumentsSchema> = {
         };
       }
 
-      let formatted = `Found ${activeDocs.length} active documents in user storage:\n\n`;
-      activeDocs.forEach((doc, idx) => {
+      const query=(params.query || '').trim().toLocaleLowerCase();
+      const matches=query?activeDocs.filter(doc=>[doc.title,doc.fileName,doc.type,doc.content].some(value=>value?.toLocaleLowerCase().includes(query))):activeDocs;
+      if(!matches.length)return {content:[{type:'text',text:`No active candidate document matched ${JSON.stringify(params.query)}. This is a search result, not proof that the candidate lacks a qualification. Use saved profile facts or ask for a required missing fact.`}],details:{documents:[],query:params.query}};
+      let formatted = `Found ${matches.length} matching active documents in user storage${query?` for ${JSON.stringify(params.query)}`:''}:\n\n`;
+      matches.forEach((doc, idx) => {
         let meta = `${doc.type}`;
         if (doc.fileCategory) meta += `, category: ${doc.fileCategory}`;
         meta += `, upload ID: "${doc.id}"`;
@@ -439,13 +442,15 @@ export const getUserDocumentsTool: AgentTool<typeof GetUserDocumentsSchema> = {
         if (doc.filePath) meta += `, path: "${doc.filePath}"`;
         if (doc.videoDuration) meta += `, duration: ${doc.videoDuration}s`;
         if (doc.dataUrl || doc.blobKey) meta += `, raw file attachment available for form upload`;
-        formatted += `### Document ${idx + 1}: ${doc.title} (${meta})\n${doc.content}\n\n`;
+        let content=doc.content;
+        if(query){const at=content.toLocaleLowerCase().indexOf(query);content=at<0?'File/title match; use this upload ID. No matching content excerpt.':`Source excerpt: ${content.slice(Math.max(0,at-240),at+query.length+480)}\nSearch another term for additional source excerpts.`;}
+        formatted += `### Document ${idx + 1}: ${doc.title} (${meta})\n${content}\n\n`;
       });
 
       return {
         content: [{ type: 'text', text: formatted }],
         details: {
-          documents: activeDocs.map(d => ({
+          documents: matches.map(d => ({
             id: d.id,
             title: d.title,
             type: d.type,
