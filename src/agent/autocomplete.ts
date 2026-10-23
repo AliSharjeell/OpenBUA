@@ -39,7 +39,8 @@ export async function inPageAutocomplete(
         .filter(input => list?.id && `${input.getAttribute('aria-controls') || ''} ${input.getAttribute('aria-owns') || ''}`.split(/\s+/).includes(list.id));
       const expanded=Array.from(document.querySelectorAll<HTMLInputElement>('input[role="combobox"][aria-expanded="true"],input[aria-autocomplete][aria-expanded="true"]')).filter(visible);
       const nearby=expanded.filter(input=>{if(!list)return false;const a=input.getBoundingClientRect(),b=list.getBoundingClientRect();return b.right>a.left && b.left<a.right && b.top<a.bottom+600 && b.bottom>a.top-300;});
-      const input = candidates.length === 1 ? candidates[0] : document.activeElement instanceof HTMLInputElement ? document.activeElement : nearby.length===1?nearby[0]:null;
+      const focused=nearby.find(input=>input===document.activeElement);
+      const input = candidates.length === 1 ? candidates[0] : candidates.length>1?null:focused || (nearby.length===1?nearby[0]:null);
       if (!input) return;
       const chosen = (option.textContent || '').trim();
       for (const delay of [0, 80, 250]) setTimeout(() => {

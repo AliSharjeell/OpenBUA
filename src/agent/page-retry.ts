@@ -25,5 +25,5 @@ export async function reloadUnavailable(tabId:number) {
     if((await chrome.tabs.get(tabId)).status==='complete')break;
   }
   const after=await inspectUnavailable(tabId);
-  return {success:!after.unavailable,dispatched:true,evidence:after.evidence||before.evidence,message:after.unavailable?'The site is still unavailable after one Chrome reload. Record failed and continue another job; no Inbox question is needed.':'Chrome reload completed. Inspect the actual page before resuming; a reload alone does not prove the form is ready.'};
+  return {success:!after.unavailable,dispatched:true,evidence:after.evidence||before.evidence,message:after.unavailable?'The site is still unavailable after one Chrome reload. Report this technical blocker and continue other independent work only if authorized.':'Chrome reload completed. Inspect the actual page before resuming; a reload alone does not prove the form is ready.'};
 }
