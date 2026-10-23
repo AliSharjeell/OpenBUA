@@ -20,6 +20,8 @@ Built with **`@earendil-works/pi-agent-core`** and **`@earendil-works/pi-ai`**, 
 
 ---
 
+See [Forms and live agent UI](FORM-WORKFLOW.md) for MiniMax low-effort setup, the form recovery workflow, new chat controls, and focused regression tests.
+
 ## Why OpenBUA? In-Browser Execution vs Cloud Browser-Use
 
 | Capability | OpenBUA | Traditional Cloud Browser-Use |
