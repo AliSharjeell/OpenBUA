@@ -15,6 +15,7 @@ import { describePlatforms } from './social-platforms';
 import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
 import { setActiveSessionIdState, getScratchpad, appendToScratchpad, loadSuggestedMemories, saveSuggestedMemory } from '../services/storage';
 import { resolveProviderConfig } from '../services/provider-config';
+import {HumanInput} from './human-input';
 
 export interface AgentUpdateListeners {
   onMessageDelta?: (text: string) => void;
@@ -277,6 +278,7 @@ export async function detectAndQueueMemorySuggestions(
 }
 
 export class FormAgentHarness {
+  public humanInput=new HumanInput();
   private docsEditPolicy: DocsEditPolicy = { cloneRequired: false, taskEpoch: 0 };
   private agent: Agent | null = null;
   private settings: AppSettings;
@@ -935,7 +937,7 @@ ${this.settings.systemInstruction || ''}`.trim();
       initialState: {
         model,
         systemPrompt,
-        tools: [...createAgentTools(this.sessionId, this.docsEditPolicy, this.pageTrustPolicy), ...this.parallel.tools()],
+        tools: [...createAgentTools(this.sessionId, this.docsEditPolicy, this.pageTrustPolicy), this.humanInput.tool(), ...this.parallel.tools()],
         messages: agentMessages.length > 0 ? agentMessages : undefined,
       },
       streamFn: (m, ctx, opts) => createStreamFn(config, m, ctx, opts?.signal),
@@ -1577,6 +1579,7 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public abort() {
+    this.humanInput.cancel();
     // Mark before tearing down, so the turn_end handler can tell a deliberate
     // stop apart from a provider-side abort and does not fight the user.
     this.userAborted = true;
@@ -1590,6 +1593,7 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public reset() {
+    this.humanInput.cancel();
     this.chatHistory = [];
     this.activeToolCalls.clear();
     this.currentStreamingText = '';
