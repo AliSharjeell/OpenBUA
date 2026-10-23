@@ -38,6 +38,8 @@ import {TaskRows} from './agent/TaskRows';
 import {ApprovalCard} from './agent/ApprovalCard';
 import type {InputRequest} from '../agent/human-input';
 import '../styles/agent-ui.css';
+import {FORM_COMMANDS,CommandMenu,SourceMenu,ModelMenu} from './agent/PromptBar';
+import {resolveProviderConfig} from '../services/provider-config';
 
 interface ChatViewProps {
   activeSessionId?: string;
@@ -49,6 +51,7 @@ interface ChatViewProps {
   settings: AppSettings;
   documents: UserDocument[];
   onNavigateToSettings: () => void;
+  onModelChange?: (provider:'free'|'openai'|'anthropic')=>void;
   onNavigateToMemory: () => void;
   onUploadDocument?: (file: File) => Promise<UserDocument>;
   onPreparePrompt?: (text: string) => Promise<string>;
@@ -234,6 +237,7 @@ export function ChatView({
   settings,
   documents,
   onNavigateToSettings,
+  onModelChange,
   onNavigateToMemory,
   onUploadDocument,
   onPreparePrompt,
@@ -241,6 +245,9 @@ export function ChatView({
   onInputDraftChange,
 }: ChatViewProps) {
   const [input, setInput] = useState(inputDraft || '');
+  const [sourcesOpen,setSourcesOpen]=useState(false),[modelsOpen,setModelsOpen]=useState(false),[commandIndex,setCommandIndex]=useState(0),[commandsDismissed,setCommandsDismissed]=useState(false);
+  const commands=!commandsDismissed && /^\/[a-z-]*$/i.test(input)?FORM_COMMANDS.filter(command=>command.name.startsWith(input.toLowerCase())):[];
+  const activeModel=resolveProviderConfig(settings);
   const [pendingInput,setPendingInput]=useState<InputRequest|null>(null);
   const [busyStarted,setBusyStarted]=useState(Date.now());
   useEffect(()=>{if(isBusy)setBusyStarted(Date.now());},[isBusy]);
@@ -276,6 +283,7 @@ export function ChatView({
   }, [input, activeSessionId]);
 
   const handleInputChange = (val: string) => {
+    setSourcesOpen(false);setModelsOpen(false);setCommandIndex(0);setCommandsDismissed(false);
     setInput(val);
     onInputDraftChange?.(val);
   };
@@ -496,6 +504,11 @@ export function ChatView({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if(e.nativeEvent.isComposing)return;
+    if(e.key==='Escape'){setSourcesOpen(false);setModelsOpen(false);setCommandsDismissed(true);}
+    if(commands.length) {
+      if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();setCommandIndex(index=>(index+(e.key==='ArrowDown'?1:commands.length-1))%commands.length);return;}
+      if((e.key==='Enter'&&!e.shiftKey)||e.key==='Tab'){e.preventDefault();handleInputChange(commands[commandIndex%commands.length].prompt);return;}
+    }
     if (mentionOptions.length) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -777,7 +790,10 @@ export function ChatView({
         )}
 
         {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
-        <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
+        <div data-openbua-composer className="agent-composer pointer-events-auto relative flex items-end bg-zinc-900/95 rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
+          {sourcesOpen&&<SourceMenu onAttach={()=>{setSourcesOpen(false);chatFileInputRef.current?.click();}} onMemory={onNavigateToMemory} onReference={()=>{handleInputChange('@');setMentionCursor(1);setMentionsDismissed(false);textareaRef.current?.focus();}}/>}
+          {modelsOpen&&<ModelMenu settings={settings} onConfigure={onNavigateToSettings} onPick={provider=>{setModelsOpen(false);onModelChange?.(provider);}}/>}
+          {commands.length>0&&<CommandMenu commands={commands} index={commandIndex%commands.length} onPick={text=>{handleInputChange(text);textareaRef.current?.focus();}}/>}
           {/* Start of Bar: Plus Button for Memory Document Upload */}
           <input
             ref={chatFileInputRef}
@@ -789,7 +805,10 @@ export function ChatView({
           />
           <button
             type="button"
-            onClick={() => chatFileInputRef.current?.click()}
+            data-composer-attach
+            aria-label="Add attachments and sources"
+            aria-expanded={sourcesOpen}
+            onClick={() => {setModelsOpen(false);setSourcesOpen(!sourcesOpen);}}
             title="Attach files, images or videos"
             disabled={isBusy || isUploadingDoc || isPreparingFiles}
             className="w-7 h-7 self-center flex items-center justify-center text-white hover:text-white/80 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0 cursor-pointer"
@@ -818,13 +837,15 @@ export function ChatView({
               }
             }}
             onSelect={event => setMentionCursor(event.currentTarget.selectionStart)}
-            aria-controls={mentionOptions.length ? 'attachment-mentions' : undefined}
-            aria-expanded={mentionOptions.length > 0}
+            aria-label="Prompt"
+            aria-controls={mentionOptions.length ? 'attachment-mentions' : commands.length?'form-commands':undefined}
+            aria-expanded={mentionOptions.length > 0 || commands.length>0}
             onKeyDown={handleKeyDown}
             className="border-0 bg-transparent min-h-[32px] max-h-[136px] resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans flex-1"
             disabled={isBusy || isPreparingFiles || !hasKey || !harness}
           />
 
+          <button type="button" className="agent-model-button" aria-label="Choose model" aria-expanded={modelsOpen} disabled={isBusy||isPreparingFiles} onClick={()=>{setSourcesOpen(false);setModelsOpen(!modelsOpen);}} title={activeModel.model}>{activeModel.model}<ChevronDown size={11}/></button>
           <button
             type="button"
             aria-label="Parallel subagent Chrome windows"
