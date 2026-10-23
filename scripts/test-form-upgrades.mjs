@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 let chromium;
-try {({chromium}=await import('@playwright/test'));} catch {({chromium}=await import('file:///C:/AppsNew/nascon-agentika/node_modules/@playwright/test/index.mjs'));}
+try {({chromium}=await import(process.env.OPENBUA_PLAYWRIGHT_MODULE || '@playwright/test'));} catch {({chromium}=await import('file:///C:/AppsNew/nascon-agentika/node_modules/@playwright/test/index.mjs'));}
 async function source(file,plugins=[]) {
   const result=await build({entryPoints:[file],bundle:true,platform:'node',format:'esm',write:false,plugins});
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);

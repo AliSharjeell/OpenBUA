@@ -56,7 +56,9 @@
     "mcp:claude": "node scripts/setup-claude-mcp.mjs",
     "test:mcp": "node scripts/test-mcp.mjs",
     "mcp:config": "node mcp/export-config.mjs",
-    "test:mcp-clients": "node scripts/test-mcp-clients.mjs"
+    "test:mcp-clients": "node scripts/test-mcp-clients.mjs",
+    "test:forms": "node scripts/test-form-upgrades.mjs && node scripts/test-minimax-stream.mjs",
+    "test:agent-ui": "node scripts/test-agent-ui.mjs && node scripts/test-form-flow-ui.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",

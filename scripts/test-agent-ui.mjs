@@ -1,7 +1,7 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
 let chromium;
-try {({chromium}=await import('@playwright/test'));}catch{({chromium}=await import('file:///C:/AppsNew/nascon-agentika/node_modules/@playwright/test/index.mjs'));}
+try {({chromium}=await import(process.env.OPENBUA_PLAYWRIGHT_MODULE || '@playwright/test'));}catch{({chromium}=await import('file:///C:/AppsNew/nascon-agentika/node_modules/@playwright/test/index.mjs'));}
 const browser=await chromium.launch({headless:true,executablePath:process.env.OPENBUA_CHROME_PATH||'C:/Users/alish/AppData/Local/ms-playwright/chromium-1243/chrome-win64/chrome.exe'});
 const page=await browser.newPage({viewport:{width:440,height:950}});
 const errors=[];page.on('pageerror',error=>errors.push(error.message));

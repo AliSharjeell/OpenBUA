@@ -9,3 +9,6 @@ dist
 *.zip
 .DS_Store
 Thumbs.db
+
+# Generated browser screenshots from test:agent-ui
+.tmp-visual-agent-ui/
