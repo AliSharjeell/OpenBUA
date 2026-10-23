@@ -27,7 +27,6 @@ import {
   Globe,
   Wrench,
   Brain,
-  Mic,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
 import {LoadingState} from './agent/LoadingState';
@@ -40,7 +39,6 @@ import type {InputRequest} from '../agent/human-input';
 import '../styles/agent-ui.css';
 import {FORM_COMMANDS,CommandMenu,SourceMenu,ModelMenu} from './agent/PromptBar';
 import {resolveProviderConfig} from '../services/provider-config';
-import {useDictation} from './agent/useDictation';
 
 interface ChatViewProps {
   activeSessionId?: string;
@@ -293,8 +291,6 @@ export function ChatView({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
-  const dictation=useDictation(text=>handleInputChange(`${textareaRef.current?.value || ''} ${text}`.trim()));
-  useEffect(()=>{if(isBusy)dictation.stop();},[isBusy,dictation.stop]);
   useEffect(()=>{
     if(!sourcesOpen&&!modelsOpen)return;
     const close=(event:PointerEvent)=>{if(!(event.target as Element)?.closest?.('[data-openbua-composer]')){setSourcesOpen(false);setModelsOpen(false);}};
@@ -852,7 +848,6 @@ export function ChatView({
           />
 
           <button type="button" className="agent-model-button" aria-label="Choose model" aria-expanded={modelsOpen} disabled={isBusy||isPreparingFiles} onClick={()=>{setSourcesOpen(false);setModelsOpen(!modelsOpen);}} title={activeModel.model}>{activeModel.model}<ChevronDown size={11}/></button>
-          {dictation.supported&&<button type="button" className="agent-dictation" disabled={isBusy||isPreparingFiles} aria-label={dictation.listening?'Stop dictation':'Start dictation'} aria-pressed={dictation.listening} onClick={dictation.toggle}><Mic size={15}/></button>}
           {/* End of Bar: Send / Stop Button */}
           <div className="self-center flex items-center shrink-0">
             {isBusy ? (
@@ -878,7 +873,6 @@ export function ChatView({
             )}
           </div>
         </div>
-        {dictation.error&&<p className="pointer-events-auto text-xs text-red-400" role="status">{dictation.error}</p>}
       </div>
     </div>
   );

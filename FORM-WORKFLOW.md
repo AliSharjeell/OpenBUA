@@ -16,7 +16,7 @@ The stream adapter preserves complete thinking blocks and signatures with tool h
 - Expandable activity notes and tool rows use real model outputs and tool results. Tool details redact credential-shaped properties.
 - Answers display actual streamed text and link sources extracted from the response, without simulated research or progress.
 - Task rows reflect parallel Chrome workers' stored states for the current session and window.
-- The rounded composer supports attachment uploads and references, `/fill`, `/inspect`, `/verify`, `/summarize`, configured model selection, and browser speech recognition where supported. Dictation never inserts sample text.
+- The rounded composer supports attachment uploads and references, `/fill`, `/inspect`, `/verify`, `/summarize`, and configured model selection.
 
 ## Verification
 
