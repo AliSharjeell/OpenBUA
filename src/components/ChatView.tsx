@@ -27,7 +27,6 @@ import {
   Globe,
   Wrench,
   Brain,
-  PanelsTopLeft,
   Mic,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
@@ -258,8 +257,6 @@ export function ChatView({
     setPendingInput(broker?.current||null);
     return broker?.subscribe(()=>setPendingInput(broker.current));
   },[harness,activeSessionId]);
-  const [parallelEnabled, setParallelEnabled] = useState(false);
-  useEffect(() => { setParallelEnabled(false); }, [activeSessionId]);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
   const chatScopeRef = useRef(activeSessionId);
   chatScopeRef.current = activeSessionId;
@@ -486,7 +483,7 @@ export function ChatView({
         const prepared = onPreparePrompt ? await onPreparePrompt(promptText) : promptText;
         setIsPreparingFiles(false);
         if (chatScopeRef.current !== promptScope) return;
-        harness.setParallelEnabled(parallelEnabled);
+        harness.setParallelEnabled(false);
         await harness.prompt(prepared);
       } catch (e: any) {
         console.error('[ChatView] Prompt error:', e);
@@ -855,17 +852,6 @@ export function ChatView({
           />
 
           <button type="button" className="agent-model-button" aria-label="Choose model" aria-expanded={modelsOpen} disabled={isBusy||isPreparingFiles} onClick={()=>{setSourcesOpen(false);setModelsOpen(!modelsOpen);}} title={activeModel.model}>{activeModel.model}<ChevronDown size={11}/></button>
-          <button
-            type="button"
-            aria-label="Parallel subagent Chrome windows"
-            aria-pressed={parallelEnabled}
-            title="Parallel subagent Chrome windows: let OpenBUA split independent tasks across up to 3 separate Chrome windows and collect their results. Off by default. Each worker uses your selected model and API key."
-            disabled={isBusy || isPreparingFiles || !harness}
-            onClick={() => setParallelEnabled(value => !value)}
-            className={`self-center shrink-0 h-7 w-7 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 ${parallelEnabled ? 'bg-blue-500/20 text-blue-500' : 'text-muted-foreground hover:bg-muted'}`}
-          >
-            <PanelsTopLeft className="w-4 h-4" />
-          </button>
           {dictation.supported&&<button type="button" className="agent-dictation" disabled={isBusy||isPreparingFiles} aria-label={dictation.listening?'Stop dictation':'Start dictation'} aria-pressed={dictation.listening} onClick={dictation.toggle}><Mic size={15}/></button>}
           {/* End of Bar: Send / Stop Button */}
           <div className="self-center flex items-center shrink-0">
