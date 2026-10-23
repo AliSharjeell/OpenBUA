@@ -13,6 +13,7 @@ export interface FreeModelConfig {
 }
 
 export interface ProviderConfig {
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   provider: ProviderType;
   baseUrl: string;
   apiKey: string;
@@ -26,11 +27,13 @@ export interface AppSettings {
   selectedMode: ModelMode;
   free: FreeModelConfig;
   openai: {
+    reasoningEffort?: ProviderConfig['reasoningEffort'];
     baseUrl: string;
     apiKey: string;
     model: string;
   };
   anthropic: {
+    reasoningEffort?: ProviderConfig['reasoningEffort'];
     baseUrl: string;
     apiKey: string;
     model: string;

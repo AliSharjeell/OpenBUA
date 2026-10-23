@@ -16,6 +16,7 @@ import { ALL_AGENT_TOOLS } from './tools';
 import { recoveryRequiresTool, toolChoiceRejected } from './recovery-tool-choice';
 import { ProviderConfig } from '../types';
 import { incrementGeminiDailyUsage } from '../services/storage';
+import { providerEffortOptions } from '../services/provider-config';
 
 function assistantMetadata(config: ProviderConfig) {
   return { api: config.provider === 'anthropic' ? 'anthropic-messages' as const : 'openai-completions' as const, provider: config.provider, model: config.model, timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
@@ -401,6 +402,7 @@ async function streamOpenAI(
     messages,
     stream: true,
   };
+  Object.assign(payload,providerEffortOptions(config));
 
   if (tools.length > 0) {
     payload.tools = tools;
@@ -1188,6 +1190,7 @@ async function streamAnthropic(
     messages,
     stream: true,
   };
+  Object.assign(payload,providerEffortOptions(config));
 
   if (systemText) {
     payload.system = systemText;

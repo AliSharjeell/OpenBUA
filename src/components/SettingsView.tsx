@@ -152,11 +152,13 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
         model: freeModel.trim(),
       },
       openai: {
+        ...settings.openai,
         baseUrl: openaiUrl.trim(),
         apiKey: openaiKey.trim(),
         model: openaiModel.trim(),
       },
       anthropic: {
+        ...settings.anthropic,
         baseUrl: anthropicUrl.trim(),
         apiKey: anthropicKey.trim(),
         model: anthropicModel.trim(),

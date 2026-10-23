@@ -1,4 +1,5 @@
 import { extractTextFromDocx } from './docx-parser';
+import { providerEffortOptions,providerEndpoint,resolveProviderConfig } from './provider-config';
 // Client-side PDF, image, video, and text document parser for extracting resume/profile text and raw file data
 import { DocumentFileType, UserDocument } from '../types';
 import { getMediaBlob, mediaBlobKeyFor, putMediaBlob } from './blob-store';
@@ -212,7 +213,7 @@ export async function extractTextWithVlm(
     const baseUrl = settings.anthropic?.baseUrl || 'https://api.anthropic.com/v1';
     const apiKey = settings.anthropic?.apiKey || '';
     const model = settings.anthropic?.model || 'claude-sonnet-5-5';
-    const endpoint = `${baseUrl.replace(/\/+$/, '')}/messages`;
+    const endpoint = providerEndpoint({provider:'anthropic',baseUrl});
 
     const base64Data = dataUrl.split(',')[1] || '';
     let validMediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/png';
@@ -231,6 +232,7 @@ export async function extractTextWithVlm(
       body: JSON.stringify({
         model,
         max_tokens: 3000,
+        ...providerEffortOptions(resolveProviderConfig(settings)),
         messages: [
           {
             role: 'user',

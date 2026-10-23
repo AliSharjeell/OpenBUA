@@ -14,6 +14,7 @@ import { getActiveTab, isExtensionPage } from './browser-bridge';
 import { describePlatforms } from './social-platforms';
 import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig } from '../types';
 import { setActiveSessionIdState, getScratchpad, appendToScratchpad, loadSuggestedMemories, saveSuggestedMemory } from '../services/storage';
+import { resolveProviderConfig } from '../services/provider-config';
 
 export interface AgentUpdateListeners {
   onMessageDelta?: (text: string) => void;
@@ -897,26 +898,7 @@ ${this.settings.systemInstruction || ''}`.trim();
   }
 
   public getActiveConfig(): ProviderConfig {
-    if (this.settings.selectedMode === 'free') {
-      return {
-        provider: 'openai',
-        baseUrl: this.settings.free?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/',
-        apiKey: this.settings.free?.apiKey || '',
-        model: this.settings.free?.model || 'gemini-3.5-flash-lite',
-        isFreeMode: true,
-        mode: 'free',
-      };
-    }
-    const isAnthropic = this.settings.activeProvider === 'anthropic';
-    const cfg = isAnthropic ? this.settings.anthropic : this.settings.openai;
-    return {
-      provider: this.settings.activeProvider,
-      baseUrl: cfg.baseUrl,
-      apiKey: cfg.apiKey,
-      model: cfg.model,
-      isFreeMode: false,
-      mode: 'byok',
-    };
+    return resolveProviderConfig(this.settings);
   }
 
   public setConversationHistory(history: ChatMessage[]) {
