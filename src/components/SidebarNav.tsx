@@ -202,7 +202,7 @@ export default function SidebarNav({
     <aside
       data-sidebar-collapsed={collapsed}
       aria-label="Workspace navigation"
-      className={`relative flex shrink-0 overflow-hidden bg-background text-foreground transition-[width] ${
+      className={`relative flex shrink-0 overflow-hidden bg-background text-foreground font-sans tracking-[-0.06em] transition-[width] ${
         fill ? "h-full" : "h-[600px]"
       } ${className}`}
       style={{
@@ -212,6 +212,8 @@ export default function SidebarNav({
         "--sidebar-copy-duration": `${SIDEBAR_MOTION.copyDuration}ms`,
         "--sidebar-copy-offset": `${SIDEBAR_MOTION.copyOffset}px`,
         "--sidebar-easing": SIDEBAR_MOTION.easing,
+        letterSpacing: "-0.06em",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       } as CSSProperties}
     >
       <div className="flex min-h-0 w-[224px] shrink-0 flex-col py-2">
