@@ -334,7 +334,7 @@ export const fillFormFieldsTool: AgentTool<typeof FillFormFieldsSchema> = {
 
       return {
         content: [{ type: 'text', text: text.trim() }],
-        details: { ...result, assignments: params.assignments },
+        details: { ...result, success:result.errors.length===0 && result.successCount===params.assignments.length, assignments: params.assignments },
       };
     } catch (err: any) {
       return {

@@ -115,6 +115,7 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
   const [anthropicUrl, setAnthropicUrl] = useState(settings.anthropic?.baseUrl || 'https://api.anthropic.com/v1');
   const [anthropicKey, setAnthropicKey] = useState(settings.anthropic?.apiKey || '');
   const [anthropicModel, setAnthropicModel] = useState(settings.anthropic?.model || 'claude-sonnet-5-5');
+  const [anthropicEffort,setAnthropicEffort]=useState<NonNullable<AppSettings['anthropic']['reasoningEffort']>>(settings.anthropic.reasoningEffort||'low');
 
   // Permissions: Ask for review (true, default) vs Full access (false)
   const [autoConfirmSubmit, setAutoConfirmSubmit] = useState(settings.autoConfirmSubmit ?? true);
@@ -159,6 +160,7 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
       },
       anthropic: {
         ...settings.anthropic,
+        reasoningEffort:anthropicEffort,
         baseUrl: anthropicUrl.trim(),
         apiKey: anthropicKey.trim(),
         model: anthropicModel.trim(),
@@ -653,7 +655,12 @@ export function SettingsView({ settings, onSettingsSaved, activeTab, onTabChange
                       {m}
                     </button>
                   ))}
+                  <button type="button" className="text-[9px] text-blue-400 underline" onClick={()=>{
+                    if(!/^https:\/\/api\.minimax\.io\//i.test(anthropicUrl))setAnthropicKey('');
+                    setAnthropicUrl('https://api.minimax.io/anthropic');setAnthropicModel('MiniMax-M3.1-Flash');setAnthropicEffort('low');
+                  }}>MiniMax Flash · low</button>
                 </div>
+                {/MiniMax-M3\.1-Flash/i.test(anthropicModel)&&<label className="mt-3 block text-[11px] text-zinc-400">Thinking effort<select aria-label="Thinking effort" className="ml-2 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1" value={anthropicEffort} onChange={event=>setAnthropicEffort(event.target.value as typeof anthropicEffort)}>{(['low','medium','high','xhigh','max'] as const).map(value=><option key={value}>{value}</option>)}</select></label>}
               </div>
             </div>
           )}
