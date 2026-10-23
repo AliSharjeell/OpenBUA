@@ -37,6 +37,7 @@ import {StreamingText} from './agent/StreamingText';
 import {TaskRows} from './agent/TaskRows';
 import {ApprovalCard} from './agent/ApprovalCard';
 import type {InputRequest} from '../agent/human-input';
+import '../styles/agent-ui.css';
 
 interface ChatViewProps {
   activeSessionId?: string;
