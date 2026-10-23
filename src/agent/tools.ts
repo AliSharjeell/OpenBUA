@@ -14,6 +14,7 @@ import { protectPageTrust, type PageTrustPolicy } from './page-trust';
 import { AgentTool, type AgentToolResult as PiAgentToolResult } from '@earendil-works/pi-agent-core';
 type AgentToolResult = PiAgentToolResult<any>;
 import { Type } from '@sinclair/typebox';
+import { protectFormRecovery } from './form-recovery';
 import { checkCanvasTextInsertion } from './canvas-edit-check';
 import { protectDocsEdits, DocsEditPolicy } from './docs-edit-safety';
 import { inspectDocsEditorTool, selectDocsTextTool, setDocsFormattingTool, docsClipboardTool, findDocsTextTool, confirmDocsCloneTool } from './docs-tools';
@@ -233,6 +234,7 @@ export const getActiveTabFormTool: AgentTool<typeof GetActiveTabFormSchema> = {
         if (!observed) continue;
         if (!field.label && observed.label) field.label=observed.label;
         if (observed.autocomplete) {
+          if(observed.selected)field.value=observed.value;
           field.type='autocomplete';
           field.options=observed.options.map(label=>({value:label,label,selected:label===observed.value}));
           field.sectionHint=[field.sectionHint,observed.message,observed.needsSelection?'Dropdown selection required':''].filter(Boolean).join(' · ');
@@ -1571,7 +1573,7 @@ export const clipboardActionTool: AgentTool<typeof ClipboardActionSchema> = {
 
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy, pagePolicy: PageTrustPolicy = { userRequests: [] }): AgentTool<any>[] {
-  return protectPageTrust(protectDocsEdits([
+  return protectFormRecovery(protectPageTrust(protectDocsEdits([
     inspectPageControlsTool,
     getActiveTabFormTool,
     inspectDocsEditorTool,
@@ -1611,7 +1613,7 @@ export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy
     waitSecondsTool,
     openNewTabTool,
     closeTabTool,
-  ], docsPolicy), pagePolicy);
+  ], docsPolicy), pagePolicy));
 }
 
 // All available tools for the OpenBUA Agent (default session fallback)
