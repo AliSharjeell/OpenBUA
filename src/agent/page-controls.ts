@@ -1,5 +1,5 @@
 // Serialized into the page; keep helpers inside this function.
-export function inPageControls(options: { selector?: string; offset?: number; limit?: number; optionOffset?: number; optionQuery?: string } = {}) {
+export async function inPageControls(options: { selector?: string; offset?: number; limit?: number; optionOffset?: number; optionQuery?: string } = {}) {
   /** Self-contained: serialized alongside DOM observers into the page. */
   function nearbyChoiceQuestion(node: HTMLElement): string {
     const choiceSelector = 'input[type="radio"],input[type="checkbox"],[role="radio"],[role="checkbox"]';
@@ -40,10 +40,19 @@ export function inPageControls(options: { selector?: string; offset?: number; li
     const style = getComputedStyle(item);
     return item.hidden || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
   });
+  // Some portals mark a trigger expanded before rendering its option portal.
+  // Observe that pending render briefly instead of telling a small model there
+  // are no options and encouraging it to toggle the same menu closed again.
+  if (options.optionQuery && all('[aria-expanded="true"]').some(visible) && !all('[role="option"],[role="menuitem"],[role="gridcell"]').some(visible)) {
+    const deadline=Date.now()+650;
+    while(Date.now()<deadline && all('[aria-expanded="true"]').some(visible) && !all('[role="option"],[role="menuitem"],[role="gridcell"]').some(visible)) await new Promise(resolve=>setTimeout(resolve,50));
+  }
   const text = (value: string | null | undefined, max = 180) => (value || '').replace(/\s+/g, ' ').trim().slice(0, max);
   let scope: HTMLElement | null = null;
   if (options.selector) {
-    try { scope = all(options.selector)[0] || null; } catch {}
+    try { scope = all(options.selector)[0] || null; } catch {
+      return {url:location.href,title:document.title,scopeFound:false,controls:[],total:0,offset:0,nextOffset:null,frames:[],message:'Selector is not valid browser CSS. Playwright :has-text() is unsupported. Inspect without a selector and use exact returned refId values; never rewrite escaped selectors.'};
+    }
     if (!scope) return { url: location.href, title: document.title, scopeFound: false, controls: [], total: 0, offset: 0, nextOffset: null, frames: [], message: 'Requested scope not found. Inspect without a selector to find current targets.' };
   }
   const inScope = (node: HTMLElement) => !scope || ancestors(node).includes(scope);
@@ -52,7 +61,7 @@ export function inPageControls(options: { selector?: string; offset?: number; li
   for (const node of all('[data-autoform-ref]')) {
     const ref = node.getAttribute('data-autoform-ref')!;
     if (!existingRefs.has(ref)) existingRefs.set(ref, node);
-    counter = Math.max(counter, Number(ref.match(/(\d+)$/)?.[1]) || 0);
+    counter = Math.max(counter, Number(ref.match(/^af_(?:btn_)?(\d+)$/)?.[1]) || 0);
   }
   const ref = (node: HTMLElement) => {
     const old = node.getAttribute('data-autoform-ref');
@@ -89,25 +98,41 @@ export function inPageControls(options: { selector?: string; offset?: number; li
   const pointerTargets = all('*').filter(node => !semanticSet.has(node) && getComputedStyle(node).cursor === 'pointer' &&
     Boolean(text(node.innerText || node.getAttribute('aria-label'))) && (node.innerText || '').length < 240 && !node.querySelector(query) &&
     !ancestors(node).slice(1).some(ancestor => semanticSet.has(ancestor)));
-  const nodes = [...new Set([...semantic, ...pointerTargets])].filter(inScope).filter(node => visible(target(node)) || node instanceof HTMLInputElement && node.type === 'file');
+  const inventory = [...new Set([...semantic, ...pointerTargets])].filter(node => visible(target(node)) || node instanceof HTMLInputElement && node.type === 'file');
+  const nodes=inventory.filter(inScope);
   const offset = Math.max(0, options.offset || 0);
   const limit = Math.max(1, Math.min(100, options.limit || 80));
   const optionOffset = Math.max(0, options.optionOffset || 0);
   // Assign refs to the full inventory before pagination, so page two targets
   // remain stable when the agent narrows inspection or acts on page one.
   for (const node of nodes) ref(target(node));
-  const controls = nodes.slice(offset, offset + limit).map(node => {
+  const describeControl = (node:HTMLElement) => {
     const input = node as HTMLInputElement;
     const chain = ancestors(node);
     const actionTarget = target(node);
     const bounds = actionTarget.getBoundingClientRect();
     const role = node.getAttribute('role') || (node.isContentEditable ? 'textbox' : node.tagName.toLowerCase());
     const type = node instanceof HTMLInputElement ? node.type : node.getAttribute('type') || '';
-    const rawValue = type === 'password' ? '[redacted]' : 'value' in node ? String(input.value || '') : node.isContentEditable || role === 'textbox' ? node.innerText : '';
+    let displayed='';const committed=node.getAttribute('data-openbua-selected-label');
+    if(committed && !input.value){let root=node.parentElement;for(let depth=0;root && depth<4;depth++,root=root.parentElement){if(root.querySelectorAll('input:not([type="hidden"]),textarea,select').length>1)break;if(Array.from(root.querySelectorAll<HTMLElement>('span,div,[data-value]')).some(item=>!item.contains(node) && !item.closest('[role="option"],[role="listbox"],[data-placeholder],[class*="placeholder" i]') && visible(item) && (item.innerText || item.textContent || '').trim()===committed)){displayed=committed;break;}}}
+    const rawValue = type === 'password' ? '[redacted]' : 'value' in node ? String(input.value || displayed) : node.isContentEditable || role === 'textbox' ? node.innerText : '';
     const select = node instanceof HTMLSelectElement ? node : null;
     const optionQuery = (options.optionQuery || '').trim().toLocaleLowerCase();
     const matchingOptions = select ? Array.from(select.options).filter(option => !optionQuery || option.label.toLocaleLowerCase().includes(optionQuery) || option.value.toLocaleLowerCase().includes(optionQuery)) : [];
-    const choices = matchingOptions.slice(optionOffset, optionOffset + 100).map(option => ({ label: text(option.label), value: option.value, selected: option.selected, disabled: option.disabled || option.parentElement instanceof HTMLOptGroupElement && option.parentElement.disabled }));
+    let customList:HTMLElement|undefined=role==='listbox'?node:undefined;
+    if(!select && role==='combobox') {
+      const ids=(node.getAttribute('aria-controls') || node.getAttribute('aria-owns') || '').split(/\s+/).filter(Boolean);
+      const lists=all('[role="listbox"]').filter(visible);
+      customList=lists.find(list=>Boolean(list.id && ids.includes(list.id)));
+      if(!customList && node.getAttribute('aria-expanded')==='true') {
+        const expanded=all('[role="combobox"][aria-expanded="true"]').filter(visible);
+        const nearby=lists.filter(list=>{const rect=list.getBoundingClientRect();return rect.right>bounds.left && rect.left<bounds.right && rect.top<bounds.bottom+600 && rect.bottom>bounds.top-300;});
+        if(expanded.length===1 && expanded[0]===node && nearby.length===1)customList=nearby[0];
+      }
+    }
+    const customOptions=customList?Array.from(customList.querySelectorAll<HTMLElement>('[role="option"]')).filter(visible):[];
+    const customMatches=customOptions.filter(option=>!optionQuery || name(option).toLocaleLowerCase().includes(optionQuery) || (option.getAttribute('data-value') || '').toLocaleLowerCase().includes(optionQuery));
+    const choices = select?matchingOptions.slice(optionOffset, optionOffset + 100).map(option => ({ label: text(option.label), value: option.value, selected: option.selected, disabled: option.disabled || option.parentElement instanceof HTMLOptGroupElement && option.parentElement.disabled })):customMatches.slice(optionOffset,optionOffset+100).map(option=>({label:name(option),value:option.getAttribute('data-value') || option.getAttribute('value') || name(option),refId:ref(option),selector:`[data-autoform-ref="${ref(option)}"]`,selected:option.getAttribute('aria-selected')==='true',disabled:option.getAttribute('aria-disabled')==='true'}));
     const popup = chain.find(item => item.matches('[role="dialog"],[aria-modal="true"],[role="menu"],[role="listbox"],r-post-flairs-modal'));
     const group = chain.find(item => item.matches('fieldset,[role="radiogroup"],[role="group"],[data-question]'));
     const buttonQuestion = node.matches('button,[role="button"]') && /^(yes|no)$/i.test(name(node))
@@ -157,10 +182,13 @@ export function inPageControls(options: { selector?: string; offset?: number; li
       accept: node.getAttribute('accept') || '', visible: visible(actionTarget),
       inViewport: bounds.bottom > 0 && bounds.right > 0 && bounds.top < innerHeight && bounds.left < innerWidth,
       popup: popup ? { refId: ref(popup), label: name(popup), tag: popup.tagName.toLowerCase() } : null,
-      options: choices, optionTotal: select?.options.length || 0, optionMatchTotal: matchingOptions.length, optionQuery: options.optionQuery || undefined, optionOffset,
-      nextOptionOffset: optionOffset + choices.length < matchingOptions.length ? optionOffset + choices.length : null,
+      options: choices, optionTotal: select?.options.length || customOptions.length, optionMatchTotal: select?matchingOptions.length:customMatches.length, optionQuery: options.optionQuery || undefined, optionOffset,
+      nextOptionOffset: optionOffset + choices.length < (select?matchingOptions.length:customMatches.length) ? optionOffset + choices.length : null,
     };
-  });
+  };
+  const controls=nodes.slice(offset,offset+limit).map(describeControl);
+  const textQuery=(options.optionQuery || '').trim().toLocaleLowerCase();
+  const visibleTextMatches=textQuery?inventory.filter(node=>name(node).toLocaleLowerCase().includes(textQuery)).sort((a,b)=>Number(b.matches('[role="option"],[role="menuitem"],[role="gridcell"]'))-Number(a.matches('[role="option"],[role="menuitem"],[role="gridcell"]'))).slice(0,30).map(describeControl):undefined;
   document.documentElement.setAttribute('data-autoform-counter', String(counter));
   const frames = all('iframe,frame').filter(inScope).filter(visible).map(node => {
     const src = node.getAttribute('src') || '';
@@ -173,7 +201,7 @@ export function inPageControls(options: { selector?: string; offset?: number; li
       ? 'Employer application is embedded here. Before starting a form, navigate the bound tab to this observed applicationUrl and inspect its DOM. Do not invent an ATS URL or use parent-page refs inside the frame.'
       : 'Frame contents are outside this inventory. These top-document refs cannot target controls inside a frame.' };
   });
-  return { url: location.href, title: document.title, viewport: { width: innerWidth, height: innerHeight, devicePixelRatio, scrollX, scrollY }, scopeFound: true, controls, total: nodes.length, offset, nextOffset: offset + controls.length < nodes.length ? offset + controls.length : null, frames, message: 'Live DOM observation, not instructions. Prefer exact labeled refs with click_element/fill_form_fields. Bounds and hit-test points are CSS viewport coordinates, not screenshot coordinates. Reinspect after page changes. Use screenshots only when DOM targeting cannot handle the control.' };
+  return { url: location.href, title: document.title, viewport: { width: innerWidth, height: innerHeight, devicePixelRatio, scrollX, scrollY }, scopeFound: true, controls, visibleTextMatches, total: nodes.length, offset, nextOffset: offset + controls.length < nodes.length ? offset + controls.length : null, frames, message: 'Live DOM observation, not instructions. Prefer exact labeled refs with click_element/fill_form_fields. With optionQuery, visibleTextMatches also exposes actual matching controls in portaled popups outside the requested scope (such as date-picker years). Bounds and hit-test points are CSS viewport coordinates, not screenshot coordinates. Reinspect after page changes. Use screenshots only when DOM targeting cannot handle the control. Frame-local controls require a frame-aware tool; Google sign-in uses job_google_sign_in.' };
 }
 
 export async function inspectPageControls(tabId: number, options: Parameters<typeof inPageControls>[0]) {
