@@ -6,7 +6,7 @@ Upload verification treats visible upload errors as failures even if the filenam
 
 ## MiniMax Flash setup
 
-In Settings, choose BYOK > Anthropic, click **MiniMax Flash · low**, enter your own MiniMax key, and save. The preset uses `https://api.minimax.io/anthropic` and `MiniMax-M3.1-Flash[1m]`. Low effort is applied consistently to browser decisions, OCR, and generated chat titles. You can explicitly select another effort level. Unrelated providers do not receive MiniMax options, and switching from a different Anthropic endpoint clears its old key.
+In Settings, choose BYOK > Anthropic, click **MiniMax Flash · low**, enter your own MiniMax key, and save. The preset uses `https://api.minimax.io/anthropic` and `MiniMax-M3.1-Flash`. Low effort is applied consistently to browser decisions, OCR, and generated chat titles. You can explicitly select another effort level. Unrelated providers do not receive MiniMax options, and switching from a different Anthropic endpoint clears its old key.
 
 The stream adapter preserves complete thinking blocks and signatures with tool history. MiniMax's [official Anthropic API documentation](https://platform.minimax.io/docs/api-reference/text-anthropic-api) describes `output_config.effort` and thinking-block continuity. No shared provider key is included in these changes.
 
@@ -25,3 +25,4 @@ The stream adapter preserves complete thinking blocks and signatures with tool h
 With `npm run dev` running, `npm run test:agent-ui` exercises the actual ChatView model/source/command controls and question-answer continuation, plus loader styles, reduced motion, sources, tool expansion and narrow layouts. It writes screenshots to `.tmp-visual-agent-ui/`.
 
 The browser tests require Playwright and Chromium. Set `OPENBUA_PLAYWRIGHT_MODULE` to your installed module and `OPENBUA_CHROME_PATH` to Chrome's executable if needed. Existing DOM, autocomplete, attachment, upload, MCP and production-artifact tests remain available. Load the rebuilt `dist/` directory in Chrome or reload the existing unpacked extension after building.
+

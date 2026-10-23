@@ -1,5 +1,13 @@
 [
   {
+    "name": "retry_unavailable_page",
+    "description": "Reload the active tab once only if an actual Chrome network-error or 502/503/504 page is observed. Refuses to reload normal forms, login or CAPTCHA pages. If still unavailable, preserve the blocker and move to other authorized work instead of asking the user to repair the site.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
     "name": "inspect_page_controls",
     "description": "Primary DOM observation: labeled buttons, inputs, options, question groups, custom pointer controls and open shadow roots. Returns exact refs/selectors, states, validation, CSS bounds, occlusion and visible hit points. Use these refs with DOM click/fill tools; CSS hit points are not screenshot pixels. Paginated, password-redacted, with explicit iframe boundaries. Screenshots are a fallback when DOM targeting cannot handle a control.",
     "inputSchema": {
