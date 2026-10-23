@@ -233,7 +233,6 @@ export async function extractTextWithVlm(
         model,
         max_tokens: 3000,
         ...providerEffortOptions(resolveProviderConfig(settings)),
-        ...providerEffortOptions(resolveProviderConfig(settings)),
         messages: [
           {
             role: 'user',
@@ -298,6 +297,7 @@ export async function extractTextWithVlm(
           },
         ],
         max_tokens: 3000,
+        ...providerEffortOptions(resolveProviderConfig(settings)),
       }),
     });
 
