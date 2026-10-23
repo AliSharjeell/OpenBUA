@@ -1046,8 +1046,6 @@ export function App() {
           }}
           navItems={[
             { key: 'chat', label: 'Chat', icon: <MessageSquare size={18} /> },
-            { key: 'memory', label: 'Memory', icon: <Brain size={18} /> },
-            { key: 'preview', label: 'Preview', icon: <Eye size={18} /> },
           ]}
           onNavigate={(key) => {
             handleSelectNavTab(key as any);

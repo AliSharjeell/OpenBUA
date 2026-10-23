@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import {
   IconArrowBoxLeft,
   IconCheckmark1Small,
@@ -11,7 +10,6 @@ import {
   IconHome,
   IconMagnifyingGlass,
   IconPlusMedium,
-  IconPopsicle2,
   IconSettingsGear1,
   IconSidebarLeftArrow,
   IconUserAdd,
@@ -21,8 +19,8 @@ import GlideMenu from "./primitives/GlideMenu";
 /* ─────────────────────────────────────────────────────────
  * SIDEBAR NAV
  * Shared by the design-system preview and the harness shell:
- * compact workspace switcher, primary navigation, searchable
- * chat history, and a collapse that preserves icon alignment.
+ * primary navigation, searchable chat history, and a collapse
+ * that preserves icon alignment.
  * ───────────────────────────────────────────────────────── */
 
 export type WorkspaceInfo = {
@@ -44,10 +42,7 @@ export type SidebarNavItem = {
   count?: string;
 };
 
-const DEFAULT_NAV_ITEMS: SidebarNavItem[] = [
-  { key: "home", label: "Home", icon: <IconHome size={18} /> },
-  { key: "invite", label: "Invite users", icon: <IconUserAdd size={18} />, count: "3/10" },
-];
+const DEFAULT_NAV_ITEMS: SidebarNavItem[] = [];
 
 export type SidebarRecent = {
   id: string;
@@ -158,84 +153,6 @@ function RailButton({
   );
 }
 
-function WorkspaceMenu({
-  position,
-  workspace,
-  onClose,
-  onNewChat,
-  onSettings,
-}: {
-  position: { top: number; left: number };
-  workspace: WorkspaceInfo;
-  onClose: () => void;
-  onNewChat?: () => void;
-  onSettings?: () => void;
-}) {
-  return createPortal(
-    <div
-      data-workspace-menu
-      className="fixed z-50 w-64 rounded-[14px] bg-surface p-1.5 shadow-overlay border border-line"
-      style={{
-        top: position.top,
-        left: position.left,
-        animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both",
-        transformOrigin: "top left",
-      }}
-    >
-      <GlideMenu className="flex flex-col gap-px" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
-        <button
-          data-menu-row
-          type="button"
-          onClick={onClose}
-          className="relative z-10 flex h-10 w-full items-center gap-1.5 rounded-[8px] px-2 text-left"
-        >
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-ink text-[11px] font-semibold text-surface">
-            {workspace.monogram}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink">{workspace.name}</span>
-          <span className="shrink-0 text-ink"><IconCheckmark1Small size={18} /></span>
-        </button>
-        <div className="my-1 h-px bg-line" />
-        <button
-          data-menu-row
-          type="button"
-          onClick={() => {
-            onClose();
-            onNewChat?.();
-          }}
-          className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left"
-        >
-          <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconPlusMedium size={16} /></span>
-          <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">New chat</span>
-        </button>
-        <button
-          data-menu-row
-          type="button"
-          onClick={() => {
-            onClose();
-            onSettings?.();
-          }}
-          className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left"
-        >
-          <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconSettingsGear1 size={16} /></span>
-          <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Settings</span>
-        </button>
-        <div className="my-1 h-px bg-line" />
-        <button
-          data-menu-row
-          type="button"
-          onClick={onClose}
-          className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left"
-        >
-          <span className="flex size-5 shrink-0 items-center justify-center text-ink-2"><IconArrowBoxLeft size={16} /></span>
-          <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">Close menu</span>
-        </button>
-      </GlideMenu>
-    </div>,
-    document.body,
-  );
-}
-
 export default function SidebarNav({
   activeTitle,
   className = "",
@@ -261,11 +178,8 @@ export default function SidebarNav({
     onNavigate?.(key);
   };
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [workspacePosition, setWorkspacePosition] = useState({ top: 0, left: 0 });
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const workspaceButtonRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const selectedTitle = activeTitle === undefined ? demoActiveTitle : activeTitle;
@@ -274,24 +188,11 @@ export default function SidebarNav({
   );
 
   useEffect(() => {
-    if (!workspaceOpen) return;
-    const close = (event: PointerEvent) => {
-      const target = event.target as Element;
-      if (!target.closest("[data-workspace-trigger]") && !target.closest("[data-workspace-menu]")) {
-        setWorkspaceOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [workspaceOpen]);
-
-  useEffect(() => {
     if (searchOpen) searchRef.current?.focus();
   }, [searchOpen]);
 
   const collapse = () => {
     setCollapsed(true);
-    setWorkspaceOpen(false);
     setSearchOpen(false);
     setQuery("");
     onClose?.();
@@ -315,45 +216,17 @@ export default function SidebarNav({
     >
       <div className="flex min-h-0 w-[224px] shrink-0 flex-col py-2">
         <div className="relative mb-2.5 h-10 shrink-0">
-          <button
-            ref={workspaceButtonRef}
-            data-workspace-trigger
-            type="button"
-            aria-expanded={workspaceOpen}
-            aria-hidden={collapsed}
-            tabIndex={collapsed ? -1 : 0}
-            onClick={() => {
-              if (!workspaceOpen && workspaceButtonRef.current) {
-                const rect = workspaceButtonRef.current.getBoundingClientRect();
-                setWorkspacePosition({ top: rect.bottom + 6, left: Math.max(8, rect.left) });
-              }
-              setWorkspaceOpen((open) => !open);
-            }}
-            className="sidebar-workspace-control absolute left-2 top-1 flex h-8 w-[164px] items-center rounded-[8px] px-2 text-left transition-[background-color,transform] duration-100 hover:bg-hover-2 active:scale-[0.99]"
-          >
-            <span className="sidebar-logo flex size-5 shrink-0 items-center justify-center text-ink">
-              <IconPopsicle2 size={18} />
-            </span>
-            <span className="sidebar-copy ml-1.5 min-w-0 flex-1 truncate text-[14px] font-medium text-ink-2">
+          {/* Static Header: OpenBUA Logo + Name (Not a dropdown) */}
+          <div className="sidebar-workspace-control absolute left-2 top-1 flex h-8 w-[164px] items-center rounded-[8px] px-2 text-left select-none">
+            <img
+              src="./icons/icon48.png"
+              alt="OpenBUA Logo"
+              className="size-5 rounded-md object-contain shrink-0"
+            />
+            <span className="sidebar-copy ml-2 min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">
               {workspace.name}
             </span>
-            <span className="sidebar-copy ml-1 flex shrink-0 text-ink-3">
-              <IconChevronDownSmall size={16} />
-            </span>
-          </button>
-
-          {workspaceOpen && (
-            <WorkspaceMenu
-              position={workspacePosition}
-              workspace={workspace}
-              onClose={() => setWorkspaceOpen(false)}
-              onNewChat={() => {
-                selectNav("chats");
-                onNewChat?.();
-              }}
-              onSettings={onFooterClick}
-            />
-          )}
+          </div>
 
           <button
             type="button"
