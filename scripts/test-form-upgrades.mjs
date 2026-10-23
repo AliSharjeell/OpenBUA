@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 let chromium;
 try {({chromium}=await import('@playwright/test'));} catch {({chromium}=await import('file:///C:/AppsNew/nascon-agentika/node_modules/@playwright/test/index.mjs'));}
@@ -39,6 +39,7 @@ assert.equal(calls,1);assert.equal(repeated.details.dispatched,false);
 state='changed';await wrapped.execute('three',args);assert.equal(calls,2);
 const {inPageCompletedFields}=await source('src/agent/native-field-state.ts');
 const {inPageControls}=await source('src/agent/page-controls.ts');
+const {inPageAutocomplete}=await source('src/agent/autocomplete.ts');
 const browser=await chromium.launch({headless:true,executablePath:process.env.OPENBUA_CHROME_PATH||'C:/Users/alish/AppData/Local/ms-playwright/chromium-1243/chrome-win64/chrome.exe'});
 try {
  const page=await browser.newPage();
@@ -51,6 +52,13 @@ try {
  const controls=await page.evaluate(inPageControls,{optionQuery:'Pakistan'});
  assert.ok(controls.controls.some(control=>control.label==='Pakistan'),'Expanded dropdown waits for delayed real options');
  assert.ok(!JSON.stringify(controls).includes('job_google_sign_in'),'No unavailable JobBot tool guidance');
+ await page.setContent('<div><input id="city" role="combobox" aria-label="City" aria-expanded="true"><span id="chosen"></span></div><div role="listbox"><button role="option">Karachi, Sindh, Pakistan</button></div>');
+ await page.evaluate(inPageAutocomplete,[]);
+ await page.evaluate(()=>document.querySelector('[role="option"]').onclick=()=>{document.querySelector('#city').value='';document.querySelector('#city').setAttribute('aria-expanded','false');document.querySelector('#chosen').textContent='Karachi, Sindh, Pakistan';document.querySelector('[role="listbox"]').hidden=true;});
+ await page.getByRole('option').click();
+ await page.waitForFunction(()=>document.querySelector('#city').dataset.openbuaSelectedLabel==='Karachi, Sindh, Pakistan');
+ const committed=await page.evaluate(inPageAutocomplete,[{selector:'#city',value:'Karachi, Sindh, Pakistan'}]);
+ assert.equal(committed[0].selected,true);assert.equal(committed[0].value,'Karachi, Sindh, Pakistan');
  console.log('PASS: MiniMax effort and endpoints, real input lifecycle, unchanged-failure guard, native no-op safety, delayed dropdown inspection');
 } finally {await browser.close();}
 
