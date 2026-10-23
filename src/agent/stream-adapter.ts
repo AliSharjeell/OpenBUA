@@ -1034,10 +1034,12 @@ async function streamAnthropic(
           if (block.type === 'text' && block.text && block.text.trim()) {
             contentBlocks.push({ type: 'text', text: block.text });
           } else if (block.type === 'thinking' && block.thinking && block.thinking.trim()) {
-            contentBlocks.push({
-              type: 'text',
-              text: `[Thinking: ${block.thinking.slice(0, 1000)}]`,
-            });
+            // MiniMax requires complete thinking blocks on subsequent tool turns.
+            // Anthropic signed blocks must retain their original signature too.
+            contentBlocks.push({ type: 'thinking', thinking: block.thinking,
+              ...(block.thinkingSignature ? {signature: block.thinkingSignature} : {}) });
+          } else if (block.type === 'thinking' && block.redacted && block.thinkingSignature) {
+            contentBlocks.push({type:'redacted_thinking',data:block.thinkingSignature});
           } else if (block.type === 'toolCall' || block.type === 'tool_use') {
             const rawArgs = block.arguments || block.args || block.input || {};
             let parsedArgs = rawArgs;
@@ -1277,7 +1279,7 @@ async function streamAnthropic(
 
   stream.push({ type: 'start', partial: assistantMessage });
 
-  let currentBlockType: 'text' | 'tool_use' | null = null;
+  let currentBlockType: 'text' | 'thinking' | 'tool_use' | null = null;
   let currentBlockIndex = 0;
   let currentToolUse: { id: string; name: string; jsonAccumulator: string } | null = null;
 
@@ -1312,7 +1314,14 @@ async function streamAnthropic(
                 partial: assistantMessage,
               });
             } else if (event.content_block?.type === 'thinking') {
-              currentBlockType = 'thinking' as any;
+              currentBlockType = 'thinking';
+              assistantMessage.content.push({type:'thinking',thinking:event.content_block.thinking || '',
+                ...(event.content_block.signature ? {thinkingSignature:event.content_block.signature} : {})});
+              currentBlockIndex=assistantMessage.content.length-1;
+              stream.push({type:'thinking_start',contentIndex:currentBlockIndex,partial:assistantMessage});
+            } else if (event.content_block?.type === 'redacted_thinking') {
+              currentBlockType=null;
+              assistantMessage.content.push({type:'thinking',thinking:'',redacted:true,thinkingSignature:event.content_block.data});
             } else if (event.content_block?.type === 'tool_use') {
               currentBlockType = 'tool_use';
               currentToolUse = {
@@ -1339,13 +1348,15 @@ async function streamAnthropic(
           }
 
           case 'content_block_delta': {
-            if (currentBlockType === ('thinking' as any) || event.delta?.type === 'thinking_delta') {
-              const delta = event.delta?.thinking || event.delta?.text || '';
-              stream.push({
-                type: 'thinking_delta' as any,
-                delta,
-                partial: assistantMessage,
-              });
+            if (currentBlockType === 'thinking') {
+              const block=assistantMessage.content[currentBlockIndex] as ThinkingContent;
+              if(event.delta?.type==='signature_delta') {
+                block.thinkingSignature=(block.thinkingSignature || '')+(event.delta.signature || '');
+              } else if(event.delta?.type==='thinking_delta') {
+                const delta=event.delta.thinking || '';
+                block.thinking+=delta;
+                stream.push({type:'thinking_delta',contentIndex:currentBlockIndex,delta,partial:assistantMessage});
+              }
             } else if (currentBlockType === 'text' && event.delta?.type === 'text_delta') {
               const delta = event.delta.text || '';
               const block = assistantMessage.content[currentBlockIndex] as TextContent;
@@ -1372,7 +1383,10 @@ async function streamAnthropic(
           }
 
           case 'content_block_stop': {
-            if (currentBlockType === 'text') {
+            if(currentBlockType==='thinking') {
+              const block=assistantMessage.content[currentBlockIndex] as ThinkingContent;
+              stream.push({type:'thinking_end',contentIndex:currentBlockIndex,content:block.thinking,partial:assistantMessage});
+            } else if (currentBlockType === 'text') {
               const block = assistantMessage.content[currentBlockIndex] as TextContent;
               stream.push({
                 type: 'text_end',
