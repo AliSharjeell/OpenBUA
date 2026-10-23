@@ -882,19 +882,17 @@ export function ChatView({
           </div>
         )}
         {attachments.length > 0 && (
-          <div className="pointer-events-auto flex w-full min-w-0 max-w-full shrink-0 flex-nowrap gap-2 overflow-x-auto overflow-y-hidden rounded-2xl border border-zinc-800/90 bg-zinc-900/95 p-2 shadow-xl" aria-label="Attached files" tabIndex={0}
+          <div className="pointer-events-auto flex w-full min-w-0 max-w-full shrink-0 flex-nowrap gap-2 overflow-x-auto overflow-y-hidden px-1 py-1" aria-label="Attached files" tabIndex={0}
             onWheel={event => { if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) event.currentTarget.scrollLeft += event.deltaY; }}>
-            {attachments.map(({doc, alias, token}) => (
-              <button key={doc.id} type="button" onClick={() => insertMention(token)} disabled={isBusy || isPreparingFiles}
-                title={`Reference ${doc.fileName || doc.title} using @${alias}`}
-                className="flex shrink-0 items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-800/60 p-2 text-left hover:bg-zinc-700 disabled:opacity-50 max-w-52">
-                {(doc.thumbnailUrl || (doc.type === 'image' && doc.dataUrl)) ? (
-                  <img src={doc.thumbnailUrl || doc.dataUrl} alt="" className="h-8 w-8 rounded-lg object-cover" />
-                ) : <FileText className="h-5 w-5 shrink-0 text-zinc-400" />}
-                <span className="min-w-0"><span className="block truncate text-[11px] text-zinc-200">{doc.fileName || doc.title}</span>
-                  <span className="flex items-center gap-1.5 text-[10px]"><span className="text-blue-400">@{alias}</span><span className="text-zinc-500">{doc.isGlobal ? 'Global' : 'This tab'}</span></span></span>
-              </button>
-            ))}
+            {attachments.map(({doc, token}) => {
+              const fileName=doc.fileName || doc.title;
+              return <button key={doc.id} type="button" onClick={() => insertMention(token)} disabled={isBusy || isPreparingFiles}
+                title={fileName} aria-label={`Reference ${fileName}`}
+                className="flex max-w-52 shrink-0 items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/90 px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-50">
+                <FileText className="h-4 w-4 shrink-0 text-zinc-400" />
+                <span className="truncate">{fileName}</span>
+              </button>;
+            })}
           </div>
         )}
 
