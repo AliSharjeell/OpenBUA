@@ -20,7 +20,7 @@ export class HumanInput {
   cancel(){this.finish?.({skipped:true,answers:[]});}
   tool():AgentTool<any> {
     return {name:'request_user_input',label:'Ask for missing information',description:'Pause for one to six concise questions when a required fact, preference or consent is missing. The user answers a real card in chat. Use actual options from the page, or text for an open answer. Never infer personal facts or fabricate consent. Does not submit any form.',parameters:Type.Object({questions:Type.Array(Type.Object({q:Type.String({minLength:1,maxLength:500}),type:Type.Union([Type.Literal('radio'),Type.Literal('check'),Type.Literal('text')]),options:Type.Array(Type.String(),{maxItems:12})}),{minItems:1,maxItems:6})}),
-      execute:async(_id,params,signal)=>{
+      execute:async(_id,params:any,signal)=>{
         if(this.current)throw new Error('An input request is already pending.');
         if(signal?.aborted)throw new Error('Input request stopped.');
         const request={id:crypto.randomUUID(),questions:params.questions} as InputRequest;
