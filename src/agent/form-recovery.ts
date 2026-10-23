@@ -7,7 +7,7 @@ export function inPageFormFingerprint() {
 }
 export function protectFormRecovery(tools:AgentTool<any>[]) {
   const failures=new Map<string,string>();
-  return tools.map(tool=>!['fill_form_fields','click_element','upload_file_to_form'].includes(tool.name)?tool:{...tool,execute:async(id,params,...rest)=>{
+  return tools.map<AgentTool<any>>(tool=>!['fill_form_fields','click_element','upload_file_to_form'].includes(tool.name)?tool:{...tool,execute:async(id,params,...rest)=>{
     const tab=await getActiveTab();
     const key=JSON.stringify([tab?.id,tool.name,params.frameId,(params.assignments||[]).map((a:any)=>[a.refId,a.selector,a.value]),params.refId,params.selector,params.text,params.fileName]);
     const observe=async()=>{try {return tab?.id && !params.frameId?(await chrome.scripting.executeScript({target:{tabId:tab.id},func:inPageFormFingerprint}))[0]?.result:undefined;}catch{return undefined;}};
