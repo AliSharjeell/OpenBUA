@@ -49,6 +49,14 @@
 .agent-task small {color:var(--agent-secondary);font-size:10px;}.agent-task small[data-state="failed"] {color:#f87171;}.agent-task small[data-state="completed"] {color:#4ade80;}
 .agent-task-detail {margin:0 12px 12px 22px;padding-left:13px;border-left:1px solid var(--agent-line);white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;color:var(--agent-secondary);font-size:11px;line-height:1.6;}
 .agent-composer {position:relative;isolation:isolate;backdrop-filter:blur(18px);}
+.agent-composer {display:grid!important;grid-template-columns:28px minmax(0,1fr) 28px 28px 28px;gap:4px;padding:8px!important;}
+.agent-composer>textarea {grid-column:1/-1;grid-row:1;min-height:36px;}
+.agent-composer>[data-composer-attach] {grid-column:1;grid-row:2;}
+.agent-composer>.agent-model-button {grid-column:2;grid-row:2;display:flex;align-items:center;gap:5px;justify-self:start;max-width:100%;}
+.agent-composer>[aria-label="Parallel subagent Chrome windows"] {grid-column:3;grid-row:2;}
+.agent-composer>.agent-dictation {grid-column:4;grid-row:2;display:grid;place-items:center;color:var(--agent-secondary);border-radius:50%;}
+.agent-dictation[aria-pressed="true"] {background:#007aff26;color:#60a5fa;}
+.agent-composer>div:last-child {grid-column:5;grid-row:2;}
 .agent-composer-menu {position:absolute;bottom:calc(100% + 8px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--agent-line);padding:5px;border-radius:14px;background:#18181bf5;box-shadow:0 12px 35px #0007;z-index:20;animation:agent-fade-up .15s ease-out;}
 .agent-composer-menu button {display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:9px 10px;border-radius:9px;color:var(--agent-ink);font-size:12px;}
 .agent-composer-menu button:hover,.agent-composer-menu button[data-active="true"] {background:var(--agent-inset);}.agent-composer-menu small {color:var(--agent-muted);font-size:10px;margin-left:auto;}

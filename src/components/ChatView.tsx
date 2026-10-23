@@ -28,6 +28,7 @@ import {
   Wrench,
   Brain,
   PanelsTopLeft,
+  Mic,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
 import {LoadingState} from './agent/LoadingState';
@@ -40,6 +41,7 @@ import type {InputRequest} from '../agent/human-input';
 import '../styles/agent-ui.css';
 import {FORM_COMMANDS,CommandMenu,SourceMenu,ModelMenu} from './agent/PromptBar';
 import {resolveProviderConfig} from '../services/provider-config';
+import {useDictation} from './agent/useDictation';
 
 interface ChatViewProps {
   activeSessionId?: string;
@@ -294,6 +296,13 @@ export function ChatView({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
+  const dictation=useDictation(text=>handleInputChange(`${textareaRef.current?.value || ''} ${text}`.trim()));
+  useEffect(()=>{if(isBusy)dictation.stop();},[isBusy,dictation.stop]);
+  useEffect(()=>{
+    if(!sourcesOpen&&!modelsOpen)return;
+    const close=(event:PointerEvent)=>{if(!(event.target as Element)?.closest?.('[data-openbua-composer]')){setSourcesOpen(false);setModelsOpen(false);}};
+    document.addEventListener('pointerdown',close);return()=>document.removeEventListener('pointerdown',close);
+  },[sourcesOpen,modelsOpen]);
 
   const [isAtBottom, setIsAtBottom] = useState(true);
   const isAtBottomRef = useRef(true);
@@ -791,8 +800,8 @@ export function ChatView({
 
         {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
         <div data-openbua-composer className="agent-composer pointer-events-auto relative flex items-end bg-zinc-900/95 rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
-          {sourcesOpen&&<SourceMenu onAttach={()=>{setSourcesOpen(false);chatFileInputRef.current?.click();}} onMemory={onNavigateToMemory} onReference={()=>{handleInputChange('@');setMentionCursor(1);setMentionsDismissed(false);textareaRef.current?.focus();}}/>}
-          {modelsOpen&&<ModelMenu settings={settings} onConfigure={onNavigateToSettings} onPick={provider=>{setModelsOpen(false);onModelChange?.(provider);}}/>}
+          {sourcesOpen&&<SourceMenu onAttach={()=>{setSourcesOpen(false);chatFileInputRef.current?.click();}} onMemory={onNavigateToMemory} onReference={()=>{handleInputChange('@');setMentionsDismissed(false);requestAnimationFrame(()=>{textareaRef.current?.focus();textareaRef.current?.setSelectionRange(1,1);setMentionCursor(1);});}}/>}
+          {modelsOpen&&<ModelMenu settings={settings} onConfigure={onNavigateToSettings} onPick={provider=>{setModelsOpen(false);if(onModelChange)onModelChange(provider);else onNavigateToSettings();}}/>}
           {commands.length>0&&<CommandMenu commands={commands} index={commandIndex%commands.length} onPick={text=>{handleInputChange(text);textareaRef.current?.focus();}}/>}
           {/* Start of Bar: Plus Button for Memory Document Upload */}
           <input
@@ -823,7 +832,7 @@ export function ChatView({
           <Textarea
             ref={textareaRef}
             rows={1}
-            placeholder={harness ? 'Ask OpenBUA ? @ to reference files' : 'Loading saved data…'}
+            placeholder={dictation.listening?'Listening…':harness ? 'Ask OpenBUA · @ files · / commands' : 'Loading saved data…'}
             value={input}
             onChange={(e) => {
               handleInputChange(e.target.value);
@@ -857,6 +866,7 @@ export function ChatView({
           >
             <PanelsTopLeft className="w-4 h-4" />
           </button>
+          {dictation.supported&&<button type="button" className="agent-dictation" disabled={isBusy||isPreparingFiles} aria-label={dictation.listening?'Stop dictation':'Start dictation'} aria-pressed={dictation.listening} onClick={dictation.toggle}><Mic size={15}/></button>}
           {/* End of Bar: Send / Stop Button */}
           <div className="self-center flex items-center shrink-0">
             {isBusy ? (
@@ -882,6 +892,7 @@ export function ChatView({
             )}
           </div>
         </div>
+        {dictation.error&&<p className="pointer-events-auto text-xs text-red-400" role="status">{dictation.error}</p>}
       </div>
     </div>
   );
