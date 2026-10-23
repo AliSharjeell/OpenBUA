@@ -1,5 +1,6 @@
 import { getBrowserWindowId, assertOwnedTab } from './window-context';
 import { inspectAutocomplete } from './autocomplete';
+import {inPageCompletedFields,mergeCompletedFields} from './native-field-state';
 import { captureScheduled } from './screenshot-capture';
 import { writeRedditDraft } from './reddit-editor';
 import { PageFormSummary, FormElementDescriptor, FormFillResult, UserDocument } from '../types';
@@ -1635,6 +1636,13 @@ export async function fillActiveTabFields(
     if (!('mode' in draft) || !['file-input', 'native-form'].includes(draft.mode)) return { ...draft, totalRequested: assignments.length, verifiedCount: draft.verifications.filter(item => item.verified).length } as FormFillResult;
   }
   const tabKey = getActiveSessionIdState();
+  const originalCount=assignments.length;
+  let completed:ReturnType<typeof inPageCompletedFields>=[];
+  if(!pressEnterAll && typeof chrome!=='undefined' && chrome.scripting) {
+    try {completed=(await chrome.scripting.executeScript({target:{tabId:activeTab.id},func:inPageCompletedFields,args:[assignments]}))[0]?.result||[];}catch { /* Normal filling still verifies its own result. */ }
+  }
+  assignments=assignments.filter((_,index)=>!completed.some(field=>field.index===index));
+  if(!assignments.length)return mergeCompletedFields({successCount:0,totalRequested:0,verifiedCount:0,errors:[],verifications:[]},completed,originalCount);
   const [globalDocs, tabDocs] = await Promise.all([
     loadGlobalMemories().catch(() => []),
     loadTabMemories(tabKey).catch(() => []),
@@ -1703,7 +1711,7 @@ export async function fillActiveTabFields(
       pressEnter: Boolean(pressEnterAll),
     }, fillTimeoutMs);
     if (response && response.success && response.data) {
-      return await verifyAutocompleteFill(activeTab.id, cleanAssignments, response.data as FormFillResult);
+      return mergeCompletedFields(await verifyAutocompleteFill(activeTab.id, cleanAssignments, response.data as FormFillResult),completed,originalCount);
     }
   } catch (err: any) {
     console.warn('[OpenBUA] sendMessageToTab failed, falling back to direct executeScript:', err?.message || err);
@@ -1718,7 +1726,7 @@ export async function fillActiveTabFields(
         args: [cleanAssignments, Boolean(pressEnterAll)],
       });
       if (results && results[0] && results[0].result) {
-        return await verifyAutocompleteFill(activeTab.id, cleanAssignments, results[0].result as FormFillResult);
+        return mergeCompletedFields(await verifyAutocompleteFill(activeTab.id, cleanAssignments, results[0].result as FormFillResult),completed,originalCount);
       }
     } catch (scriptErr: any) {
       const msg = scriptErr?.message || String(scriptErr);
