@@ -222,10 +222,10 @@ function inPageInspectForm(containerSelector?: string): PageFormSummary {
   // Self-contained because this function is serialized into the page.
   function generateRefId(el: HTMLElement): string {
     const existing = el.getAttribute('data-autoform-ref');
-    if (existing && /^af_(?:btn_)?\d+$/.test(existing) && dom.querySelector(`[data-autoform-ref="${existing}"]`) === el) return existing;
+    if (existing && /^(?:af_(?:btn_)?\d+|jobref_[a-f0-9]{12}|choice_\d+)$/.test(existing) && dom.querySelector(`[data-autoform-ref="${existing}"]`) === el) return existing;
     let counter = Number(document.documentElement.getAttribute('data-autoform-counter')) || 0;
     dom.querySelectorAll('[data-autoform-ref]').forEach(node => {
-      counter = Math.max(counter, Number(node.getAttribute('data-autoform-ref')?.match(/(\d+)$/)?.[1]) || 0);
+      counter = Math.max(counter, Number(node.getAttribute('data-autoform-ref')?.match(/^af_(?:btn_)?(\d+)$/)?.[1]) || 0);
     });
     const refId = `af_${counter + 1}`;
     document.documentElement.setAttribute('data-autoform-counter', String(counter + 1));

@@ -160,7 +160,7 @@ export async function extractTextWithVlm(
     const baseUrl = settings.free?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/';
     const apiKey = settings.free?.apiKey || '';
     const model = settings.free?.model || 'gemini-3.5-flash-lite';
-    const endpoint = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    const endpoint = providerEndpoint({provider:'openai',baseUrl});
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -232,6 +232,7 @@ export async function extractTextWithVlm(
       body: JSON.stringify({
         model,
         max_tokens: 3000,
+        ...providerEffortOptions(resolveProviderConfig(settings)),
         ...providerEffortOptions(resolveProviderConfig(settings)),
         messages: [
           {
