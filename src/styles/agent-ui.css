@@ -70,3 +70,7 @@
 @keyframes agent-word-resolve {from{opacity:.4;filter:blur(3px)}to{opacity:1;filter:blur(0)}}
 @keyframes agent-caret {50%{opacity:.3}}
 @media(prefers-reduced-motion:reduce) {.agent-ui *,.agent-ui *::before,.agent-ui *::after {animation:none!important;transition:none!important;scroll-behavior:auto!important;}.agent-shimmer {color:var(--agent-secondary);background:none;}.agent-pixels i {opacity:.15;}}
+.agent-approval footer {flex-wrap:wrap;}
+.agent-question-nav {flex-shrink:0;white-space:nowrap;}
+.agent-approval footer>div:last-child {margin-left:auto;}
+.agent-approval footer button {white-space:nowrap;flex-shrink:0;}
