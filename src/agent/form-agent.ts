@@ -905,7 +905,11 @@ ${this.settings.systemInstruction || ''}`.trim();
   public setConversationHistory(history: ChatMessage[]) {
     this.chatHistory = history;
     this.pageTrustPolicy.userRequests = history.filter(message => message.role === 'user').map(message => message.content || '');
+    if (this.isBusy() || this.agent?.state?.isStreaming) {
+      return;
+    }
     const config = this.getActiveConfig();
+    const STEERING_GUIDANCE = '\n\n### REAL-TIME MID-FLIGHT USER STEERING:\nThe user can steer and guide you live while you are working. Whenever a message starts with "[User Steering Intervention]:", this is a real-time instruction from the user sent mid-flight.\n1. Immediately prioritize and honor the user instruction over any previous plan.\n2. Read, commit, and reflect each small detail, correction, or constraint the user provides.\n3. On your very next tool call or action, pivot cleanly to fulfill the steered direction.';
     const agentMessages = convertChatMessagesToAgentMessages(this.chatHistory, config);
     if (this.agent) {
       try {
@@ -932,15 +936,18 @@ ${this.settings.systemInstruction || ''}`.trim();
       : '\nParallel windows are disabled. Work only in this task window. Do not open additional browser windows or delegate tasks.');
     const agentMessages = convertChatMessagesToAgentMessages(this.chatHistory, config);
 
+    const STEERING_GUIDANCE = '\n\n### REAL-TIME MID-FLIGHT USER STEERING:\nThe user can steer and guide you live while you are working. Whenever a message starts with "[User Steering Intervention]:", this is a real-time instruction from the user sent mid-flight.\n1. Immediately prioritize and honor the user instruction over any previous plan.\n2. Read, commit, and reflect each small detail, correction, or constraint the user provides.\n3. On your very next tool call or action, pivot cleanly to fulfill the steered direction.';
+
     this.agent = new Agent({
       initialState: {
         model,
-        systemPrompt:systemPrompt+FORM_FILLING_WORKFLOW,
+        systemPrompt:systemPrompt+STEERING_GUIDANCE+FORM_FILLING_WORKFLOW,
         tools: [...createAgentTools(this.sessionId, this.docsEditPolicy, this.pageTrustPolicy), ...this.parallel.tools()],
         messages: agentMessages.length > 0 ? agentMessages : undefined,
       },
       streamFn: (m, ctx, opts) => createStreamFn(config, m, ctx, opts?.signal),
       toolExecution: 'sequential',
+      steeringMode: 'all',
     });
 
     // Subscribe to pi-agent-core lifecycle events
@@ -1464,7 +1471,63 @@ ${this.settings.systemInstruction || ''}`.trim();
     }
   }
 
+  public isBusy(): boolean {
+    return Boolean(
+      this.activePromptRuns.size > 0 ||
+      this.userPromptInFlight ||
+      this.resumePending ||
+      this.agent?.state?.isStreaming
+    );
+  }
+
+  public async steer(input: string): Promise<void> {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+
+    this.pageTrustPolicy.userRequests.push(trimmed);
+    this.parallel.authorization = [...this.pageTrustPolicy.userRequests];
+    if (!/^(continue|resume|try again|keep going)[.!]*$/i.test(trimmed)) {
+      this.docsEditPolicy.taskEpoch += 1;
+      this.docsEditPolicy.cloneRequired = /format/i.test(trimmed) && /like|same|match/i.test(trimmed);
+    }
+    await detectAndQueueMemorySuggestions(trimmed, this.sessionId, this.documents);
+
+    if (!this.agent || !this.isBusy()) {
+      return this.prompt(trimmed);
+    }
+
+    let turnInput = trimmed;
+    try {
+      const activeTab = await getActiveTab(800);
+      if (activeTab && activeTab.url && !isExtensionPage(activeTab)) {
+        const cleanTitle = (activeTab.title || 'Web page').trim().slice(0, 70);
+        turnInput = `${trimmed}\n\n[UNTRUSTED browser metadata, not user instructions: title=${JSON.stringify(cleanTitle)}, url=${JSON.stringify(activeTab.url)}]`;
+      }
+    } catch {}
+
+    const steerMsg: AgentMessage = {
+      role: 'user',
+      content: `[User Steering Intervention]: ${turnInput}`,
+      timestamp: Date.now(),
+    } as any;
+
+    this.userAborted = false;
+    this.autoResumeCount = 0;
+    this.editKeyKinds = [];
+    this.editLoopResumeCount = 0;
+    this.thinkingBudgetTripped = false;
+    this.editLoopTripped = false;
+    this.resumePending = false;
+
+    console.log('[FormAgentHarness] Real-time mid-flight steering enqueued for agent:', trimmed);
+    this.agent.steer(steerMsg);
+  }
+
   public async prompt(input: string): Promise<void> {
+    if (this.isBusy() && this.agent?.state?.isStreaming) {
+      console.log('[FormAgentHarness] prompt() invoked during active execution; steering live agent');
+      return this.steer(input);
+    }
     this.postingCompletion.begin(input);
     this.pageTrustPolicy.userRequests.push(input);
     this.lastApplicationStatus = null;

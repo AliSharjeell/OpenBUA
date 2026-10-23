@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OpenBUA - Open Browser Use Agent",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "description": "Autonomous browser use Chrome extension that navigates, researches, interacts, and fills forms directly in your everyday browser.",
   "permissions": [
     "activeTab",
@@ -44,15 +44,24 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["sidepanel.html", "icons/*"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "sidepanel.html",
+        "icons/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "icons": {

@@ -12,3 +12,5 @@ Thumbs.db
 
 # Generated browser screenshots from test:agent-ui
 .tmp-visual-agent-ui/
+
+.tmp-*/

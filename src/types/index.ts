@@ -113,6 +113,7 @@ export interface ChatMessage {
   timestamp: number;
   toolCalls?: ToolCallState[];
   isStreaming?: boolean;
+  isSteering?: boolean;
 }
 
 export interface FormElementDescriptor {

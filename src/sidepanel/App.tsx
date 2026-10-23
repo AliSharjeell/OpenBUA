@@ -45,6 +45,7 @@ import { MemoryView } from '../components/MemoryView';
 import { SettingsView } from '../components/SettingsView';
 import { PreviewView } from '../components/PreviewView';
 import { SuggestedMemoriesView } from '../components/SuggestedMemoriesView';
+import SidebarNav from '../components/SidebarNav';
 import {
   MessageSquare,
   Layers,
@@ -142,7 +143,7 @@ export function App() {
   // Listen for real-time scratchpad / live preview document updates from agent
   useEffect(() => {
     const handleScratchpadUpdate = (e: Event) => {
-      const customEvt = e as CustomEvent<{ content: string; sessionId?: string }>;
+      const customEvt = e as CustomEvent<{ content: string; sessionId: string }>;
       if (customEvt.detail) {
         const { content, sessionId } = customEvt.detail;
         const targetSid = sessionId || currentTabKeyRef.current;
@@ -667,8 +668,8 @@ export function App() {
     await handleSelectSession(newSession.id);
   };
 
-  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
-    e.stopPropagation();
+  const handleDeleteSession = async (e: React.MouseEvent | undefined, sessionId: string) => {
+    e?.stopPropagation?.();
     if (isBusy) return;
     let updated: ChatSession[];
     try { updated = await deleteChatSession(sessionId); }
@@ -1027,161 +1028,56 @@ export function App() {
         aria-hidden="true"
       />
 
-      {/* Sidebar Drawer (takes up 65% of screen, pure slide in/out at 100% opacity) */}
+      {/* Sidebar Drawer with Modern Collapsible / Searchable Nav */}
       <div
-        className={`fixed top-0 bottom-0 left-0 z-50 w-[65%] max-w-[280px] bg-zinc-950 border-r border-zinc-900 flex flex-col shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+        className={`fixed top-0 bottom-0 left-0 z-50 w-[240px] bg-background border-r border-line flex flex-col shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
           isSidebarOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'
         }`}
         aria-hidden={!isSidebarOpen}
       >
-          {/* Drawer Header (without dividing line, without cross icon) */}
-          <div className="p-4 pb-2 flex items-center gap-2">
-            <img src="./icons/icon48.png" alt="OpenBUA Logo" className="w-5 h-5 rounded-md object-contain" />
-            <span className="font-bold text-sm tracking-tight text-white">
-              OpenBUA
-            </span>
-          </div>
-
-          {/* New Chat Create Button (no bg, bold white text) */}
-          <div className="px-3 py-1">
-            <button
-              type="button"
-              onClick={async () => {
-                await handleCreateSession();
-                handleSelectNavTab('chat');
-                setIsSidebarOpen(false);
-              }}
-              className="flex items-center gap-2.5 w-full px-2 py-2 rounded-xl text-xs font-medium text-white hover:bg-zinc-900/60 transition-colors cursor-pointer"
-            >
-              <Plus className="w-4 h-4 text-white" />
-              <span>New Chat</span>
-            </button>
-          </div>
-
-          {/* Recent Chats (Scrollable) */}
-          <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1">
-            <div className="px-2 py-1.5 text-xs font-bold text-white">
-              Recent
-            </div>
-
-            {sessions.map((sess) => {
-              const isActive = activeSessionId === sess.id;
-              const isEditing = editingSessionId === sess.id;
-
-              return (
-                <div
-                  key={sess.id}
-                  onClick={() => {
-                    if (!isEditing) {
-                      handleSelectSession(sess.id);
-                      handleSelectNavTab('chat');
-                      setIsSidebarOpen(false);
-                    }
-                  }}
-                  className={`group flex items-center justify-between px-2.5 py-2 rounded-xl text-xs transition-colors cursor-pointer ${
-                    isActive
-                      ? 'bg-zinc-900 text-white font-medium'
-                      : 'text-white/80 hover:text-white hover:bg-zinc-900/50'
-                  }`}
-                >
-                  {isEditing ? (
-                    <div
-                      className="flex items-center gap-1.5 w-full"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <input
-                        type="text"
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleSaveRename(sess.id);
-                          if (e.key === 'Escape') handleCancelRename();
-                        }}
-                        autoFocus
-                        className="flex-1 bg-zinc-950 border border-zinc-700 rounded-md px-2 py-0.5 text-xs text-white focus:outline-none focus:border-zinc-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleSaveRename(sess.id)}
-                        title="Save title"
-                        className="p-1 hover:text-emerald-400 text-zinc-400 cursor-pointer"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCancelRename}
-                        title="Cancel"
-                        className="p-1 hover:text-zinc-200 text-zinc-500 cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2 truncate min-w-0 pr-1">
-                        <MessageSquare className="w-3.5 h-3.5 shrink-0 text-white" />
-                        <span className="truncate text-white">{sess.title}</span>
-                      </div>
-
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                        <button
-                          type="button"
-                          onClick={(e) => handleCopySessionChat(e, sess.id)}
-                          title="Copy entire chat"
-                          className="p-1 rounded text-white/70 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
-                        >
-                          {copiedSessionId === sess.id ? (
-                            <Check className="w-3 h-3 text-emerald-400" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleStartRename(e, sess)}
-                          title="Rename tab"
-                          className="p-1 rounded text-white/70 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        {sessions.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteSession(e, sess.id)}
-                            title="Delete tab"
-                            className="p-1 rounded text-white/70 hover:text-red-400 hover:bg-zinc-800 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Sticky Settings Button at the bottom */}
-          <div className="p-3 border-t border-zinc-900/50 bg-zinc-950/95 sticky bottom-0 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                handleSelectNavTab('settings');
-                setIsSidebarOpen(false);
-              }}
-              className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-                activeNavTab === 'settings'
-                  ? 'bg-zinc-900 text-white'
-                  : 'text-white hover:bg-zinc-900/60'
-              }`}
-            >
-              <Settings className="w-4 h-4 text-white" />
-              <span className="text-white">Settings</span>
-            </button>
-          </div>
-        </div>
+        <SidebarNav
+          fill
+          activeTitle={sessions.find((sess) => sess.id === activeSessionId)?.title}
+          activeNav={activeNavTab}
+          workspace={{
+            key: 'openbua',
+            name: 'OpenBUA',
+            monogram: 'O',
+          }}
+          navItems={[
+            { key: 'chat', label: 'Chat', icon: <MessageSquare size={18} /> },
+            { key: 'memory', label: 'Memory', icon: <Brain size={18} /> },
+            { key: 'preview', label: 'Preview', icon: <Eye size={18} /> },
+          ]}
+          onNavigate={(key) => {
+            handleSelectNavTab(key as any);
+            setIsSidebarOpen(false);
+          }}
+          onNewChat={async () => {
+            await handleCreateSession();
+            handleSelectNavTab('chat');
+            setIsSidebarOpen(false);
+          }}
+          onPick={(id) => {
+            handleSelectSession(id);
+            handleSelectNavTab('chat');
+            setIsSidebarOpen(false);
+          }}
+          onDeleteSession={(id) => {
+            if (sessions.length > 1) {
+              handleDeleteSession(undefined, id);
+            }
+          }}
+          recents={sessions.map((sess) => ({ id: sess.id, label: sess.title }))}
+          footerLabel="Settings"
+          footerIcon={<Settings size={16} />}
+          onFooterClick={() => {
+            handleSelectNavTab('settings');
+            setIsSidebarOpen(false);
+          }}
+          onClose={() => setIsSidebarOpen(false)}
+        />
+      </div>
 
       {/* Main View Area */}
       <main className="h-full w-full flex flex-col overflow-hidden relative select-text">

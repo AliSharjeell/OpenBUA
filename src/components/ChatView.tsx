@@ -27,6 +27,7 @@ import {
   Globe,
   Wrench,
   Brain,
+  Compass,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
 import { ThinkingOrb } from 'thinking-orbs';
@@ -450,18 +451,20 @@ export function ChatView({
 
   const handleSend = async (textToSend?: string) => {
     const promptText = (textToSend || input).trim();
-    if (!promptText || isBusy || isPreparingFiles || isUploadingDoc || !harness) return;
+    if (!promptText || isPreparingFiles || isUploadingDoc || !harness) return;
 
     if (!hasKey) {
       onNavigateToSettings();
       return;
     }
 
+    const isMidFlightSteer = isBusy;
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
       content: promptText,
       timestamp: Date.now(),
+      isSteering: isMidFlightSteer,
     };
 
     const promptScope = activeSessionId;
@@ -484,11 +487,15 @@ export function ChatView({
         const prepared = onPreparePrompt ? await onPreparePrompt(promptText) : promptText;
         setIsPreparingFiles(false);
         if (chatScopeRef.current !== promptScope) return;
-        harness.setParallelEnabled(false);
-        await harness.prompt(prepared);
+        if (isMidFlightSteer) {
+          await harness.steer(prepared);
+        } else {
+          harness.setParallelEnabled(false);
+          await harness.prompt(prepared);
+        }
       } catch (e: any) {
-        console.error('[ChatView] Prompt error:', e);
-        if (chatScopeRef.current === promptScope) onMessagesChange([...newMessages, {id: `file-error-${Date.now()}`, role: 'assistant', content: `Could not prepare attachments: ${e?.message || e}`, timestamp: Date.now()}]);
+        console.error('[ChatView] Prompt/Steer error:', e);
+        if (chatScopeRef.current === promptScope) onMessagesChange([...newMessages, {id: `file-error-${Date.now()}`, role: 'assistant', content: `Could not process request: ${e?.message || e}`, timestamp: Date.now()}]);
       } finally {
         setIsPreparingFiles(false);
       }
@@ -735,7 +742,13 @@ export function ChatView({
                       <MarkdownRenderer content={msg.content} />
                     ) : (
                       <div className="whitespace-pre-wrap leading-relaxed select-text font-sans">
-                        {msg.content}
+                        {msg.isSteering && (
+                          <div className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300 uppercase tracking-wider mb-1 px-1.5 py-0.5 rounded bg-black/25 select-none">
+                            <Compass className="w-3 h-3" />
+                            <span>Steered</span>
+                          </div>
+                        )}
+                        <div>{msg.content}</div>
                       </div>
                     )}
                   </div>
@@ -942,12 +955,12 @@ export function ChatView({
             aria-expanded={mentionOptions.length > 0}
             onKeyDown={handleKeyDown}
             className="border-0 bg-transparent min-h-[32px] max-h-[136px] resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans flex-1"
-            disabled={isBusy || isPreparingFiles || !hasKey || !harness}
+            disabled={isPreparingFiles || !hasKey || !harness}
           />
 
           {/* End of Bar: Send / Stop Button */}
-          <div className="self-center flex items-center shrink-0">
-            {isBusy ? (
+          <div className="self-center flex items-center gap-1 shrink-0">
+            {isBusy && (
               <Button
                 variant="destructive"
                 size="icon"
@@ -957,15 +970,30 @@ export function ChatView({
               >
                 <Square className="w-3 h-3 fill-current" />
               </Button>
-            ) : (
+            )}
+            {(!isBusy || Boolean(input.trim())) && (
               <Button
                 size="icon"
-                className="h-7 w-7 rounded-full bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF] shadow-sm transition-colors cursor-pointer flex items-center justify-center"
+                className={`h-7 w-7 rounded-full shadow-sm transition-all cursor-pointer flex items-center justify-center ${
+                  isBusy
+                    ? 'bg-amber-600 hover:bg-amber-500 active:scale-95 text-white'
+                    : 'bg-[#007AFF] text-white hover:bg-[#0071e3] disabled:opacity-40 disabled:hover:bg-[#007AFF]'
+                }`}
                 onClick={() => handleSend()}
                 disabled={!input.trim() || isPreparingFiles || isUploadingDoc || !hasKey || !harness}
-                title={harness ? 'Send (Enter)' : 'Loading saved data…'}
+                title={
+                  isBusy
+                    ? 'Steer agent mid-flight (Enter)'
+                    : harness
+                      ? 'Send (Enter)'
+                      : 'Loading saved data…'
+                }
               >
-                <Send className="w-3.5 h-3.5 text-white" />
+                {isBusy ? (
+                  <Compass className="w-3.5 h-3.5 text-white" />
+                ) : (
+                  <Send className="w-3.5 h-3.5 text-white" />
+                )}
               </Button>
             )}
           </div>

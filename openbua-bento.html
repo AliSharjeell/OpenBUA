@@ -1,0 +1,756 @@
+<title>OpenBUA Bento</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #09090b;
+    --surface: #18181b;
+    --surface-2: #121215;
+    --border: #27272a;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --accent: #007AFF;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .shimmer {
+    background: linear-gradient(90deg, #52525b 0%, #fafafa 50%, #52525b 100%);
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmerWave 2.4s ease-in-out infinite;
+  }
+  @keyframes shimmerWave {
+    0% { background-position: 120% 0; }
+    100% { background-position: -120% 0; }
+  }
+  @keyframes gateDrain {
+    0% { width: 100%; }
+    100% { width: 8%; }
+  }
+  .gate-fill { animation: gateDrain 10s linear infinite; }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+
+<div id="root"></div>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+          mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+
+const LOGO = "data:image/png;base64,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";
+
+/* ── Icons: exact lucide path data (v1.48.0, as used by the extension) ── */
+const ICONS = {
+  brain: [
+    ["path", { d: "M12 18V5" }],
+    ["path", { d: "M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4" }],
+    ["path", { d: "M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5" }],
+    ["path", { d: "M17.997 5.125a4 4 0 0 1 2.526 5.77" }],
+    ["path", { d: "M18 18a4 4 0 0 0 2-7.464" }],
+    ["path", { d: "M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517" }],
+    ["path", { d: "M6 18a4 4 0 0 1-2-7.464" }],
+    ["path", { d: "M6.003 5.125a4 4 0 0 0-2.526 5.77" }],
+  ],
+  wrench: [
+    ["path", { d: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z" }],
+  ],
+  trash: [
+    ["path", { d: "M10 11v6" }],
+    ["path", { d: "M14 11v6" }],
+    ["path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" }],
+    ["path", { d: "M3 6h18" }],
+    ["path", { d: "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }],
+  ],
+  globe: [
+    ["circle", { cx: "12", cy: "12", r: "10" }],
+    ["path", { d: "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" }],
+    ["path", { d: "M2 12h20" }],
+  ],
+  layers: [
+    ["path", { d: "M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" }],
+    ["path", { d: "M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" }],
+    ["path", { d: "M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" }],
+  ],
+  plus: [
+    ["path", { d: "M5 12h14" }],
+    ["path", { d: "M12 5v14" }],
+  ],
+  send: [
+    ["path", { d: "M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z" }],
+    ["path", { d: "m21.854 2.147-10.94 10.939" }],
+  ],
+  chevronRight: [["path", { d: "m9 18 6-6-6-6" }]],
+  chevronDown: [["path", { d: "m6 9 6 6 6-6" }]],
+  copy: [
+    ["rect", { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2" }],
+    ["path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }],
+  ],
+  check: [["path", { d: "M20 6 9 17l-5-5" }]],
+  loader: [["path", { d: "M21 12a9 9 0 1 1-6.219-8.56" }]],
+  eye: [
+    ["path", { d: "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" }],
+    ["circle", { cx: "12", cy: "12", r: "3" }],
+  ],
+  alert: [
+    ["circle", { cx: "12", cy: "12", r: "10" }],
+    ["line", { x1: "12", x2: "12", y1: "8", y2: "12" }],
+    ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16" }],
+  ],
+  message: [
+    ["path", { d: "M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" }],
+  ],
+  settings: [
+    ["path", { d: "M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" }],
+    ["circle", { cx: "12", cy: "12", r: "3" }],
+  ],
+  menu: [
+    ["path", { d: "M4 8h16" }],
+    ["path", { d: "M4 16h16" }],
+  ],
+};
+
+function Icon({ name, className = "w-4 h-4", strokeWidth = 2 }) {
+  const nodes = ICONS[name] || [];
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {nodes.map(([tag, attrs], i) => React.createElement(tag, { ...attrs, key: i }))}
+    </svg>
+  );
+}
+
+/* ── Sample data ── */
+const CHIPS = [
+  ["Live research preview", "#007AFF"],
+  ["Self-learning memory", "#34C759"],
+  ["Free Gemini API tier", "#FF9F0A"],
+  ["Captcha handling", "#A78BFA"],
+];
+
+const FREE_MODELS = [
+  { name: "Gemini 3.5 Flash Lite", rate: "15 RPM · 500 RPD", badge: "Recommended Free", badgeClass: "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/30" },
+  { name: "Gemini 3.1 Flash Lite", rate: "15 RPM · 500 RPD", badge: "High Limit", badgeClass: "bg-zinc-800 text-zinc-300 border-zinc-700" },
+  { name: "Gemini 3.8 Flash", rate: "5 RPM · 20 RPD", badge: "Flagship Flash", badgeClass: "bg-amber-950/70 text-amber-300 border-amber-800/60" },
+];
+
+const AGENCIES = [
+  ["1", "Studio Neun", "Brand & Digital", "Mitte"],
+  ["2", "Kraftwerk Studios", "Product & Motion", "Friedrichshain"],
+  ["3", "HORT Berlin", "Spatial & Type", "Charlottenburg"],
+];
+
+const TOOL_ROWS = [
+  { icon: "wrench", label: "Inspecting Page Form Elements", desc: "Scanning active tab DOM for input fields, selects, and buttons…", active: false },
+  { icon: "wrench", label: "Auto-Filling Form Inputs", desc: "Matching stored memory to each field and typing values.", active: false },
+  { icon: "loader", label: "Updating Live Preview", desc: "Appending discovered finding or table row to the preview…", active: true },
+  { icon: "brain", label: "Suggesting New Memory", desc: "Noticed a repeatable preference worth remembering.", active: false },
+];
+
+const MEMORIES = [
+  {
+    title: "University Affiliation",
+    body: "LUMO University — MSc Human-Computer Interaction (expected 2027). Use this on education and student-status fields.",
+  },
+  {
+    title: "Form Preference",
+    body: "Skip optional phone fields and untick newsletter checkboxes by default.",
+  },
+];
+
+const ENGINES = ["Cloudflare", "reCAPTCHA", "hCaptcha", "Arkose", "Bing", "Generic"];
+
+const RECENTS = [
+  { label: "Berlin agency shortlist", active: true },
+  { label: "Sweepstakes form sweep", active: false },
+];
+
+/* ── Shared building blocks ── */
+function Card({ className = "", children }) {
+  return (
+    <section className={"min-w-0 flex flex-col rounded-2xl border border-zinc-800/90 bg-zinc-900/70 shadow-sm overflow-hidden transition-colors hover:border-zinc-700/70 " + className}>
+      {children}
+    </section>
+  );
+}
+
+function CardHead({ eyebrow, title, desc, right }) {
+  return (
+    <div className="p-4 sm:p-5 space-y-1.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1.5 min-w-0">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{eyebrow}</div>
+          <h2 className="text-[17px] font-semibold tracking-tight text-zinc-100">{title}</h2>
+        </div>
+        {right}
+      </div>
+      {desc ? <p className="text-xs leading-relaxed text-zinc-400 max-w-[54ch]">{desc}</p> : null}
+    </div>
+  );
+}
+
+function Mock({ children, className = "" }) {
+  return <div className={"border-t border-zinc-800/70 p-4 sm:p-5 flex " + className}>{children}</div>;
+}
+
+function Screen({ children, className = "" }) {
+  return <div className={"rounded-xl border border-zinc-800/80 bg-zinc-950 overflow-hidden w-full flex flex-col " + className}>{children}</div>;
+}
+
+function SegToggle({ items, active }) {
+  return (
+    <div className="inline-flex items-center p-0.5 bg-zinc-900 border border-zinc-800/90 rounded-full">
+      {items.map((label) => (
+        <span
+          key={label}
+          className={
+            "flex items-center justify-center h-6 px-2.5 rounded-full text-[11px] leading-none " +
+            (label === active ? "bg-zinc-100 text-zinc-950 font-semibold shadow-xs" : "text-zinc-400")
+          }
+        >
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CircleBtn({ children, className = "" }) {
+  return (
+    <span className={"grid place-items-center w-7 h-7 rounded-full bg-zinc-900/95 border border-zinc-800/90 text-zinc-300 shadow-xl shadow-black/60 " + className}>
+      {children}
+    </span>
+  );
+}
+
+function BrainBtn() {
+  return (
+    <span className="relative grid place-items-center w-7 h-7 rounded-full bg-zinc-800 border border-zinc-700 text-white shadow-xl shadow-black/60">
+      <Icon name="brain" className="w-3.5 h-3.5" />
+      <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-[#007AFF] ring-2 ring-zinc-950 animate-pulse" />
+    </span>
+  );
+}
+
+/* ── Card 1: redesigned chat interface ── */
+function ChatCard() {
+  return (
+    <Card className="md:col-span-6 lg:col-span-7">
+      <CardHead
+        eyebrow="New UI redesign"
+        title="The chat interface, rebuilt"
+        desc="A floating header with Chat · Memory · Preview pill navigation, iMessage-style bubbles, expandable thought and tool traces, and a rounded composer that stays out of the way."
+      />
+      <Mock className="min-w-0">
+        <Screen className="min-h-[380px] max-h-[440px]">
+          {/* Sidebar drawer */}
+          <div className="hidden md:flex flex-col w-[158px] shrink-0 border-r border-zinc-900 bg-zinc-950 p-2.5 gap-0.5">
+            <div className="px-2 py-1.5 text-sm font-bold tracking-[-0.04em] text-white">OpenBUA</div>
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-xl text-[11px] font-medium text-white">
+              <Icon name="plus" className="w-3.5 h-3.5" /> New Chat
+            </div>
+            <div className="px-2 py-1.5 text-[11px] font-bold text-white">Recent</div>
+            {RECENTS.map((r) => (
+              <div
+                key={r.label}
+                className={
+                  "flex items-center justify-between px-2.5 py-1.5 rounded-xl text-[11px] " +
+                  (r.active ? "bg-zinc-900 text-white font-medium" : "text-white/70")
+                }
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <Icon name="message" className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{r.label}</span>
+                </span>
+                {r.active ? (
+                  <span className="flex items-center gap-1 text-white/60 shrink-0">
+                    <Icon name="copy" className="w-3 h-3" />
+                    <Icon name="trash" className="w-3 h-3" />
+                  </span>
+                ) : null}
+              </div>
+            ))}
+            <div className="mt-auto pt-2 border-t border-zinc-900/60">
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-xl text-[11px] text-white/80">
+                <Icon name="settings" className="w-3.5 h-3.5" /> Settings
+              </div>
+            </div>
+          </div>
+
+          {/* Main column */}
+          <div className="flex-1 min-w-0 flex flex-col">
+            {/* Floating-style header row */}
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-zinc-900/80">
+              <CircleBtn><Icon name="menu" className="w-3.5 h-3.5" strokeWidth={2.5} /></CircleBtn>
+              <div className="flex items-center p-0.5 bg-zinc-900 border border-zinc-800 rounded-full">
+                <span className="flex items-center justify-center h-6 px-2.5 rounded-full text-[11px] leading-none bg-zinc-100 text-zinc-950 font-semibold shadow-xs">Chat</span>
+                <span className="flex items-center justify-center h-6 px-2.5 rounded-full text-[11px] leading-none text-zinc-400">Memory</span>
+                <span className="flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[11px] leading-none text-zinc-400">
+                  Preview
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#007AFF] animate-pulse" />
+                </span>
+              </div>
+              <BrainBtn />
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 px-3.5 py-3 space-y-3 overflow-hidden">
+              <div className="flex flex-col items-end space-y-1">
+                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-[#007AFF] text-white p-2.5 text-[11px] leading-relaxed shadow-sm">
+                  Research the 5 best design agencies in Berlin and start the partner signup on kraftwerk.studio
+                </div>
+                <div className="text-[9px] text-zinc-500 tabular-nums px-1">14:02:11</div>
+              </div>
+
+              <div className="flex flex-col items-start space-y-1">
+                <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-zinc-900/90 border border-zinc-800 p-2.5 text-[11px] text-zinc-200 leading-relaxed shadow-sm space-y-2">
+                  <p>On it — I'll gather shortlist details, fill the signup, and pause before submitting.</p>
+                  <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+                    <Icon name="chevronRight" className="w-3 h-3" />
+                    Thought for 12s
+                  </div>
+                  <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+                    <Icon name="wrench" className="w-3 h-3 text-zinc-500" />
+                    Tools used (3)
+                    <Icon name="chevronDown" className="w-3 h-3 text-zinc-500" />
+                  </div>
+                  <div className="border-l-2 border-zinc-800/70 pl-2.5 space-y-1.5">
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                      <Icon name="wrench" className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                      Inspecting Page Form Elements
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                      <Icon name="loader" className="w-3.5 h-3.5 shrink-0 text-[#007AFF] animate-spin" />
+                      Updating Live Preview
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                      <Icon name="brain" className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                      Suggesting New Memory
+                    </div>
+                  </div>
+                </div>
+                <div className="text-[9px] text-zinc-500 tabular-nums px-1">14:02:19</div>
+              </div>
+            </div>
+
+            {/* Thinking pill + composer */}
+            <div className="px-3 pb-3 space-y-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-900/95 border border-zinc-800/90 shadow-xl shadow-black/70">
+                <span className="w-4 h-4 rounded-full border-2 border-zinc-600 border-t-zinc-100 animate-spin" />
+                <span className="shimmer text-[11px] font-medium">Agent's Thinking</span>
+              </div>
+              <div className="flex items-center gap-2 bg-zinc-900/95 rounded-[24px] border border-zinc-800/90 p-1.5 pl-2 shadow-2xl shadow-black/70">
+                <span className="grid place-items-center w-7 h-7 rounded-full bg-zinc-800/80 text-white shrink-0">
+                  <Icon name="plus" className="w-3.5 h-3.5" />
+                </span>
+                <span className="flex-1 min-w-0 text-xs text-zinc-500 truncate">Ask OpenBUA</span>
+                <span className="grid place-items-center w-7 h-7 rounded-full bg-[#007AFF] hover:bg-[#0071e3] text-white shrink-0 shadow-sm">
+                  <Icon name="send" className="w-3.5 h-3.5" />
+                </span>
+              </div>
+            </div>
+          </div>
+        </Screen>
+      </Mock>
+    </Card>
+  );
+}
+
+/* ── Card 2: live research preview ── */
+function PreviewCard() {
+  const [copied, setCopied] = useState(false);
+  const onCopy = () => {
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+  return (
+    <Card className="md:col-span-6 lg:col-span-5">
+      <CardHead
+        eyebrow="Live research"
+        title="Findings stream in as they land"
+        desc="Every discovery the agent makes is appended to a live preview — tables, shortlists, sources — in real time while it works."
+      />
+      <Mock className="min-w-0">
+        <Screen className="min-h-[380px] max-h-[440px] p-4">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs font-semibold text-zinc-200 tracking-tight truncate">Live Research Preview</span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#007AFF]/15 text-[#007AFF] border border-[#007AFF]/30 animate-pulse shrink-0">
+                <Icon name="loader" className="w-2.5 h-2.5 animate-spin" />
+                Live Updating
+              </span>
+            </div>
+            <button
+              onClick={onCopy}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium text-white shadow-xs transition-colors shrink-0"
+              style={{ backgroundColor: copied ? "#34C759" : "#007AFF" }}
+            >
+              <Icon name={copied ? "check" : "copy"} className="w-3 h-3" />
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+
+          <div className="rounded-2xl bg-zinc-900/40 border border-zinc-800/70 p-3.5 shadow-sm flex-1 overflow-hidden">
+            <div className="text-sm font-semibold text-zinc-100 tracking-tight">Berlin Design Agencies — Shortlist</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5 mb-2.5">5 found · ranked by portfolio fit · updating live</div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-[10px]">
+                <thead>
+                  <tr>
+                    {["#", "Agency", "Focus", "District"].map((h) => (
+                      <th key={h} className="border border-zinc-800 bg-zinc-900 text-zinc-400 font-medium text-left px-2 py-1.5 whitespace-nowrap">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {AGENCIES.map((row, i) => (
+                    <tr key={row[0]} className={i % 2 === 1 ? "bg-[#121215]" : ""}>
+                      {row.map((cell, j) => (
+                        <td key={j} className="border border-zinc-800 px-2 py-1.5 text-zinc-300">
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  <tr>
+                    <td className="border border-zinc-800 px-2 py-1.5 text-zinc-500 tabular-nums">4</td>
+                    <td className="border border-zinc-800 px-2 py-1.5 text-zinc-300">
+                      Fuenf Id
+                      <span className="inline-block w-1.5 h-3 bg-zinc-300 ml-0.5 align-middle animate-pulse" />
+                    </td>
+                    <td className="border border-zinc-800 px-2 py-1.5 text-zinc-600">—</td>
+                    <td className="border border-zinc-800 px-2 py-1.5 text-zinc-600">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-3 space-y-1 text-[10px] text-zinc-400">
+              <div>· Each row links back to the source page it came from</div>
+              <div>· Table keeps growing while the agent keeps browsing<span className="inline-block w-1.5 h-3 bg-zinc-400 ml-1 align-middle animate-pulse" /></div>
+            </div>
+          </div>
+        </Screen>
+      </Mock>
+    </Card>
+  );
+}
+
+/* ── Card 3: free API ── */
+function FreeApiCard() {
+  return (
+    <Card className="md:col-span-3 lg:col-span-4 lg:row-span-2">
+      <CardHead
+        eyebrow="Settings · Free API"
+        title="Use it for free"
+        desc="Connect Google Gemini's free tier from Settings: grab a key in one click, pick a model, and run the agent at zero cost. Hit a limit and another model picks up where you left off."
+      />
+      <div className="px-4 sm:px-5 pb-4 sm:pb-5 flex items-end gap-3">
+        <div className="text-[64px] sm:text-[76px] leading-[0.8] font-black tracking-[-0.05em] text-[#007AFF]">$0</div>
+        <div className="pb-1.5">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-500 font-semibold">per run</div>
+          <div className="text-xs text-zinc-300 font-medium">free Gemini tier, built in</div>
+        </div>
+      </div>
+      <Mock className="flex-col">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <span className="text-xs font-semibold text-zinc-100 tracking-tight">Google Gemini Free</span>
+          <SegToggle items={["Free", "BYOK"]} active="Free" />
+        </div>
+
+        <div className="space-y-1.5">
+          {FREE_MODELS.map((m) => (
+            <div key={m.name} className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-[11px] font-medium text-zinc-200 truncate">{m.name}</div>
+                <div className="text-[10px] text-zinc-500 tabular-nums">{m.rate}</div>
+              </div>
+              <span className={"inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-medium border shrink-0 " + m.badgeClass}>
+                {m.badge}
+              </span>
+            </div>
+          ))}
+          <div className="px-1 text-[10px] text-zinc-500">+ 3 more free models — switch anytime and resume</div>
+        </div>
+
+        <div className="mt-3">
+          <div className="text-[11px] font-medium text-zinc-300 mb-1">Gemini API Key</div>
+          <div className="flex items-center justify-between gap-2 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2">
+            <span className="font-mono text-[11px] text-zinc-400 truncate">AIzaSy••••••••••••••••</span>
+            <Icon name="eye" className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+          </div>
+        </div>
+
+        <button className="w-full mt-3 py-2.5 px-4 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-100 font-medium text-[11px] flex items-center justify-center transition-all shadow-md active:scale-[0.99]">
+          Get Free Gemini API Key
+        </button>
+        <div className="mt-2 text-[10px] text-zinc-500 text-center">No card, no paywall — keys are free at Google AI Studio.</div>
+      </Mock>
+    </Card>
+  );
+}
+
+/* ── Card 4: self-learning memory ── */
+function MemoryCard() {
+  return (
+    <Card className="md:col-span-3 lg:col-span-5">
+      <CardHead
+        eyebrow="Self-learning agent"
+        title="Learns you — for tasks"
+        desc="While it works, OpenBUA notices personal details, preferences, and repeatable steps, then offers them as suggested memory you approve in one click."
+      />
+      <Mock className="min-w-0">
+        <Screen className="p-4 space-y-3">
+          <div className="flex items-center justify-center gap-2.5 relative">
+            <span className="relative grid place-items-center w-7 h-7 rounded-full bg-zinc-800 border border-zinc-700 text-white">
+              <Icon name="brain" className="w-3.5 h-3.5" />
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#007AFF] ring-2 ring-zinc-950 animate-pulse" />
+            </span>
+            <span className="inline-flex items-center gap-2 h-7 px-3.5 bg-zinc-900 border border-zinc-800 rounded-full shadow-md">
+              <span className="text-[11px] font-semibold text-zinc-100 tracking-tight">Suggested memory</span>
+              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold text-white leading-none bg-[#007AFF]">3</span>
+            </span>
+          </div>
+
+          {MEMORIES.map((m, i) => (
+            <div key={m.title} className={"relative bg-zinc-900/70 border border-zinc-800/90 rounded-2xl p-3.5 space-y-2.5 shadow-sm " + (i === 1 ? "opacity-95" : "")}>
+              <span className="absolute top-3 right-3 p-1 rounded-lg text-zinc-500">
+                <Icon name="trash" className="w-3.5 h-3.5" />
+              </span>
+              <div className="text-xs font-semibold text-white tracking-tight pr-7">{m.title}</div>
+              <div className="p-2 rounded-xl bg-zinc-950/80 border border-zinc-800/60 text-[11px] text-zinc-300 leading-relaxed">
+                {m.body}
+              </div>
+              <div className="flex items-center justify-end gap-1.5">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-medium bg-zinc-800 border border-zinc-700/80 text-zinc-200">
+                  <Icon name="layers" className="w-3 h-3 text-zinc-400" />
+                  Tab Memory
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-medium text-white shadow-xs" style={{ backgroundColor: "#007AFF" }}>
+                  <Icon name="globe" className="w-3 h-3" />
+                  Global
+                </span>
+              </div>
+            </div>
+          ))}
+        </Screen>
+      </Mock>
+    </Card>
+  );
+}
+
+/* ── Card 5: captcha handling ── */
+function CaptchaCard() {
+  return (
+    <Card className="md:col-span-3 lg:col-span-3">
+      <CardHead
+        eyebrow="Captcha handling"
+        title="Stops, solves, or pivots"
+        desc="When a challenge appears, the agent pauses with a 10-second gate and an audio cue."
+      />
+      <Mock className="min-w-0">
+        <Screen className="p-3.5 gap-3">
+          <div className="w-full rounded-2xl border border-zinc-800 bg-zinc-900/95 backdrop-blur-md p-3 shadow-2xl space-y-2.5">
+            <div className="text-[13px] font-medium text-white tracking-tight">Captcha Detected</div>
+            <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden">
+              <div className="gate-fill bg-zinc-400 h-full rounded-full" style={{ width: "55%" }} />
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-zinc-500">
+              <span>Auto-solve gate</span>
+              <span className="tabular-nums">4s left</span>
+            </div>
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <span className="px-3 py-1.5 rounded-full text-[11px] font-medium text-white shadow-sm" style={{ backgroundColor: "#007AFF" }}>
+                Solving it manually
+              </span>
+              <span className="px-2.5 py-1.5 rounded-full text-[11px] font-medium bg-zinc-800 border border-zinc-700/60 text-zinc-300">
+                Skip / Pivot
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {ENGINES.map((e) => (
+              <span key={e} className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-medium bg-zinc-900 text-zinc-400 border border-zinc-800">
+                {e}
+              </span>
+            ))}
+          </div>
+          <div className="text-[10px] text-zinc-500 leading-relaxed">
+            On timeout the agent pivots — e.g. an X-Ray search — instead of getting stuck.
+          </div>
+        </Screen>
+      </Mock>
+    </Card>
+  );
+}
+
+/* ── Card 6: autonomous tools ── */
+function ToolsCard() {
+  return (
+    <Card className="md:col-span-3 lg:col-span-5">
+      <CardHead
+        eyebrow="Autonomous agent"
+        title="Drives your tab, narrates every step"
+        desc="OpenBUA navigates, researches, interacts, and fills forms with real browser tools — and shows its work in the chat."
+      />
+      <Mock className="min-w-0">
+        <Screen className="p-4">
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 mb-3">
+            <Icon name="wrench" className="w-3 h-3 text-zinc-500" />
+            Tools used (4)
+            <Icon name="chevronDown" className="w-3 h-3 text-zinc-500" />
+          </div>
+          <div className="border-l-2 border-zinc-800/70 pl-3 space-y-2.5">
+            {TOOL_ROWS.map((t) => (
+              <div key={t.label}>
+                <div className={"flex items-center gap-2 text-[11px] " + (t.active ? "text-[#007AFF]" : "text-zinc-400")}>
+                  <Icon
+                    name={t.icon}
+                    className={"w-3.5 h-3.5 shrink-0 " + (t.active ? "text-[#007AFF] animate-spin" : "text-zinc-500")}
+                  />
+                  {t.label}
+                </div>
+                <div className="text-[10px] text-zinc-600 leading-snug mt-0.5 pl-[22px]">{t.desc}</div>
+              </div>
+            ))}
+          </div>
+        </Screen>
+      </Mock>
+    </Card>
+  );
+}
+
+/* ── Card 7: permissions ── */
+function PermissionsCard() {
+  return (
+    <Card className="md:col-span-6 lg:col-span-3">
+      <CardHead
+        eyebrow="Permissions"
+        title="Ask first, or full autonomy"
+        desc="You decide how much leash the agent gets."
+      />
+      <Mock className="flex-col">
+        <div className="space-y-2">
+          <div className="rounded-xl bg-zinc-900 border-[#007AFF]/60 border shadow-sm ring-1 ring-[#007AFF]/30 p-3 space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="grid place-items-center w-3.5 h-3.5 rounded-full bg-[#007AFF] border border-[#007AFF]">
+                <Icon name="check" className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+              </span>
+              <span className="text-[11px] font-medium text-white">Ask for review</span>
+            </div>
+            <div className="text-[10px] text-zinc-400 leading-tight pl-[22px]">Asks before final submission or major actions</div>
+          </div>
+          <div className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-3 space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="w-3.5 h-3.5 rounded-full border border-zinc-600" />
+              <span className="text-[11px] font-medium text-zinc-300">Full access</span>
+            </div>
+            <div className="text-[10px] text-zinc-500 leading-tight pl-[22px]">Autonomously fills and submits end-to-end</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mt-3">
+          <button className="flex-1 py-2 px-4 rounded-full text-white font-semibold text-[11px] shadow-md active:scale-95 transition-transform" style={{ backgroundColor: "#007AFF" }}>
+            Save Settings
+          </button>
+          <button className="py-2 px-3.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300 font-medium text-[11px]">
+            Test API
+          </button>
+        </div>
+      </Mock>
+    </Card>
+  );
+}
+
+/* ── Page ── */
+function App() {
+  return (
+    <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 pb-14">
+      <header className="py-10 sm:py-14 flex flex-col gap-4">
+        <div className="flex items-center gap-3.5">
+          <img src={LOGO} alt="" width="56" height="56" className="w-12 h-12 sm:w-14 sm:h-14 rounded-[14px] shrink-0" />
+          <div className="flex items-baseline gap-3 flex-wrap min-w-0">
+            <h1 className="text-[30px] sm:text-[38px] font-bold tracking-[-0.06em] leading-none text-zinc-50">OpenBUA</h1>
+            <span className="text-[11px] font-medium text-zinc-500">v1.4.0 · Chrome extension</span>
+          </div>
+        </div>
+        <p className="max-w-[640px] text-sm sm:text-[15px] leading-relaxed text-zinc-400">
+          The autonomous browser agent that navigates, researches, interacts, and fills forms in your everyday browser.
+          Here is what is inside — a rebuilt chat UI, live research streaming, and a memory that learns you.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {CHIPS.map(([label, color]) => (
+            <span key={label} className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/70 px-3 py-1.5 text-[11px] font-medium text-zinc-300">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
+              {label}
+            </span>
+          ))}
+        </div>
+      </header>
+
+      <main className="grid grid-cols-1 md:grid-cols-6 lg:grid-cols-12 gap-3 sm:gap-4">
+        <ChatCard />
+        <PreviewCard />
+        <FreeApiCard />
+        <MemoryCard />
+        <CaptchaCard />
+        <ToolsCard />
+        <PermissionsCard />
+      </main>
+
+      <footer className="mt-8 sm:mt-10 flex flex-col sm:flex-row gap-2 sm:items-center justify-between text-[11px] text-zinc-500 border-t border-zinc-900 pt-5">
+        <span>OpenBUA — Open Browser Use Agent. Feature showcase with sample data.</span>
+        <span className="text-zinc-600">Inter · React · Tailwind</span>
+      </footer>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
