@@ -16,6 +16,7 @@ import { AppSettings, UserDocument, ToolCallState, ChatMessage, ProviderConfig }
 import { setActiveSessionIdState, getScratchpad, appendToScratchpad, loadSuggestedMemories, saveSuggestedMemory } from '../services/storage';
 import { resolveProviderConfig } from '../services/provider-config';
 import {HumanInput} from './human-input';
+import {FORM_FILLING_WORKFLOW} from './form-workflow';
 
 export interface AgentUpdateListeners {
   onMessageDelta?: (text: string) => void;
@@ -936,7 +937,7 @@ ${this.settings.systemInstruction || ''}`.trim();
     this.agent = new Agent({
       initialState: {
         model,
-        systemPrompt,
+        systemPrompt:systemPrompt+FORM_FILLING_WORKFLOW,
         tools: [...createAgentTools(this.sessionId, this.docsEditPolicy, this.pageTrustPolicy), this.humanInput.tool(), ...this.parallel.tools()],
         messages: agentMessages.length > 0 ? agentMessages : undefined,
       },
