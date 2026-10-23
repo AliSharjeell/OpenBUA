@@ -61,4 +61,3 @@ try {
  assert.equal(committed[0].selected,true);assert.equal(committed[0].value,'Karachi, Sindh, Pakistan');
  console.log('PASS: MiniMax effort and endpoints, real input lifecycle, unchanged-failure guard, native no-op safety, delayed dropdown inspection');
 } finally {await browser.close();}
-

@@ -56,5 +56,3 @@ try {
  assert.deepEqual(errors,[]);
  console.log('PASS: actual question tool answers, loader styles/time/fallback/reduced motion, trace/tool expansion/redaction, real sources and follow-ups, 440px and 320px layouts');
 } catch(error){console.error('Browser errors:',errors);throw error;} finally {await browser.close();}
-
-

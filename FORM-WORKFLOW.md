@@ -1,4 +1,4 @@
-﻿# Forms and live agent UI
+# Forms and live agent UI
 
 OpenBUA's form workflow uses labeled DOM controls first, batches known values, and verifies the committed result. It distinguishes typed autocomplete text from an actual selection, retains option references across inspectors, and recognizes selected widgets whose search input clears. Exact valid native text fields are skipped when already correct. A failed identical action on an unchanged form is blocked so the model must inspect validation or change its approach.
 
@@ -25,4 +25,3 @@ The stream adapter preserves complete thinking blocks and signatures with tool h
 With `npm run dev` running, `npm run test:agent-ui` exercises the actual ChatView model/source/command controls and question-answer continuation, plus loader styles, reduced motion, sources, tool expansion and narrow layouts. It writes screenshots to `.tmp-visual-agent-ui/`.
 
 The browser tests require Playwright and Chromium. Set `OPENBUA_PLAYWRIGHT_MODULE` to your installed module and `OPENBUA_CHROME_PATH` to Chrome's executable if needed. Existing DOM, autocomplete, attachment, upload, MCP and production-artifact tests remain available. Load the rebuilt `dist/` directory in Chrome or reload the existing unpacked extension after building.
-
