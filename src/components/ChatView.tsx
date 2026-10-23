@@ -27,18 +27,11 @@ import {
   Globe,
   Wrench,
   Brain,
+  PanelsTopLeft,
 } from 'lucide-react';
 import { captchaManager, CaptchaState } from '../agent/browser-bridge';
-import {LoadingState} from './agent/LoadingState';
-import {ThinkingState} from './agent/ThinkingState';
-import {ToolChips} from './agent/ToolChips';
-import {StreamingText} from './agent/StreamingText';
-import {TaskRows} from './agent/TaskRows';
-import {ApprovalCard} from './agent/ApprovalCard';
-import type {InputRequest} from '../agent/human-input';
-import '../styles/agent-ui.css';
-import {FORM_COMMANDS,CommandMenu,SourceMenu,ModelMenu} from './agent/PromptBar';
-import {resolveProviderConfig} from '../services/provider-config';
+import { ThinkingOrb } from 'thinking-orbs';
+import { LoadingPill } from './agent/LoadingPill';
 
 interface ChatViewProps {
   activeSessionId?: string;
@@ -50,7 +43,6 @@ interface ChatViewProps {
   settings: AppSettings;
   documents: UserDocument[];
   onNavigateToSettings: () => void;
-  onModelChange?: (provider:'free'|'openai'|'anthropic')=>void;
   onNavigateToMemory: () => void;
   onUploadDocument?: (file: File) => Promise<UserDocument>;
   onPreparePrompt?: (text: string) => Promise<string>;
@@ -236,7 +228,6 @@ export function ChatView({
   settings,
   documents,
   onNavigateToSettings,
-  onModelChange,
   onNavigateToMemory,
   onUploadDocument,
   onPreparePrompt,
@@ -244,17 +235,8 @@ export function ChatView({
   onInputDraftChange,
 }: ChatViewProps) {
   const [input, setInput] = useState(inputDraft || '');
-  const [sourcesOpen,setSourcesOpen]=useState(false),[modelsOpen,setModelsOpen]=useState(false),[commandIndex,setCommandIndex]=useState(0),[commandsDismissed,setCommandsDismissed]=useState(false);
-  const commands=!commandsDismissed && /^\/[a-z-]*$/i.test(input)?FORM_COMMANDS.filter(command=>command.name.startsWith(input.toLowerCase())):[];
-  const activeModel=resolveProviderConfig(settings);
-  const [pendingInput,setPendingInput]=useState<InputRequest|null>(null);
-  const [busyStarted,setBusyStarted]=useState(Date.now());
-  useEffect(()=>{if(isBusy)setBusyStarted(Date.now());},[isBusy]);
-  useEffect(()=>{
-    const broker=harness?.humanInput;
-    setPendingInput(broker?.current||null);
-    return broker?.subscribe(()=>setPendingInput(broker.current));
-  },[harness,activeSessionId]);
+  const [parallelEnabled, setParallelEnabled] = useState(false);
+  useEffect(() => { setParallelEnabled(false); }, [activeSessionId]);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
   const chatScopeRef = useRef(activeSessionId);
   chatScopeRef.current = activeSessionId;
@@ -265,6 +247,38 @@ export function ChatView({
   const mention = input.slice(0, mentionCursor).match(/@([^\s@]*)$/);
   const mentionOptions = mention && !mentionsDismissed ? attachments.filter(({doc, alias}) =>
     `${alias} ${doc.fileName || doc.title}`.toLowerCase().includes(mention[1].toLowerCase())).slice(0, 8) : [];
+
+  const [expandedThoughtIds, setExpandedThoughtIds] = useState<Record<string, boolean>>({});
+  const [expandedToolsIds, setExpandedToolsIds] = useState<Record<string, boolean>>({});
+
+  const toggleThought = (msgId: string) => {
+    setExpandedThoughtIds((prev) => {
+      const targetMsg = messages.find((m) => m.id === msgId);
+      const isCurrentlyStreamingBlock = Boolean(
+        targetMsg?.isStreaming && (!targetMsg.content || targetMsg.content.length === 0)
+      );
+      const currentExpanded = prev[msgId] !== undefined ? prev[msgId] : isCurrentlyStreamingBlock;
+      return {
+        ...prev,
+        [msgId]: !currentExpanded,
+      };
+    });
+  };
+
+  const toggleTools = (msgId: string) => {
+    setExpandedToolsIds((prev) => {
+      const targetMsg = messages.find((m) => m.id === msgId);
+      const isRunningAnyTool = Boolean(targetMsg?.toolCalls?.some((tc) => tc.status === 'running'));
+      const isCurrentlyStreamingTools = Boolean(
+        isRunningAnyTool || (targetMsg?.isStreaming && (!targetMsg.content || targetMsg.content.length === 0))
+      );
+      const currentExpanded = prev[msgId] !== undefined ? prev[msgId] : isCurrentlyStreamingTools;
+      return {
+        ...prev,
+        [msgId]: !currentExpanded,
+      };
+    });
+  };
 
   useEffect(() => {
     setInput(inputDraft || '');
@@ -280,7 +294,6 @@ export function ChatView({
   }, [input, activeSessionId]);
 
   const handleInputChange = (val: string) => {
-    setSourcesOpen(false);setModelsOpen(false);setCommandIndex(0);setCommandsDismissed(false);
     setInput(val);
     onInputDraftChange?.(val);
   };
@@ -291,11 +304,6 @@ export function ChatView({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
-  useEffect(()=>{
-    if(!sourcesOpen&&!modelsOpen)return;
-    const close=(event:PointerEvent)=>{if(!(event.target as Element)?.closest?.('[data-openbua-composer]')){setSourcesOpen(false);setModelsOpen(false);}};
-    document.addEventListener('pointerdown',close);return()=>document.removeEventListener('pointerdown',close);
-  },[sourcesOpen,modelsOpen]);
 
   const [isAtBottom, setIsAtBottom] = useState(true);
   const isAtBottomRef = useRef(true);
@@ -479,7 +487,7 @@ export function ChatView({
         const prepared = onPreparePrompt ? await onPreparePrompt(promptText) : promptText;
         setIsPreparingFiles(false);
         if (chatScopeRef.current !== promptScope) return;
-        harness.setParallelEnabled(false);
+        harness.setParallelEnabled(parallelEnabled);
         await harness.prompt(prepared);
       } catch (e: any) {
         console.error('[ChatView] Prompt error:', e);
@@ -505,12 +513,6 @@ export function ChatView({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if(e.nativeEvent.isComposing)return;
-    if(e.key==='Escape'){setSourcesOpen(false);setModelsOpen(false);setCommandsDismissed(true);}
-    if(commands.length) {
-      if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();setCommandIndex(index=>(index+(e.key==='ArrowDown'?1:commands.length-1))%commands.length);return;}
-      if((e.key==='Enter'&&!e.shiftKey)||e.key==='Tab'){e.preventDefault();handleInputChange(commands[commandIndex%commands.length].prompt);return;}
-    }
     if (mentionOptions.length) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -576,7 +578,7 @@ export function ChatView({
   }, [messages]);
 
   return (
-    <div className="agent-ui relative flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
+    <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 text-xs">
       {/* Messages Scroll Area - Full height canvas with top and bottom clearance for floating elements */}
       <div
         ref={scrollContainerRef}
@@ -609,8 +611,117 @@ export function ChatView({
             key={msg.id}
             className={`group flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1.5 select-text`}
           >
-            {msg.role === 'assistant' && msg.thinking?.trim() && <ThinkingState label="Thinking" done={msg.thinkingDurationMs ? `Thought for ${formatThoughtDuration(msg.thinkingDurationMs,msg.thinking.length)}` : 'Activity notes'} working={Boolean(msg.isStreaming && !msg.content)}><div className="agent-thought-text">{msg.thinking}</div></ThinkingState>}
-            {msg.role === 'assistant' && Boolean(msg.toolCalls?.length) && <ToolChips calls={msg.toolCalls!}/>}
+            {/* Thought Collapsible Accordion */}
+            {msg.role === 'assistant' && msg.thinking && msg.thinking.trim().length > 0 && (() => {
+              const isCurrentlyStreamingThought = Boolean(
+                msg.isStreaming && (!msg.content || msg.content.length === 0)
+              );
+              const isExpanded = expandedThoughtIds[msg.id] ?? isCurrentlyStreamingThought;
+              const durationLabel = isCurrentlyStreamingThought
+                ? 'Thinking...'
+                : `Thought for ${formatThoughtDuration(msg.thinkingDurationMs, msg.thinking.length)}`;
+
+              return (
+                <div className="w-full max-w-[92%] flex flex-col items-start py-0.5 select-text font-sans">
+                  {/* Clickable Header: "Thought for ___mins/secs" with Chevron */}
+                  <button
+                    type="button"
+                    onClick={() => toggleThought(msg.id)}
+                    className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg text-[11px] font-sans text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer select-none group/thought"
+                    title={isExpanded ? 'Click to collapse thoughts' : 'Click to expand thoughts'}
+                  >
+                    <span className="font-medium tracking-tight text-zinc-400 group-hover/thought:text-zinc-200">
+                      {durationLabel}
+                    </span>
+                    <ChevronRight
+                      className={`w-3 h-3 text-zinc-500 group-hover/thought:text-zinc-300 transition-transform duration-200 shrink-0 ${
+                        isExpanded ? 'rotate-90' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+
+                  {/* Expandable Reasoning Body */}
+                  {isExpanded && (
+                    <div className="w-full pl-2 pr-1 pt-1 pb-1 animate-in fade-in duration-150">
+                      <div className="border-l-2 border-zinc-800 pl-2.5 py-0.5 text-[11px] text-zinc-400 italic font-normal whitespace-pre-wrap select-text leading-relaxed font-sans">
+                        {msg.thinking}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Tools Used Collapsible Accordion */}
+            {msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0 && (() => {
+              const isRunningAnyTool = msg.toolCalls.some((tc) => tc.status === 'running');
+              const isCurrentlyStreamingTools = Boolean(
+                isRunningAnyTool || (msg.isStreaming && (!msg.content || msg.content.length === 0))
+              );
+              const isExpanded = expandedToolsIds[msg.id] ?? isCurrentlyStreamingTools;
+              const toolCount = msg.toolCalls.length;
+              const toolsLabel = isRunningAnyTool
+                ? `Using tools (${toolCount})...`
+                : `Tools used (${toolCount})`;
+
+              return (
+                <div className="w-full max-w-[92%] flex flex-col items-start py-0.5 select-text font-sans">
+                  {/* Clickable Header: "Tools used (X)" with Chevron */}
+                  <button
+                    type="button"
+                    onClick={() => toggleTools(msg.id)}
+                    className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg text-[11px] font-sans text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer select-none group/tools"
+                    title={isExpanded ? 'Click to collapse tools' : 'Click to expand tools'}
+                  >
+                    <Wrench className="w-3 h-3 text-zinc-500 group-hover/tools:text-zinc-300 shrink-0" />
+                    <span className="font-medium tracking-tight text-zinc-400 group-hover/tools:text-zinc-200">
+                      {toolsLabel}
+                    </span>
+                    {isRunningAnyTool && (
+                      <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
+                    )}
+                    <ChevronRight
+                      className={`w-3 h-3 text-zinc-500 group-hover/tools:text-zinc-300 transition-transform duration-200 shrink-0 ${
+                        isExpanded ? 'rotate-90' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+
+                  {/* Expandable Tool Calls List */}
+                  {isExpanded && (
+                    <div className="w-full pl-2 pr-1 pt-1 pb-1 animate-in fade-in duration-150">
+                      <div className="border-l-2 border-zinc-800/60 pl-2.5 py-0.5 space-y-1 select-text font-sans">
+                        {msg.toolCalls.map((tc) => {
+                          const meta = getToolMeta(tc.toolName);
+                          const Icon = meta.icon;
+                          return (
+                            <div
+                              key={tc.id}
+                              className="flex items-center gap-1.5 py-0.5 text-[11px] text-zinc-400 font-sans select-text leading-normal"
+                            >
+                              <Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0 select-none" />
+                              <span className="text-zinc-400 select-text cursor-text font-normal font-sans">
+                                {tc.toolName}
+                              </span>
+                              {tc.status === 'running' && (
+                                <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0 ml-0.5" />
+                              )}
+                              {tc.status === 'error' && (
+                                <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium select-text font-sans ml-1">
+                                  <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />
+                                  <span>{tc.errorMessage ? tc.errorMessage : 'Failed'}</span>
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Message Bubble (rendered if content exists, or if user message, or if still streaming) */}
             {(msg.content || (msg.isStreaming && !msg.thinking && (!msg.toolCalls || msg.toolCalls.length === 0)) || msg.role === 'user') && (
               <div
@@ -624,7 +735,7 @@ export function ChatView({
                 {msg.content && (
                   <div>
                     {msg.role === 'assistant' ? (
-                      <StreamingText content={msg.content} streaming={Boolean(msg.isStreaming)} onFollowUp={!isBusy ? handleInputChange : undefined} followUps={msg.toolCalls?.some(call => call.toolName === 'fill_form_fields') ? ['Check the completed fields for errors'] : []} />
+                      <MarkdownRenderer content={msg.content} />
                     ) : (
                       <div className="whitespace-pre-wrap leading-relaxed select-text font-sans">
                         {msg.content}
@@ -660,7 +771,6 @@ export function ChatView({
           </div>
         ))}
 
-        <TaskRows sessionId={activeSessionId}/>
         {/* Dynamic bottom spacer to ensure message content is never occluded by floating input, thinking pill, or captcha */}
         {displayMessages.length > 0 && (
           <div
@@ -755,9 +865,9 @@ export function ChatView({
             </button>
           )}
 
-          {isBusy && !pendingInput && <div className="agent-busy-pill pointer-events-auto"><LoadingState label={activeTool ? getToolMeta(activeTool.toolName).label : 'Working'} startedAt={busyStarted}/></div>}
+          {isBusy && <LoadingPill label={activeTool ? getToolMeta(activeTool.toolName).label : 'Working'} />}
         </div>
-        {pendingInput && <div className="pointer-events-auto"><ApprovalCard key={pendingInput.id} request={pendingInput} onSubmit={answers=>harness?.humanInput.answer(pendingInput.id,answers)} onSkip={()=>harness?.humanInput.answer(pendingInput.id,[],true)}/></div>}
+
         {isPreparingFiles && (
           <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-2 text-xs text-zinc-300" role="status">
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading attachments into Memory?
@@ -792,10 +902,7 @@ export function ChatView({
         )}
 
         {/* Rounder, Sleek Low-Height Floating Input Box with Drop Shadow */}
-        <div data-openbua-composer className="agent-composer pointer-events-auto relative flex items-end bg-zinc-900/95 rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
-          {sourcesOpen&&<SourceMenu onAttach={()=>{setSourcesOpen(false);chatFileInputRef.current?.click();}} onMemory={onNavigateToMemory} onReference={()=>{handleInputChange('@');setMentionsDismissed(false);requestAnimationFrame(()=>{textareaRef.current?.focus();textareaRef.current?.setSelectionRange(1,1);setMentionCursor(1);});}}/>}
-          {modelsOpen&&<ModelMenu settings={settings} onConfigure={onNavigateToSettings} onPick={provider=>{setModelsOpen(false);if(onModelChange)onModelChange(provider);else onNavigateToSettings();}}/>}
-          {commands.length>0&&<CommandMenu commands={commands} index={commandIndex%commands.length} onPick={text=>{handleInputChange(text);textareaRef.current?.focus();}}/>}
+        <div className="pointer-events-auto relative flex items-end bg-zinc-900/95 rounded-[24px] border border-zinc-800/90 focus-within:border-zinc-700 transition-colors p-1 pl-1.5 pr-1 shadow-2xl shadow-black/70">
           {/* Start of Bar: Plus Button for Memory Document Upload */}
           <input
             ref={chatFileInputRef}
@@ -807,10 +914,7 @@ export function ChatView({
           />
           <button
             type="button"
-            data-composer-attach
-            aria-label="Add attachments and sources"
-            aria-expanded={sourcesOpen}
-            onClick={() => {setModelsOpen(false);setSourcesOpen(!sourcesOpen);}}
+            onClick={() => chatFileInputRef.current?.click()}
             title="Attach files, images or videos"
             disabled={isBusy || isUploadingDoc || isPreparingFiles}
             className="w-7 h-7 self-center flex items-center justify-center text-white hover:text-white/80 transition-colors bg-transparent border-0 rounded-full disabled:opacity-40 shrink-0 cursor-pointer"
@@ -825,7 +929,7 @@ export function ChatView({
           <Textarea
             ref={textareaRef}
             rows={1}
-            placeholder={harness ? 'Ask OpenBUA · @ files · / commands' : 'Loading saved data…'}
+            placeholder={harness ? 'Ask OpenBUA ? @ to reference files' : 'Loading saved data…'}
             value={input}
             onChange={(e) => {
               handleInputChange(e.target.value);
@@ -839,15 +943,24 @@ export function ChatView({
               }
             }}
             onSelect={event => setMentionCursor(event.currentTarget.selectionStart)}
-            aria-label="Prompt"
-            aria-controls={mentionOptions.length ? 'attachment-mentions' : commands.length?'form-commands':undefined}
-            aria-expanded={mentionOptions.length > 0 || commands.length>0}
+            aria-controls={mentionOptions.length ? 'attachment-mentions' : undefined}
+            aria-expanded={mentionOptions.length > 0}
             onKeyDown={handleKeyDown}
             className="border-0 bg-transparent min-h-[32px] max-h-[136px] resize-none py-1.5 px-1.5 text-xs focus-visible:ring-0 focus:outline-none overflow-y-auto leading-relaxed font-sans flex-1"
             disabled={isBusy || isPreparingFiles || !hasKey || !harness}
           />
 
-          <button type="button" className="agent-model-button" aria-label="Choose model" aria-expanded={modelsOpen} disabled={isBusy||isPreparingFiles} onClick={()=>{setSourcesOpen(false);setModelsOpen(!modelsOpen);}} title={activeModel.model}>{activeModel.model}<ChevronDown size={11}/></button>
+          <button
+            type="button"
+            aria-label="Parallel subagent Chrome windows"
+            aria-pressed={parallelEnabled}
+            title="Parallel subagent Chrome windows: let OpenBUA split independent tasks across up to 3 separate Chrome windows and collect their results. Off by default. Each worker uses your selected model and API key."
+            disabled={isBusy || isPreparingFiles || !harness}
+            onClick={() => setParallelEnabled(value => !value)}
+            className={`self-center shrink-0 h-7 w-7 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 ${parallelEnabled ? 'bg-blue-500/20 text-blue-500' : 'text-muted-foreground hover:bg-muted'}`}
+          >
+            <PanelsTopLeft className="w-4 h-4" />
+          </button>
           {/* End of Bar: Send / Stop Button */}
           <div className="self-center flex items-center shrink-0">
             {isBusy ? (

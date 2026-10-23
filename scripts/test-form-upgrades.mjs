@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 let chromium;
 try {({chromium}=await import(process.env.OPENBUA_PLAYWRIGHT_MODULE || '@playwright/test'));} catch {({chromium}=await import('file:///C:/AppsNew/nascon-agentika/node_modules/@playwright/test/index.mjs'));}
@@ -17,18 +17,6 @@ assert.equal(providerEndpoint(mini),'https://api.minimax.io/anthropic/v1/message
 assert.equal(providerEndpoint({...mini,baseUrl:'https://api.minimax.io/anthropic/v1/'}),'https://api.minimax.io/anthropic/v1/messages');
 assert.equal(providerEndpoint({provider:'openai',baseUrl:'https://generativelanguage.googleapis.com/v1beta/openai'}),'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions');
 assert.equal(resolveProviderConfig({selectedMode:'byok',activeProvider:'anthropic',anthropic:mini}).reasoningEffort,'low');
-const {HumanInput}=await source('src/agent/human-input.ts');
-const broker=new HumanInput();let changes=0;broker.subscribe(()=>changes++);
-const questions=[{q:'Preferred arrangement?',type:'radio',options:['Remote','Onsite']},{q:'Skills?',type:'check',options:['Python','React']}];
-const pending=broker.tool().execute('test',{questions},new AbortController().signal);
-assert.equal(broker.current.questions.length,2);
-assert.throws(()=>broker.answer('stale',[]),/no longer pending/);
-assert.throws(()=>broker.answer(broker.current.id,[{selected:['Invented'],custom:''},{selected:['Python'],custom:''}]),/Answer every/);
-const answers=[{selected:['Remote'],custom:''},{selected:['Python','React'],custom:'Also TypeScript'}];
-broker.answer(broker.current.id,answers);
-assert.deepEqual((await pending).details.answers,answers);assert.equal(broker.current,null);assert.equal(changes,2);
-const abort=new AbortController();const waiting=broker.tool().execute('abort',{questions},abort.signal);abort.abort();
-assert.equal((await waiting).details.skipped,true);assert.equal(broker.current,null);
 let state='first',calls=0;
 globalThis.chrome={scripting:{executeScript:async()=>[{result:state}]}};
 const {protectFormRecovery}=await source('src/agent/form-recovery.ts',[{name:'mock-browser',setup(build){build.onResolve({filter:/^\.\/browser-bridge$/},()=>({path:'mock-browser',namespace:'mock'}));build.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export const getActiveTab=async()=>({id:7});'}));}}]);
@@ -59,5 +47,6 @@ try {
  await page.waitForFunction(()=>document.querySelector('#city').dataset.openbuaSelectedLabel==='Karachi, Sindh, Pakistan');
  const committed=await page.evaluate(inPageAutocomplete,[{selector:'#city',value:'Karachi, Sindh, Pakistan'}]);
  assert.equal(committed[0].selected,true);assert.equal(committed[0].value,'Karachi, Sindh, Pakistan');
- console.log('PASS: MiniMax effort and endpoints, real input lifecycle, unchanged-failure guard, native no-op safety, delayed dropdown inspection');
+ console.log('PASS: MiniMax effort and endpoints, unchanged-failure guard, native no-op safety, delayed dropdown inspection and committed autocomplete selection');
 } finally {await browser.close();}
+

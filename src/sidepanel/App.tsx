@@ -15,7 +15,6 @@ import {
 } from '../types';
 import {
   loadSettings,
-  saveSettings,
   loadGlobalMemories,
   loadTabMemories,
   migrateGlobalMemoryMedia,
@@ -1198,10 +1197,6 @@ export function App() {
             documents={availableDocuments}
             onPreparePrompt={handlePreparePrompt}
             onNavigateToSettings={() => handleSelectNavTab('settings')}
-            onModelChange={selection=>{
-              const updated={...settings,selectedMode:selection==='free'?'free' as const:'byok' as const,...(selection==='free'?{}:{activeProvider:selection})};
-              void saveSettings(updated).then(()=>handleSettingsSaved(updated));
-            }}
             onNavigateToMemory={() => handleSelectNavTab('memory')}
             onUploadDocument={handleChatDocumentUpload}
             inputDraft={inputDrafts[activeSessionId] || ''}
