@@ -15,6 +15,7 @@ import { AgentTool, type AgentToolResult as PiAgentToolResult } from '@earendil-
 type AgentToolResult = PiAgentToolResult<any>;
 import { Type } from '@sinclair/typebox';
 import { protectFormRecovery } from './form-recovery';
+import {reloadUnavailable} from './page-retry';
 import { checkCanvasTextInsertion } from './canvas-edit-check';
 import { protectDocsEdits, DocsEditPolicy } from './docs-edit-safety';
 import { inspectDocsEditorTool, selectDocsTextTool, setDocsFormattingTool, docsClipboardTool, findDocsTextTool, confirmDocsCloneTool } from './docs-tools';
@@ -1573,7 +1574,15 @@ export const clipboardActionTool: AgentTool<typeof ClipboardActionSchema> = {
 
 // Factory to create session-bound tools for the OpenBUA Agent
 export function createAgentTools(sessionId?: string, docsPolicy?: DocsEditPolicy, pagePolicy: PageTrustPolicy = { userRequests: [] }): AgentTool<any>[] {
+  const retried=new Set<number>();
+  const retryPage:AgentTool<any>={name:'retry_unavailable_page',label:'Retry unavailable page once',description:'Reload the active tab once only if an actual Chrome network-error or 502/503/504 page is observed. Refuses to reload normal forms, login or CAPTCHA pages. If still unavailable, preserve the blocker and move to other authorized work instead of asking the user to repair the site.',parameters:Type.Object({}),execute:async()=>{
+    const tab=await getActiveTab();if(!tab?.id)throw new Error('No active page.');
+    const details=retried.has(tab.id)?{success:false,dispatched:false,message:'This tab was already retried. Record the technical blocker and continue other authorized work.'}:await reloadUnavailable(tab.id);
+    if(details.dispatched)retried.add(tab.id);
+    return {content:[{type:'text',text:JSON.stringify(details)}],details};
+  }};
   return protectFormRecovery(protectPageTrust(protectDocsEdits([
+    retryPage,
     inspectPageControlsTool,
     getActiveTabFormTool,
     inspectDocsEditorTool,
